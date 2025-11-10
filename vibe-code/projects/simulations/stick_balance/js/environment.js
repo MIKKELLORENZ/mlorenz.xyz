@@ -1,188 +1,126 @@
 /**
- * Environment for the stick balance simulation
- * Manages wind, rewards, and episode state
+ * Environment for the stick balance simulation (CartPole-like)
  */
 class Environment {
     constructor(params) {
         this.physics = new Physics();
-        
-        // Wind parameters
-        this.maxWindStrength = params.windStrength || 5.0;
+
+        // Wind (kept off initially for curriculum)
+        this.maxWindStrength = params.windStrength || 0;
         this.currentWind = 0;
-        this.windChangeSpeed = 0.05; // How quickly the wind changes
         this.targetWind = 0;
-        this.windUpdateInterval = 100; // Update target wind every 100 steps
+        this.windChangeSpeed = 0.05;
+        this.windUpdateInterval = 80;
         this.stepCount = 0;
-        
-        // Episode parameters
-        this.initialAngleVariation = params.initialAngleVariation || 5; // Degrees
-        this.maxSteps = 10000; // Maximum steps per episode
-        
-        // Reward shaping parameters
-        this.lastAngle = 0; // Track previous angle for progress rewards
-        this.progressRewardWeight = 2.0; // Weight for progress rewards
-        this.stablePositionRewardWeight = 1.0; // Reward for keeping the platform centered
-        
-        // Curriculum learning
+
+        // Episodes
+        this.initialAngleVariation = params.initialAngleVariation || 2; // degrees
+        this.maxSteps = 2000;
+
+        // Reward shaping weights
+        this.failPenalty = -100;
+
+        // Curriculum: no wind first 200 episodes
         this.episodeCount = 0;
-        
-        // Debug and reward normalization
-        this.debug = params.debug || false;
-        this.rewardNormalization = params.rewardNormalization || false;
-        this.rewardStats = { mean: 0, std: 1, count: 0 };
-        
-        // Initialize state
+
+        // Track durations to unlock wind later (optional)
+        this.recentDurations = [];
+
         this.reset();
     }
-    
-    /**
-     * Reset the environment to start a new episode
-     * Simplified curriculum learning for faster learning
-     */
+
     reset() {
-        // Update episode count for curriculum learning
         this.episodeCount++;
-        
-        // Much more aggressive curriculum progression
-        let windScale = this.episodeCount < 50 ? 0.0 : Math.min(1.0, (this.episodeCount-50) / 200);
-        let angleScale = this.episodeCount < 20 ? 0.1 : Math.min(1.0, (this.episodeCount-20) / 100);
-        
-        let effectiveWindStrength = this.maxWindStrength * windScale;
-        let effectiveAngleVariation = Math.min(
-            this.initialAngleVariation,
-            0.5 + (this.initialAngleVariation - 0.5) * angleScale
-        );
-        
-        // Initialize physics state with progressive difficulty
-        this.state = this.physics.createInitialState(effectiveAngleVariation);
-        
-        // Store maximum wind strength but set current to 0
-        this.maxEffectiveWindStrength = effectiveWindStrength;
+        this.state = this.physics.createInitialState(this.initialAngleVariation);
+
+        // Simple curriculum: gradually increase initial angle variation
+        if (this.episodeCount % 50 === 0 && this.initialAngleVariation < 10) {
+            this.initialAngleVariation += 1;
+        }
+
+        // After agent shows some stability, allow longer episodes
+        if (this.episodeCount === 300) this.maxSteps = 3000;
+        if (this.episodeCount === 600) this.maxSteps = 5000;
+
+        // Enable wind sooner if user set it and some stability achieved
+        this.windEnabled = (this.maxWindStrength > 0) && (this.episodeCount >= 120);
+
         this.currentWind = 0;
         this.targetWind = 0;
-        
         this.stepCount = 0;
         this.episodeOver = false;
         this.totalReward = 0;
-        this.lastAngle = this.state.stickAngle;
-        
-        // Log curriculum progress occasionally
-        if (this.episodeCount % 20 === 0 && this.episodeCount < 200) {
-            console.log(`Curriculum: Episode ${this.episodeCount}, Wind scale: ${windScale.toFixed(3)}, Angle scale: ${angleScale.toFixed(3)}, Max angle: ${effectiveAngleVariation.toFixed(2)}°`);
-        }
-        
-        return this.state;
+
+        return { ...this.state, wind: this.currentWind, windMax: this.maxWindStrength || 0 };
     }
-    
-    /**
-     * Update wind forces
-     */
+
     updateWind() {
         this.stepCount++;
-        
-        // Periodically change target wind
-        if (this.stepCount % this.windUpdateInterval === 0) {
-            this.targetWind = (Math.random() * 2 - 1) * this.maxEffectiveWindStrength;
+
+        if (!this.windEnabled) {
+            this.currentWind = 0;
+            return 0;
         }
-        
-        // Smoothly transition current wind towards target
+
+        if (this.stepCount % this.windUpdateInterval === 0) {
+            this.targetWind = (Math.random() * 2 - 1) * this.maxWindStrength;
+        }
         this.currentWind += (this.targetWind - this.currentWind) * this.windChangeSpeed;
-        
         return this.currentWind;
     }
-    
-    /**
-     * Calculate reward based on current state
-     */
-    calculateReward() {
-        const stickAngle = this.state.stickAngle;
-        const platformVel = this.state.platformVel;
-        const platformPos = this.state.platformPos;
-        
-        // If stick has fallen, give large negative reward
-        if (this.physics.hasStickFallen(this.state)) {
-            return -50.0; // Strong negative signal for failure
-        }
-        
-        // Base reward for staying upright (every step)
-        let reward = 2.0; // Increased base reward
-        
-        // Strong bonus for being very upright (within 1 degree)
-        if (Math.abs(stickAngle) < Math.PI/180) {
-            reward += 5.0;
-        }
-        // Good bonus for being reasonably upright (within 5 degrees)
-        else if (Math.abs(stickAngle) < Math.PI/36) {
-            reward += 3.0;
-        }
-        // Moderate bonus for being somewhat upright (within 10 degrees)
-        else if (Math.abs(stickAngle) < Math.PI/18) {
-            reward += 1.0;
-        }
-        
-        // Angle penalty - quadratic to encourage staying very upright
-        const normalizedAngle = Math.abs(stickAngle) / (Math.PI / 4);
-        const anglePenalty = normalizedAngle * normalizedAngle * 3.0;
-        
-        // Small penalty for platform velocity to encourage smooth control
-        const velocityPenalty = Math.min(2.0, Math.abs(platformVel) * 0.2);
-        
-        // Small penalty for being far from center
-        const positionPenalty = Math.min(1.0, Math.abs(platformPos) * 0.2);
-        
-        // Combined reward
-        reward -= anglePenalty;
-        reward -= velocityPenalty;
-        reward -= positionPenalty;
-        
-        // Store current angle for next time
-        this.lastAngle = stickAngle;
-        
+
+    calculateReward(prevState, action, nextState, done) {
+        if (done) return this.failPenalty;
+
+        // Core survival bonus - more generous
+        let reward = 2.0;
+
+        // Upright bonus (sharp near zero angle) - increased weight
+        const angle = nextState.stickAngle;
+        const uprightBonus = Math.exp(-40 * angle * angle); // ~1 near 0, drops fast
+        reward += 3.5 * uprightBonus;
+
+        // Centering bonus - reward being near the middle of the map
+        const x = nextState.platformPos;
+        const centeringBonus = Math.exp(-0.5 * x * x); // ~1 at center, drops with distance
+        reward += 0.05 * centeringBonus;
+
+        // Position penalty (keep near center) - reduced to allow more movement
+        reward -= 0.005 * x * x;
+
+        // Velocity penalties (small) - very gentle
+        reward -= 0.001 * nextState.platformVel * nextState.platformVel;
+        reward -= 0.0005 * nextState.stickAngularVel * nextState.stickAngularVel;
+
+        // Small control cost to discourage unnecessary large actions
+        const actMag = Math.abs(action);
+        reward -= 0.005 * actMag;
+
         return reward;
     }
-    
-    /**
-     * Take an action in the environment
-     * @param {number} action - Action to take (-1 to 1)
-     * @returns {Object} - Object containing next state, reward, and whether episode is done
-     */
+
     step(action) {
-        this.lastAction = action;
-        
-        // Update wind
-        const windForce = this.updateWind();
-        
-        // Update physics
-        this.state = this.physics.update(this.state, action, windForce);
-        
-        // Calculate reward
-        const reward = this.calculateReward();
+        const wind = this.updateWind();
+        const next = this.physics.update(this.state, action, wind);
+
+        const done = this.physics.hasStickFallen(next) || this.stepCount >= this.maxSteps;
+        const reward = this.calculateReward(this.state, action, next, done);
+
         this.totalReward += reward;
-        
-        // Check if episode is over
-        const done = this.physics.hasStickFallen(this.state) || this.stepCount >= this.maxSteps;
-        this.episodeOver = done;
-        
+        this.state = next;
+
         return {
-            state: this.state,
-            reward: reward,
-            done: done,
+            state: { ...this.state, wind: this.currentWind, windMax: this.maxWindStrength || 0 },
+            reward,
+            done,
             wind: this.currentWind,
             totalReward: this.totalReward,
             steps: this.stepCount
         };
     }
-    
-    /**
-     * Get whether the episode is completed
-     */
-    isDone() {
-        return this.episodeOver;
-    }
-    
-    /**
-     * Get world size information (for rendering)
-     */
+
+    isDone() { return this.episodeOver; }
+
     getWorldInfo() {
         return {
             width: this.physics.worldWidth,
@@ -191,19 +129,12 @@ class Environment {
             wheelRadius: this.physics.wheelRadius
         };
     }
-    
-    /**
-     * Get normalized wind strength (-1 to 1)
-     */
+
     getNormalizedWind() {
-        return this.currentWind / this.maxWindStrength;
+        return this.currentWind / (this.maxWindStrength || 1);
     }
-    
-    /**
-     * Toggle debug mode
-     * @param {boolean} enabled - Enable or disable debug mode
-     */
+
     setDebugMode(enabled) {
         this.debug = !!enabled;
     }
-};
+}

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EverDiff - Infinite Split Notes</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- CDN Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/diff@5.1.0/dist/diff.min.js"></script>
+</head>
+<body>
+    <!-- Main app container -->
+    <div id="app">
+        <!-- Top-right overflow menu -->
+        <div id="overflow-menu" class="overflow-menu">
+            <button id="menu-trigger" class="menu-trigger" aria-label="Menu">⋯</button>
+            <div id="menu-dropdown" class="menu-dropdown hidden">
+                <button data-action="export-doc">Export Document</button>
+                <button data-action="export-all">Export All as ZIP</button>
+                <button data-action="import-json">Import JSON</button>
+                <button data-action="toggle-sequence">Toggle Sequence Panel</button>
+                <button data-action="show-palette">Command Palette</button>
+            </div>
+        </div>
+
+        <!-- Layout root for split panes -->
+        <div id="layout-root" class="layout-root"></div>
+
+        <!-- Sequence panel (initially hidden) -->
+        <div id="sequence-panel" class="sequence-panel hidden">
+            <div class="sequence-header">
+                <h3>Document Sequence</h3>
+                <button id="close-sequence" class="close-btn">×</button>
+            </div>
+            <div id="sequence-list" class="sequence-list"></div>
+            <div class="sequence-actions">
+                <button id="diff-selected">Diff Selected</button>
+                <button id="multi-diff">Multi-Diff All</button>
+            </div>
+        </div>
+
+        <!-- Command palette -->
+        <div id="command-palette" class="command-palette hidden">
+            <input id="palette-input" type="text" placeholder="Type command..." autocomplete="off">
+            <div id="palette-results" class="palette-results"></div>
+        </div>
+
+        <!-- Diff viewer -->
+        <div id="diff-viewer" class="diff-viewer hidden">
+            <div class="diff-header">
+                <h3 id="diff-title">Document Diff</h3>
+                <button id="close-diff" class="close-btn">×</button>
+            </div>
+            <div id="diff-content" class="diff-content"></div>
+        </div>
+
+        <!-- SVG overlay for arrows -->
+        <svg id="arrow-overlay" class="arrow-overlay">
+            <defs>
+                <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+                        refX="9" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+                </marker>
+            </defs>
+        </svg>
+    </div>
+
+    <!-- Hidden file input for imports -->
+    <input type="file" id="import-input" accept=".json" style="display: none;">
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const bestDuration = document.getElementById('bestDuration');
     const lastReward = document.getElementById('lastReward');
     const weightChange = document.getElementById('weightChange');
+    const avgReward100 = document.getElementById('avgReward100');
     
     // Chart contexts
     const rewardsChartCtx = document.getElementById('rewardsChart').getContext('2d');
@@ -399,6 +400,8 @@ document.addEventListener('DOMContentLoaded', () => {
             this.episodeSteps = 0;
             this.totalSteps = 0;
             this.currentState = this.environment.reset();
+            
+            this.trainRepeats = 1; // base, adaptive later
         }
         
         // Start the simulation
@@ -621,6 +624,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Update weight change
             weightChange.textContent = stats.lastWeightChange.toFixed(4);
             
+            // Update average reward
+            if (avgReward100) {
+                avgReward100.textContent = stats.avgRewardLast100.toFixed(1);
+            }
+            
             // Update charts every episode (removed the previous condition)
             
             // Limit the number of data points to prevent excessive memory usage
@@ -729,7 +737,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Dynamically adjust gravel sound based on velocity
                     if (this.gravelSound && this.gravelSoundStarted) {
                         try {
-                            // ...existing code...
                             // Just update volume and playback state
                             const absVelocity = Math.abs(result.state.platformVel) || 0;
                             const cappedVelocity = Math.min(absVelocity, 20);
@@ -749,11 +756,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     
                     // Learn from the result
-                    this.agent.learn(this.currentState, action, result.reward, result.state, result.done);                        // Debug learning progress in early episodes
-                        if (this.agent.episodeCount <= 10 && this.episodeSteps % 100 === 0) {
-                            const debug = this.agent.verifyLearning();
-                            console.log(`Learning check - Episode ${this.agent.episodeCount}, Step ${this.episodeSteps}: Buffer=${debug.bufferSize}, WeightChange=${debug.weightChange.toFixed(6)}, SumW1=${debug.sumW1.toFixed(2)}`);
-                        }
+                    for (let r = 0; r < this.trainRepeats; r++) {
+                        this.agent.learn(this.currentState, action, result.reward, result.state, result.done);
+                    }
+                    // Adaptive extra training in early curriculum
+                    if (this.agent.episodeCount < 150) this.trainRepeats = 2;
+                    else if (this.agent.episodeCount < 300) this.trainRepeats = 1;
+                    
+                    // Debug learning progress in early episodes
+                    if (this.agent.episodeCount <= 10 && this.episodeSteps % 100 === 0) {
+                        const debug = this.agent.verifyLearning();
+                        console.log(`Learning check - Episode ${this.agent.episodeCount}, Step ${this.episodeSteps}: Buffer=${debug.bufferSize}, WeightChange=${debug.weightChange.toFixed(6)}, SumW1=${debug.sumW1.toFixed(2)}`);
+                    }
                     
                     // Update current state
                     this.currentState = result.state;
@@ -785,7 +799,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         
                         // Log episode info less frequently as training progresses
                         if (this.agent.episodeCount % 5 === 0 || this.agent.episodeCount < 50) {
-                            console.log(`Episode ${this.agent.episodeCount} completed. Duration: ${this.episodeSteps} steps (${(this.episodeSteps * this.environment.physics.timestep).toFixed(1)}s), Reward: ${result.totalReward.toFixed(2)}, Exploration: ${this.agent.explorationRate.toFixed(3)}`);
+                            console.log(
+                              `Episode ${this.agent.episodeCount} completed. Dur: ${(this.episodeSteps*this.environment.physics.timestep).toFixed(1)}s ` +
+                              `Reward: ${result.totalReward.toFixed(2)} Avg100: ${this.agent.avgRewardLast100.toFixed(2)} Explore: ${this.agent.explorationRate.toFixed(3)}`
+                            );
                         }
                         
                         // Play fallen sound if needed

@@ -52,6 +52,10 @@
                     <span>Weight Change:</span>
                     <span id="weightChange">0</span>
                 </div>
+                <div>
+                    <span>Avg Reward (100):</span>
+                    <span id="avgReward100">0</span>
+                </div>
             </div>
         </div>
         
@@ -59,8 +63,8 @@
             <h3>Training Parameters</h3>
             <div class="parameter">
                 <label for="learningRate">Learning Rate:</label>
-                <input type="range" id="learningRate" min="0.001" max="0.1" step="0.001" value="0.02">
-                <span id="learningRateValue">0.02</span>
+                <input type="range" id="learningRate" min="0.001" max="0.1" step="0.001" value="0.008">
+                <span id="learningRateValue">0.008</span>
             </div>
             <div class="parameter">
                 <label for="discountFactor">Discount Factor:</label>
@@ -79,8 +83,8 @@
             </div>
             <div class="parameter">
                 <label for="explorationDecay">Exploration Decay Rate:</label>
-                <input type="range" id="explorationDecay" min="0.99" max="0.999" step="0.001" value="0.998">
-                <span id="explorationDecayValue">0.998</span>
+                <input type="range" id="explorationDecay" min="0.99" max="0.999" step="0.001" value="0.995">
+                <span id="explorationDecayValue">0.995</span>
             </div>
             <div class="parameter">
                 <label for="windStrength">Max Wind Strength:</label>

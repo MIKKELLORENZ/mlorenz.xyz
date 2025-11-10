@@ -1,0 +1,28 @@
+:root{
+	--bg:#f7f6f3; /* soft off-white */
+}
+
+html,body{
+	height:100%;
+}
+
+/* zero margin/padding to avoid scrollbars */
+*{ box-sizing:border-box; }
+html,body{
+	margin:0; padding:0; background:var(--bg);
+	overflow:hidden; /* no scrollbars */
+}
+
+/* full-screen canvas */
+#stage{
+	position:fixed; inset:0; width:100vw; height:100vh;
+	display:block; /* remove inline-gap */
+	touch-action:manipulation; /* better mobile interactions */
+}
+
+/* optional faint vignette using pseudo element on body */
+body::after{
+	content:""; position:fixed; inset:0; pointer-events:none;
+	background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.06) 100%);
+	mix-blend-mode:multiply; /* subtle focus */
+}

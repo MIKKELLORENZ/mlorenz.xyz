@@ -1,0 +1,73 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Georgia', serif;
+    background: linear-gradient(135deg, #87CEEB 0%, #A8E0D0 50%, #CFE8C6 100%);
+    overflow: hidden;
+    height: 100vh;
+}
+
+#container {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+    cursor: grab;
+}
+
+#container:active {
+    cursor: grabbing;
+}
+
+#info {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    color: #2c5530;
+    z-index: 100;
+    background: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(8px) saturate(120%);
+    padding: 20px;
+    border-radius: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    max-width: 300px;
+    pointer-events: none; /* don't block camera drag */
+}
+
+#info h1 {
+    font-size: 1.8rem;
+    margin-bottom: 10px;
+    color: #1a4a1e;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+#info p {
+    font-size: 0.9rem;
+    line-height: 1.4;
+    color: #2c5530;
+    opacity: 0.9;
+}
+
+/* Loading animation */
+.loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #2c5530;
+    font-size: 1.2rem;
+    z-index: 50;
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+}
+
+#info {
+    animation: float 6s ease-in-out infinite;
+}

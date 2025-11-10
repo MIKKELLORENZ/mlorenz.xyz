@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Stonks Clicker 📈 — Turbo Edition</title>
+<style>
+  :root {
+    --bg:#090b16; --bg2:#0b0f1f; --card:#121736; --text:#ecf2ff; --muted:#9aa7d1; --accent:#7aa2ff; --good:#59e394; --warn:#ffd166; --bad:#ff6b6b;
+    --glow: 0 0 24px rgba(122,162,255,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;background: radial-gradient(1200px 600px at 20% -10%,#15204a00,transparent),linear-gradient(180deg,var(--bg),var(--bg2));color:var(--text)}
+  header{padding:18px;text-align:center;position:sticky;top:0;background:linear-gradient(180deg,rgba(9,11,22,.95),rgba(9,11,22,.6));backdrop-filter:blur(6px);z-index:5;border-bottom:1px solid #202a55}
+  h1{margin:0;font-size:24px;letter-spacing:.3px}
+  .badge{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;border:1px solid #263057;background:#0f1633;color:var(--muted);font-size:12px;margin-left:8px}
+  .app{max-width:1280px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:1.2fr 1fr .9fr}
+  .card{background:var(--card);border:1px solid #222b58;border-radius:16px;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+  .stat{font-size:30px;font-weight:800;margin-top:6px}
+  .muted{color:var(--muted);font-size:13px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0}
+  .big-btn{width:100%;padding:18px 20px;font-size:18px;font-weight:800;border-radius:14px;border:0;cursor:pointer;background:var(--accent);color:#0b1020;transition:transform .05s ease, box-shadow .2s;box-shadow:var(--glow)}
+  .big-btn:active{transform:scale(.985)}
+  .ghost{background:transparent;border:1px solid #2a3563;color:var(--text);padding:10px 12px;border-radius:10px;cursor:pointer}
+  .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#0f1736;border:1px solid #273466;font-size:12px;color:var(--muted)}
+  .store{display:grid;gap:10px}
+  .item{display:grid;gap:6px;padding:12px;border-radius:12px;border:1px solid #283267;background:#0f1530}
+  .item .top{display:flex;justify-content:space-between;align-items:baseline}
+  .item h3{margin:0;font-size:16px}
+  .item small{color:var(--muted)}
+  .buy{padding:10px 12px;border-radius:10px;border:1px solid #2a315a;background:#0d1330;color:var(--text);font-weight:700;cursor:pointer}
+  .buy:disabled{opacity:.45;cursor:not-allowed}
+  .footer{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  .progress{height:10px;background:#0b1130;border:1px solid #273266;border-radius:999px;overflow:hidden}
+  .progress > div{height:100%;background:linear-gradient(90deg,#59e394,#7aa2ff);box-shadow:0 0 14px rgba(122,162,255,.5) inset;width:0%}
+  .flash{animation:flash .25s ease}
+  @keyframes flash{0%{box-shadow:0 0 0 rgba(89,227,148,0)}50%{box-shadow:0 0 24px rgba(89,227,148,.35)}100%{box-shadow:0 0 0 rgba(89,227,148,0)}}
+  .banner{margin:8px 0;padding:10px 12px;border:1px dashed #4154a8;border-radius:10px;background:#0f1738;color:#b8c6ff;font-size:13px}
+  .leader{display:grid;gap:8px}
+  .bot{display:flex;justify-content:space-between;align-items:center;padding:10px;border:1px solid #243161;border-radius:10px;background:#0d1433}
+  .bot .name{font-weight:700}
+  .bot .delta{font-size:12px;color:var(--muted)}
+  canvas{width:100%;height:160px;border-radius:10px;border:1px solid #22305e;background:linear-gradient(180deg,#0b1233,#0a0f2a)}
+  .achv{display:grid;gap:8px}
+  .achv .a{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:10px;border:1px solid #243161;background:#0c1231}
+  .a.done{border-color:#3c6;box-shadow:0 0 12px rgba(89,227,148,.25)}
+  .title-row{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap}
+  .title-row .ghost{padding:8px 10px}
+  .tooltip{position:absolute;pointer-events:none;background:#0b112a;border:1px solid #2a3666;color:var(--text);padding:6px 8px;border-radius:8px;font-size:12px;transform:translate(-50%,-120%);white-space:nowrap}
+  .float{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;font-weight:800;color:#9fe0ff;opacity:0;}
+  .float.show{animation:fpop .6s ease forwards}
+  @keyframes fpop{0%{opacity:0;transform:translate(-50%,-30%) scale(.9)}20%{opacity:1}100%{opacity:0;transform:translate(-50%,-80%) scale(1.1)}}
+  .trade{display:grid;gap:10px}
+  .offer{display:flex;justify-content:space-between;align-items:center;border:1px solid #23305e;background:#0c1333;padding:10px;border-radius:10px}
+  .legend{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+  .legend span{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  .swatch{width:10px;height:10px;border-radius:2px;background:#fff;border:1px solid #22305e}
+  @media (max-width: 1100px){.app{grid-template-columns:1fr 1fr}}
+  @media (max-width: 780px){.app{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <header>
+    <div class="title-row">
+      <h1>Stonks Clicker <span class="muted">— Turbo Edition</span> 📈</h1>
+      <span class="badge" id="levelBadge">Lv 1 • Trainee</span>
+      <span class="badge" id="monthBadge">Month in: 60s</span>
+      <button class="ghost" id="dailyBtn">Daily Bonus</button>
+      <button class="ghost" id="prestigeBtn" disabled>Prestige</button>
+    </div>
+    <div class="banner" id="eventBanner" style="display:none"></div>
+  </header>
+
+  <div class="app">
+    <!-- LEFT: Core play -->
+    <section class="card" id="left">
+      <div class="stat" id="money">$0</div>
+      <div class="muted" id="rate">0/s</div>
+      <div class="row"><button class="big-btn" id="click">Trade (+$<span id="clickPower"></span>)</button></div>
+      <div class="progress"><div id="levelProg"></div></div>
+      <div class="row"><span class="pill">Tip: Buy generators to earn while idle. Events may boost income. 🔔</span></div>
+      <div class="footer">
+        <button class="ghost" id="saveBtn">Save</button>
+        <button class="ghost" id="resetBtn">Hard Reset</button>
+        <button class="ghost" id="themeBtn">Toggle Theme</button>
+      </div>
+    </section>
+
+    <!-- MIDDLE: Store & Upgrades -->
+    <section class="card" id="mid">
+      <h2 style="margin:0 0 8px 0">Market Desk</h2>
+      <div class="store" id="store"></div>
+      <h2 style="margin:12px 0 8px 0">Upgrades</h2>
+      <div class="store" id="upgrades"></div>
+    </section>
+
+    <!-- RIGHT: Graphs + Bots + Achievements + Trade -->
+    <section class="card" id="right">
+      <h2 style="margin:0 0 8px 0">Progress Charts</h2>
+      <canvas id="moneyChart"></canvas>
+      <div style="height:8px"></div>
+      <canvas id="rateChart"></canvas>
+      <div style="height:8px"></div>
+      <h3 style="margin:8px 0 6px">Rivals Wealth</h3>
+      <div class="legend" id="botsLegend"></div>
+      <canvas id="botsChart" style="height:180px"></canvas>
+      <div id="chartTip" class="tooltip" style="display:none"></div>
+      <h2 style="margin:12px 0 8px 0">Rivals (Bots)</h2>
+      <div class="leader" id="bots"></div>
+      <h2 style="margin:12px 0 8px 0">Achievements</h2>
+      <div class="achv" id="achievements"></div>
+      <h2 style="margin:12px 0 8px 0">Trade Center</h2>
+      <div class="trade" id="trade"></div>
+      <div class="row"><button class="ghost" id="newOffersBtn">Request Offers</button></div>
+    </section>
+  </div>
+
+  <div class="float" id="floatText">+$1</div>
+
+<script>
+(() => {
+  // ====== Core state ======
+  let money = 0;
+  let clickPower = 1;
+  let manualClicks = 0;
+  let totalEarned = 0; // lifetime
+  let prestige = 0;    // prestige points
+  let globalMult = 1;  // from prestige & events & levels
+  let level = 1;
+  let theme = 'dark';
+  const levelNames = ['Trainee','Junior','Associate','Trader','Senior Trader','VP','Director','MD','Legend'];
+  const levelThresholds = [0, 1000, 50000, 1e6, 2.5e7, 5e8, 2e10, 1e12, 1e14];
+
+  // ====== Time (game month is configurable) ======
+  const monthMs = 60000; // 1 real minute = 1 game month (tweak here)
+  let nextMonthAt = Date.now() + monthMs;
+
+  // Producers: op = monthly operating cost per unit; lifespan in months (-1 = infinite)
+  // stock: -1 = unlimited; otherwise shared market remaining units. lastBuyer tracked globally.
+  const producers = [
+    { key:'intern',  name:'Intern ☕',         units:[], baseCost:10,    cost:10,     cps:0.1,  desc:'+0.1/s each', unlock:1, op:0,    lifespan:-1, stock:rollStock(), lastBuyer:'—' },
+    { key:'trader',  name:'Trader 💼',        units:[], baseCost:100,   cost:100,    cps:1,    desc:'+1/s each',   unlock:1, op:20,   lifespan:36, stock:rollStock(), lastBuyer:'—' },
+    { key:'analyst', name:'Analyst 📊',       units:[], baseCost:1000,  cost:1000,   cps:8,    desc:'+8/s each',   unlock:2, op:120,  lifespan:48, stock:rollStock(), lastBuyer:'—' },
+    { key:'algo',    name:'Algo Bot 🤖',      units:[], baseCost:5000,  cost:5000,   cps:35,   desc:'+35/s each',  unlock:2, op:400,  lifespan:24, stock:rollStock(), lastBuyer:'—' },
+    { key:'server',  name:'Server Farm 🖥️',   units:[], baseCost:25000, cost:25000,  cps:160,  desc:'+160/s each', unlock:3, op:900,  lifespan:36, stock:rollStock(), lastBuyer:'—' },
+    { key:'fund',    name:'Hedge Fund 🏦',    units:[], baseCost:150000,cost:150000, cps:900,  desc:'+900/s each', unlock:3, op:3500, lifespan:120, stock:rollStock(), lastBuyer:'—' },
+    { key:'lab',     name:'Quant Lab 🧪',     units:[], baseCost:900000,cost:900000, cps:6000, desc:'+6k/s each',  unlock:4, op:9000, lifespan:96, stock:rollStock(), lastBuyer:'—' },
+    { key:'sat',     name:'Space Link 🛰️',   units:[], baseCost:5e6,   cost:5e6,    cps:42000,desc:'+42k/s each', unlock:5, op:25000,lifespan:72, stock:rollStock(), lastBuyer:'—' },
+  ];
+
+  function rollStock(){ return Math.random()<0.7 ? -1 : (5 + Math.floor(Math.random()*15)); }
+
+  const upgrades = [
+    { key:'betterMouse', name:'Better Mouse',    level:0, baseCost:50,    cost:50,    inc:1,   desc:'+1 click power/level', unlock:1 },
+    { key:'hftSwitch',   name:'HFT Switch',      level:0, baseCost:500,   cost:500,   inc:5,   desc:'+5 click power/level', unlock:1 },
+    { key:'riskOn',      name:'Risk-ON Mode',    level:0, baseCost:3000,  cost:3000,  inc:20,  desc:'+20 click power/level',unlock:2 },
+    { key:'macroGlass',  name:'Macro Crystal 🔮',level:0, baseCost:20000, cost:20000, inc:120, desc:'+120 click power/level',unlock:3 },
+  ];
+
+  // Achievements (expanded)
+  const achv = [
+    { key:'a100',   name:'First $100',         test:()=> totalEarned>=100,      got:false },
+    { key:'a1k',    name:'First $1K',          test:()=> totalEarned>=1000,     got:false },
+    { key:'a10k',   name:'First $10K',         test:()=> totalEarned>=1e4,      got:false },
+    { key:'a100k',  name:'First $100K',        test:()=> totalEarned>=1e5,      got:false },
+    { key:'a1m',    name:'Seven Figures',      test:()=> totalEarned>=1e6,      got:false },
+    { key:'a1b',    name:'Billionaire',        test:()=> totalEarned>=1e9,      got:false },
+    { key:'a100ps', name:'100/s',              test:()=> totalCps()>=100,       got:false },
+    { key:'a5kps',  name:'5K/s',               test:()=> totalCps()>=5e3,       got:false },
+    { key:'aClick1k', name:'Click Machine',    test:()=> manualClicks>=1000,    got:false },
+    { key:'aPrestige', name:'First Prestige',  test:()=> prestige>=1,           got:false },
+    { key:'aBuyout', name:'Market Buyout',     test:()=> producers.some(p=> p.stock===0), got:false },
+    { key:'aBeatBot',name:'Top of the Board',  test:()=> bots.length && totalEarned >= Math.max(...bots.map(b=>b.total)), got:false },
+  ];
+
+  // Events (temporary multipliers)
+  let activeEvent = null; // {name, mult, until}
+
+  // ====== DOM ======
+  const elMoney = document.getElementById('money');
+  const elRate = document.getElementById('rate');
+  const elClick = document.getElementById('click');
+  const elClickPower = document.getElementById('clickPower');
+  const elStore = document.getElementById('store');
+  const elUpgrades = document.getElementById('upgrades');
+  const elSave = document.getElementById('saveBtn');
+  const elReset = document.getElementById('resetBtn');
+  const elLevelProg = document.getElementById('levelProg');
+  const elLevelBadge = document.getElementById('levelBadge');
+  const elDaily = document.getElementById('dailyBtn');
+  const elPrestige = document.getElementById('prestigeBtn');
+  const elEventBanner = document.getElementById('eventBanner');
+  const elBots = document.getElementById('bots');
+  const elAch = document.getElementById('achievements');
+  const elTheme = document.getElementById('themeBtn');
+  const floatText = document.getElementById('floatText');
+  const elMonthBadge = document.getElementById('monthBadge');
+  const tradeBox = document.getElementById('trade');
+  const newOffersBtn = document.getElementById('newOffersBtn');
+
+  // Charts
+  const moneyChart = document.getElementById('moneyChart');
+  const rateChart = document.getElementById('rateChart');
+  const botsChart = document.getElementById('botsChart');
+  const botsLegend = document.getElementById('botsLegend');
+  const chartTip = document.getElementById('chartTip');
+  const samples = { t:[], money:[], rate:[] };
+  const botSamples = [];// [{name, data:[] }]
+  const maxSamples = 180; // last 3 minutes (1/s)
+
+  // ====== Utils ======
+  const f = n => {
+    if (!isFinite(n)) return '∞';
+    if (Math.abs(n) < 1000) return (Math.round(n*100)/100).toString();
+    const units = ['K','M','B','T','Q'];
+    let u = -1; let x = Math.abs(n);
+    while (x >= 1000 && u < units.length-1) { x/=1000; u++; }
+    return (n<0?'-':'') + x.toFixed(2) + units[u];
+  };
+  const now = () => Date.now();
+  const clamp = (x,a,b)=> Math.max(a, Math.min(b,x));
+  const totalCps = () => producers.reduce((s,p)=> s + p.units.length * p.cps, 0) * globalMult;
+
+  // Save/Load
+  const saveKey = 'stonksSaveV3';
+  const state = { lastDaily:0 };
+  const save = () => {
+    const data = { money, clickPower, manualClicks, totalEarned, prestige, globalMult, level, theme, producers, upgrades, achv, lastDaily: state.lastDaily, nextMonthAt, bots };
+    try { localStorage.setItem(saveKey, JSON.stringify(data)); } catch(e){}
+  };
+  const load = () => {
+    const raw = localStorage.getItem(saveKey) || localStorage.getItem('stonksSaveV2') || localStorage.getItem('stonksSave');
+    if (!raw) return;
+    try{
+      const data = JSON.parse(raw);
+      money = data.money ?? money;
+      clickPower = data.clickPower ?? clickPower;
+      manualClicks = data.manualClicks ?? 0;
+      totalEarned = data.totalEarned ?? totalEarned;
+      prestige = data.prestige ?? 0;
+      globalMult = data.globalMult ?? (1 + (data.prestige||0)*0.1);
+      level = data.level ?? level;
+      theme = data.theme ?? theme;
+      state.lastDaily = data.lastDaily ?? 0;
+      nextMonthAt = data.nextMonthAt ?? (now()+monthMs);
+      // merge producers by key
+      if (Array.isArray(data.producers)) for (const p of producers){ const fP = data.producers.find(x=>x.key===p.key); if (fP) Object.assign(p,fP) }
+      if (Array.isArray(data.upgrades)) for (const u of upgrades){ const fU = data.upgrades.find(x=>x.key===u.key); if (fU) Object.assign(u,fU) }
+      if (Array.isArray(data.achv)) for (const a of achv){ const fA = data.achv.find(x=>x.key===a.key); if (fA) Object.assign(a,fA) }
+      if (data.bots && Array.isArray(data.bots)) {
+        bots.splice(0,bots.length,...data.bots);
+      }
+      if (theme==='light') document.documentElement.style.filter='invert(1) hue-rotate(180deg)';
+    }catch(e){}
+  };
+
+  // ====== Render ======
+  function render() {
+    // Leveling
+    const nxtIdx = clamp(level,0,levelThresholds.length-1);
+    const prev = levelThresholds[level-1] ?? 0;
+    const next = levelThresholds[nxtIdx] ?? levelThresholds[levelThresholds.length-1];
+    const prog = next>prev? (totalEarned - prev) / (next - prev) : 1;
+    elLevelProg.style.width = clamp(prog*100,0,100) + '%';
+    elLevelBadge.textContent = `Lv ${level} • ${levelNames[level-1] || levelNames[levelNames.length-1]}`;
+
+    // Month badge
+    const msLeft = Math.max(0, nextMonthAt - now());
+    elMonthBadge.textContent = `Month in: ${Math.ceil(msLeft/1000)}s`;
+
+    elMoney.textContent = '$' + f(money);
+    elRate.textContent = f(totalCps()) + '/s';
+    elClickPower.textContent = f(clickPower);
+
+    // Store render
+    elStore.innerHTML = '';
+    for (const p of producers) {
+      if (level < p.unlock) continue;
+      const can = money >= p.cost && (p.stock===-1 || p.stock>0);
+      const avgLife = p.units.length ? avg(p.units) : null;
+      const div = document.createElement('div');
+      div.className = 'item';
+      const stockTxt = (p.stock===-1? '∞' : p.stock);
+      div.innerHTML = `
+        <div class="top">
+          <h3>${p.name}</h3>
+          <span class="pill">Owned: ${p.units.length}</span>
+        </div>
+        <small>${p.desc} • Op: $${f(p.op)}/mo • Life: ${p.lifespan===-1? '∞' : p.lifespan+' mo'}</small>
+        <div class="row">
+          <button class="buy" ${can?'':'disabled'} data-key="${p.key}">Buy — $${f(p.cost)}</button>
+          <small class="muted">Next cost ↑ 15% • Stock: ${stockTxt} • Last: ${p.lastBuyer}</small>
+        </div>
+        <small class="muted">${avgLife!=null? ('Avg lifespan left: ~'+avgLife.toFixed(1)+' mo') : ''}</small>
+      `;
+      elStore.appendChild(div);
+    }
+
+    // Upgrades render
+    elUpgrades.innerHTML = '';
+    for (const u of upgrades){
+      if (level < u.unlock) continue;
+      const can = money >= u.cost;
+      const div = document.createElement('div');
+      div.className = 'item';
+      div.innerHTML = `
+        <div class="top">
+          <h3>${u.name}</h3>
+          <span class="pill">Lv ${u.level}</span>
+        </div>
+        <small>${u.desc}</small>
+        <div class="row">
+          <button class="buy" ${can?'':'disabled'} data-up="${u.key}">Upgrade — $${f(u.cost)}</button>
+          <small class="muted">Cost grows ×1.7</small>
+        </div>`;
+      elUpgrades.appendChild(div);
+    }
+
+    // Prestige button state
+    const prestigeReady = totalEarned >= 1e6;
+    elPrestige.disabled = !prestigeReady;
+
+    // Achievements
+    elAch.innerHTML = '';
+    for (const a of achv){
+      const d = document.createElement('div'); d.className = 'a' + (a.got?' done':'');
+      d.innerHTML = `<span>${a.name}</span><span class="pill">${a.got?'✓':'—'}</span>`;
+      elAch.appendChild(d);
+    }
+
+    // Bots
+    renderBots();
+
+    // Charts
+    drawCharts(); drawBotsChart();
+
+    // Event banner
+    if (activeEvent && activeEvent.until > now()){
+      const secs = Math.ceil((activeEvent.until - now())/1000);
+      elEventBanner.style.display='block';
+      elEventBanner.textContent = `${activeEvent.name} — ${Math.round((activeEvent.mult-1)*100)}% income for ${secs}s`;
+    } else {
+      elEventBanner.style.display='none';
+    }
+
+    // Trade offers
+    renderOffers();
+  }
+
+  // ====== Helpers ======
+  function avg(arr){ if (!arr.length) return 0; return arr.reduce((a,b)=>a+(b===-1?1000:b),0)/arr.length; }
+
+  // ====== Actions ======
+  elClick.addEventListener('click', (e) => {
+    const gain = clickPower * globalMult;
+    manualClicks++;
+    addMoney(gain);
+    flashLeft();
+    float(`+$${f(gain)}`);
+  });
+  function flashLeft(){ const L=document.getElementById('left'); L.classList.remove('flash'); void L.offsetWidth; L.classList.add('flash'); }
+
+  elStore.addEventListener('click', e => {
+    const key = e.target?.dataset?.key; if (!key) return;
+    const p = producers.find(x=>x.key===key); if (!p || money < p.cost) return;
+    if (!(p.stock===-1 || p.stock>0)) return;
+    money -= p.cost; p.units.push(p.lifespan); p.cost = Math.ceil(p.cost * 1.15); if (p.stock!==-1) p.stock--; p.lastBuyer='You'; render(); checkAchievements();
+  });
+
+  elUpgrades.addEventListener('click', e => {
+    const key = e.target?.dataset?.up; if (!key) return;
+    const u = upgrades.find(x=>x.key===key); if (!u || money < u.cost) return;
+    money -= u.cost; u.level += 1; clickPower += u.inc; u.cost = Math.ceil(u.cost * 1.7); render();
+  });
+
+  elSave.addEventListener('click', ()=>{ save(); render(); });
+  elReset.addEventListener('click', ()=>{
+    if (!confirm('Hard reset your save?')) return;
+    ['stonksSave','stonksSaveV2','stonksSaveV3'].forEach(k=>localStorage.removeItem(k));
+    location.reload();
+  });
+
+  elTheme.addEventListener('click', ()=>{
+    theme = theme==='dark'?'light':'dark';
+    document.documentElement.style.filter = theme==='light' ? 'invert(1) hue-rotate(180deg)' : '';
+    render(); save();
+  });
+
+  // Daily bonus
+  elDaily.addEventListener('click', ()=>{
+    const today = new Date(); today.setHours(0,0,0,0);
+    const last = state.lastDaily ? new Date(state.lastDaily) : new Date(0);
+    if (last < today){
+      const bonus = Math.max(100, Math.floor(totalCps()*120 + level*250));
+      addMoney(bonus);
+      state.lastDaily = now();
+      alert('Daily bonus +$'+f(bonus));
+      save();
+    } else {
+      alert('Already claimed today!');
+    }
+  });
+
+  // Prestige
+  elPrestige.addEventListener('click', ()=>{
+    if (totalEarned < 1e6) return;
+    const points = Math.floor(totalEarned/1e6);
+    if (!confirm(`Prestige for +${points} permanent points? This resets money, items, upgrades, bots and market.`)) return;
+    prestige += points; globalMult = 1 + prestige*0.1; money=0; clickPower=1; level=1; totalEarned=0; activeEvent=null; manualClicks=0; nextMonthAt=now()+monthMs;
+    // reset producers
+    for (const p of producers){ p.units=[]; p.cost=p.baseCost; p.stock=rollStock(); p.lastBuyer='—'; }
+    // reset upgrades
+    for (const u of upgrades){ u.level=0; u.cost=u.baseCost; }
+    // reset achievements
+    for (const a of achv){ a.got=false; }
+    // reset bots
+    resetBots();
+    save(); render();
+  });
+
+  // Money helper
+  function addMoney(x){ money += x; totalEarned += x; checkLevel(); checkAchievements(); }
+
+  function checkLevel(){
+    for (let i=levelThresholds.length-1;i>=0;i--){ if (totalEarned >= levelThresholds[i]){ const newLv=i+1; if (newLv!==level){ level=newLv; // tiny mult bump baked into passive calc
+      } break; } }
+  }
+
+  function checkAchievements(){
+    for (const a of achv){ if (!a.got && a.test()){ a.got=true; confetti(); }}
+  }
+
+  // ====== Passive income & events ======
+  setInterval(()=>{
+    const base = producers.reduce((s,p)=> s + p.units.length*p.cps, 0);
+    const mult = (1 + prestige*0.1) * (1 + (level-1)*0.02) * (activeEvent? activeEvent.mult:1);
+    globalMult = mult;
+    addMoney(base * mult / 10); // 10 ticks/s
+    // month check
+    if (now() >= nextMonthAt){
+      doMonthClose();
+      nextMonthAt += monthMs;
+    }
+    render();
+  },100);
+
+  // Random events
+  setInterval(()=>{
+    if (activeEvent && activeEvent.until > now()) return;
+    if (Math.random() < 0.25){
+      const good = Math.random() < 0.8;
+      activeEvent = {
+        name: good? 'Bull Run 📈' : 'Circuit Breaker ⛔',
+        mult: good? (1.3 + Math.random()*0.5) : (0.7 + Math.random()*0.2),
+        until: now() + 15000
+      };
+    }
+  }, 6000);
+
+  // ====== Month close: charge ops, age & retire, restock ======
+  function doMonthClose(){
+    // Player
+    let opBill = 0; let retiredMsg = [];
+    for (const p of producers){
+      opBill += p.op * p.units.length;
+      // age
+      if (p.lifespan!==-1){
+        for (let i=0;i<p.units.length;i++){ if (p.units[i]!==-1) p.units[i] = p.units[i]-1; }
+        const before = p.units.length;
+        p.units = p.units.filter(u=> u===-1 || u>0);
+        const died = before - p.units.length;
+        if (died>0) retiredMsg.push(`${died} ${p.name}${died>1?'s':''}`);
+      }
+      // slight restock if limited
+      if (p.stock!==-1) p.stock += Math.floor(Math.random()*3);
+    }
+    money -= opBill;
+    if (retiredMsg.length) notify(`${retiredMsg.join(', ')} left service.`, 'warn');
+
+    // Bots
+    for (const b of bots){
+      let bill=0; let removed=[];
+      for (const p of b.prods){
+        bill += p.op * p.units.length;
+        if (p.lifespan!==-1){
+          for (let i=0;i<p.units.length;i++){ if (p.units[i]!==-1) p.units[i] = p.units[i]-1; }
+          const before = p.units.length;
+          p.units = p.units.filter(u=> u===-1 || u>0);
+          const died = before - p.units.length; if (died>0) removed.push(`${died} ${p.name}`);
+        }
+      }
+      b.money -= bill; // bots can go negative too
+      if (removed.length) {/* silent for bots */}
+    }
+  }
+
+  function notify(msg, type='info'){
+    elEventBanner.style.display='block';
+    elEventBanner.textContent = msg;
+    elEventBanner.style.borderColor = type==='warn'? '#856d2b' : '#4154a8';
+    setTimeout(()=>{ if (!activeEvent) elEventBanner.style.display='none'; }, 4000);
+  }
+
+  // ====== Charts (canvas) ======
+  function sample(){
+    samples.t.push(now());
+    samples.money.push(money);
+    samples.rate.push(totalCps());
+    if (samples.t.length > maxSamples){ samples.t.shift(); samples.money.shift(); samples.rate.shift(); }
+
+    // bot samples
+    for (let i=0;i<bots.length;i++){
+      if (!botSamples[i]) botSamples[i] = { name:bots[i].name, data:[] };
+      botSamples[i].data.push(bots[i].total);
+      if (botSamples[i].data.length>maxSamples) botSamples[i].data.shift();
+    }
+  }
+  setInterval(sample, 1000);
+
+  function setCanvasSize(c){ const dpr=window.devicePixelRatio||1; c.width=c.clientWidth*dpr; c.height=c.clientHeight*dpr; const ctx=c.getContext('2d'); ctx.setTransform(1,0,0,1,0,0); ctx.scale(dpr,dpr); }
+  function drawCharts(){
+    [moneyChart, rateChart].forEach(c=>{ if (c._inited!==true){ setCanvasSize(c); c._inited=true; }});
+    drawLineChart(moneyChart, samples.money, '$');
+    drawLineChart(rateChart, samples.rate, '/s');
+  }
+  window.addEventListener('resize', ()=>{ [moneyChart, rateChart, botsChart].forEach(c=> c._inited=false); render(); });
+
+  function drawLineChart(canvas, arr, suf){
+    const ctx = canvas.getContext('2d');
+    const w = canvas.clientWidth, h = canvas.clientHeight; ctx.clearRect(0,0,w,h);
+    if (arr.length<2) return;
+    const min = Math.min(...arr), max = Math.max(...arr);
+    const pad = 8; const H=h-2*pad, W=w-2*pad;
+    const y = v => H - (max-min===0?0:(v-min)/(max-min))*H + pad;
+    const x = i => pad + (i/(arr.length-1))*W;
+    ctx.lineWidth=2; ctx.strokeStyle='#8fb2ff'; ctx.beginPath(); ctx.moveTo(x(0), y(arr[0]));
+    for(let i=1;i<arr.length;i++) ctx.lineTo(x(i), y(arr[i]));
+    ctx.stroke();
+    const g = ctx.createLinearGradient(0,pad,0,h);
+    g.addColorStop(0,'rgba(122,162,255,.25)'); g.addColorStop(1,'rgba(122,162,255,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.moveTo(x(0),y(arr[0])); for(let i=1;i<arr.length;i++) ctx.lineTo(x(i),y(arr[i])); ctx.lineTo(x(arr.length-1),h-pad); ctx.lineTo(x(0),h-pad); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#9aa7d1'; ctx.font='12px system-ui'; ctx.fillText(f(arr[arr.length-1])+suf, w-60, 14);
+  }
+
+  // Bots wealth chart (multi-line)
+  const botColors = ['#9b5de5','#00bbf9','#fee440','#00f5d4'];
+  function drawBotsChart(){
+    if (!botsChart._inited){ setCanvasSize(botsChart); botsChart._inited=true; }
+    const ctx = botsChart.getContext('2d');
+    const w = botsChart.clientWidth, h = botsChart.clientHeight; ctx.clearRect(0,0,w,h);
+    const series = botSamples.filter(Boolean);
+    if (!series.length) return;
+    const all = series.flatMap(s=>s.data);
+    const min = Math.min(...all), max = Math.max(...all);
+    const pad = 8; const H=h-2*pad, W=w-2*pad;
+    const y = v => H - (max-min===0?0:(v-min)/(max-min))*H + pad;
+    const x = (i,len) => pad + (i/(len-1))*W;
+
+    botsLegend.innerHTML='';
+    series.forEach((s,idx)=>{
+      const col = botColors[idx%botColors.length];
+      ctx.lineWidth=2; ctx.strokeStyle=col; ctx.beginPath();
+      if (s.data.length<2) return;
+      ctx.moveTo(x(0,s.data.length), y(s.data[0]));
+      for(let i=1;i<s.data.length;i++) ctx.lineTo(x(i,s.data.length), y(s.data[i]));
+      ctx.stroke();
+      const span = document.createElement('span'); span.innerHTML = `<span class="swatch" style="background:${col}"></span>${s.name}`; botsLegend.appendChild(span);
+    });
+  }
+
+  // Hover tooltip for charts
+  ;['mousemove','mouseleave'].forEach(ev=>{
+    moneyChart.addEventListener(ev, e=> chartHover(e, samples.money, '$'));
+    rateChart.addEventListener(ev, e=> chartHover(e, samples.rate, '/s'));
+  });
+  function chartHover(e, arr, suf){
+    if (e.type==='mouseleave'){ chartTip.style.display='none'; return; }
+    const rect = e.target.getBoundingClientRect();
+    const idx = Math.round((e.clientX - rect.left) / rect.width * (arr.length-1));
+    const val = arr[idx]; if (val==null) { chartTip.style.display='none'; return; }
+    chartTip.style.display='block'; chartTip.textContent = f(val)+suf; chartTip.style.left = e.clientX+'px'; chartTip.style.top = (rect.top)+'px';
+  }
+
+  // ====== Bots ======
+  const botNames = ['Ava (Greedy)','Milo (Saver)','Zoe (Upgrader)','Kai (Mixed)'];
+  const bots = botNames.map((name,i)=> makeBot(name, i));
+
+  function makeBot(name, strategy){
+    return { name, money: 0, total:0, click:1, strategy, prods: producers.map(p=>({ key:p.key, name:p.name, cps:p.cps, op:p.op, lifespan:p.lifespan, units:[], baseCost:p.baseCost, cost:p.baseCost })), ups: upgrades.map(u=>({ key:u.key, inc:u.inc, level:0, baseCost:u.baseCost, cost:u.baseCost })) };
+  }
+
+  function resetBots(){
+    for (let i=0;i<bots.length;i++){ bots[i] = makeBot(botNames[i], i); }
+    botSamples.length = 0;
+  }
+
+  function botTick(){
+    for (const b of bots){
+      // income
+      const cps = b.prods.reduce((s,p)=> s+p.units.length*p.cps, 0);
+      const income = (cps + b.click*0.2) * (1 + prestige*0.05);
+      b.money += income; b.total += income;
+      // clicks
+      if (Math.random()<0.5) b.money += b.click;
+      // purchases from shared market
+      const buyable = b.prods.map(bp=>{
+        const mp = producers.find(pp=>pp.key===bp.key);
+        const can = (mp.stock===-1 || mp.stock>0) && b.money>=bp.cost;
+        return can? {bp, mp}: null;
+      }).filter(Boolean);
+
+      if (buyable.length){
+        const pick = pickByStrategy(b, buyable);
+        if (pick){
+          const {bp, mp} = pick; b.money -= bp.cost; bp.units.push(bp.lifespan); bp.cost = Math.ceil(bp.cost*1.15);
+          if (mp.stock!==-1) mp.stock--; mp.lastBuyer = b.name;
+        }
+      }
+      // upgrades
+      const affordU = b.ups.filter(u=> b.money>=u.cost);
+      if (b.strategy===2 && affordU.length){ const u = affordU[0]; b.money-=u.cost; u.level++; b.click+=u.inc; u.cost=Math.ceil(u.cost*1.7); }
+      else if (Math.random()<0.2 && affordU.length){ const u = affordU[Math.floor(Math.random()*affordU.length)]; b.money-=u.cost; u.level++; b.click+=u.inc; u.cost=Math.ceil(u.cost*1.7); }
+    }
+  }
+
+  function pickByStrategy(b, list){
+    if (b.strategy===0){ // Greedy: most expensive
+      return list.sort((a,b)=> b.bp.cost - a.bp.cost)[0];
+    } else if (b.strategy===1){ // Saver: wait if close to higher tier
+      const sorted = list.sort((a,b)=> a.bp.cost - b.bp.cost);
+      const highest = sorted[sorted.length-1];
+      if (b.money > highest.bp.cost*0.9) return highest; else return sorted[0];
+    } else if (b.strategy===2){ // Upgrader buys mid-tier generators
+      return list[Math.floor(list.length/2)] || list[0];
+    } else { // Mixed random
+      return list[Math.floor(Math.random()*list.length)];
+    }
+  }
+
+  setInterval(()=>{ botTick(); renderBots(); }, 1000);
+
+  function renderBots(){
+    elBots.innerHTML='';
+    const sorted = bots.slice().sort((a,b)=> b.total - a.total);
+    for (const b of sorted){
+      const inv = producers.map(p=>{
+        const bp = b.prods.find(x=>x.key===p.key);
+        return `${symbolFor(p.key)}${bp.units.length}`;
+      }).join(' ');
+      const el = document.createElement('div'); el.className='bot';
+      el.innerHTML = `<span class="name">${b.name}</span><span>$${f(b.total)} <span class="delta">bank: $${f(b.money)} • ${inv}</span></span>`;
+      elBots.appendChild(el);
+    }
+  }
+
+  function symbolFor(key){
+    return ({intern:'🧑',trader:'💼',analyst:'📊',algo:'🤖',server:'🖥️',fund:'🏦',lab:'🧪',sat:'🛰️'})[key]||'•';
+  }
+
+  // ====== Trade Center ======
+  const offers = [];// {id, seller, key, price, life}
+  newOffersBtn.addEventListener('click', ()=> generateOffers());
+  function generateOffers(){
+    offers.length = 0;
+    // Bots offer to sell one random unit if they have >1
+    for (const b of bots){
+      const owned = b.prods.filter(p=> p.units.length>1);
+      if (!owned.length) continue;
+      const pick = owned[Math.floor(Math.random()*owned.length)];
+      const life = pick.units[0]===-1? -1 : pick.units[0]; // approximate
+      const lifeFrac = (life===-1||pick.lifespan===-1)? 1 : Math.max(0.1, life/pick.lifespan);
+      const market = producers.find(pp=>pp.key===pick.key);
+      const base = market.cost; // reference
+      const price = Math.round(base * 0.8 * lifeFrac);
+      offers.push({ id: Math.random().toString(36).slice(2), seller: b.name, key: pick.key, price, life: life, lifespan: pick.lifespan });
+    }
+    renderOffers();
+  }
+
+  function renderOffers(){
+    tradeBox.innerHTML='';
+    if (!offers.length){
+      const o = document.createElement('div'); o.className='muted'; o.textContent='No offers currently. Click "Request Offers".'; tradeBox.appendChild(o); return;
+    }
+    for (const o of offers){
+      const div = document.createElement('div'); div.className='offer';
+      const lifeTxt = o.life===-1? '∞' : `~${o.life} mo left`;
+      div.innerHTML = `<span>${symbolFor(o.key)} ${nameFor(o.key)} from <b>${o.seller}</b> • ${lifeTxt}</span><span>$${f(o.price)} <button class="ghost" data-accept="${o.id}">Buy</button></span>`;
+      tradeBox.appendChild(div);
+    }
+  }
+
+  tradeBox.addEventListener('click', e=>{
+    const id = e.target?.dataset?.accept; if (!id) return;
+    const o = offers.find(x=>x.id===id); if (!o) return;
+    if (money < o.price) { alert('Not enough funds'); return; }
+    money -= o.price;
+    // transfer from seller bot to player
+    const bot = bots.find(b=> b.name===o.seller);
+    const bp = bot.prods.find(p=> p.key===o.key);
+    const life = bp.units.shift() ?? bp.lifespan; // remove one
+    const mp = producers.find(p=> p.key===o.key);
+    mp.units.push(life);
+    mp.lastBuyer = `Trade (${bot.name})`;
+    offers.splice(offers.findIndex(x=>x.id===id),1);
+    renderOffers(); render();
+  });
+
+  function nameFor(key){ return producers.find(p=>p.key===key)?.name || key; }
+
+  // ====== FX ======
+  function confetti(){
+    for (let i=0;i<12;i++){
+      const s = document.createElement('div'); s.textContent = ['🎉','✨','💸','📈'][Math.floor(Math.random()*4)];
+      Object.assign(s.style,{ position:'fixed', left: (10+Math.random()*80)+'%', top:'-10px', fontSize:(16+Math.random()*12)+'px', transition:'transform 1.2s ease, opacity 1.2s ease', zIndex:9 });
+      document.body.appendChild(s);
+      const dx = (Math.random()*2-1)*200; const dy = 120+Math.random()*160; const rot = (Math.random()*2-1)*120;
+      requestAnimationFrame(()=>{ s.style.transform=`translate(${dx}px, ${dy}px) rotate(${rot}deg)`; s.style.opacity='0'; });
+      setTimeout(()=> s.remove(), 1300);
+    }
+  }
+  function float(txt){ floatText.textContent = txt; floatText.classList.remove('show'); void floatText.offsetWidth; floatText.classList.add('show'); }
+
+  // ====== Init ======
+  load();
+  render();
+
+  // Autosave
+  setInterval(save, 3000);
+  window.addEventListener('beforeunload', save);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Studio</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="main-layout">
+        <!-- Header -->
+        <header class="header">
+            <h1>Audio Studio</h1>
+            <div class="header-controls">
+                <!-- Transport Controls -->
+                <div class="transport">
+                    <button id="playBtn" class="transport-btn">▶</button>
+                    <button id="pauseBtn" class="transport-btn">⏸</button>
+                    <button id="stopBtn" class="transport-btn">⏹</button>
+                    <div class="time-display">
+                        <span id="currentTime">00:00.000</span>
+                        <span>/</span>
+                        <span id="totalTime">00:00.000</span>
+                    </div>
+                    <div class="tempo-control">
+                        <label>BPM: <input type="number" id="bpmInput" value="120" min="40" max="240"></label>
+                    </div>
+                    <div class="snap-control">
+                        <label>
+                            <input type="checkbox" id="snapEnabled" checked>
+                            Snap
+                        </label>
+                        <select id="snapValue">
+                            <option value="1">1 Bar</option>
+                            <option value="0.5">1/2</option>
+                            <option value="0.25" selected>1/4</option>
+                            <option value="0.125">1/8</option>
+                            <option value="0.0625">1/16</option>
+                            <option value="0.03125">1/32</option>
+                        </select>
+                    </div>
+                </div>
+                <button id="exportBtn" class="export-btn">Export Project</button>
+            </div>
+        </header>
+
+        <div class="workspace">
+            <!-- Main Content Area -->
+            <div class="main-content">
+                <!-- Timeline -->
+                <div class="timeline-container">
+                    <div class="timeline-header">
+                        <div class="track-controls-spacer"></div>
+                        <div class="timeline-ruler" id="timelineRuler"></div>
+                    </div>
+                </div>
+
+                <!-- Tracks Container with Playhead -->
+                <div class="tracks-wrapper">
+                    <div class="timeline-playhead-overlay">
+                        <div class="playhead" id="playhead"></div>
+                    </div>
+                    <div class="tracks-container" id="tracksContainer">
+                        <!-- Tracks will be added here dynamically -->
+                    </div>
+                </div>
+
+                <!-- Add Track Button -->
+                <div class="add-track-container">
+                    <button id="addTrackBtn" class="add-track-btn">
+                        <svg width="24" height="24" viewBox="0 0 24 24">
+                            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" fill="currentColor"/>
+                        </svg>
+                        Add Track
+                    </button>
+                </div>
+            </div>
+
+            <!-- Master Track (Vertical on Right) -->
+            <div class="master-track">
+                <div class="master-header">
+                    <h3>Master</h3>
+                    <button id="masterSettingsBtn" class="settings-btn">⚙</button>
+                </div>
+                <div class="master-fader">
+                    <input type="range" id="masterVolume" orient="vertical" min="0" max="1" step="0.01" value="0.8">
+                    <span id="masterVolumeValue">-2 dB</span>
+                </div>
+                <div class="meter-container">
+                    <div class="meter">
+                        <div class="meter-bar" id="masterMeterL"></div>
+                    </div>
+                    <div class="meter">
+                        <div class="meter-bar" id="masterMeterR"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Track Settings Modal -->
+    <div id="trackSettingsModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Track Settings</h2>
+            <div class="settings-tabs">
+                <button class="tab-btn active" data-tab="eq">EQ</button>
+                <button class="tab-btn" data-tab="compression">Compression</button>
+                <button class="tab-btn" data-tab="effects">Effects</button>
+                <button class="tab-btn" data-tab="automation">Automation</button>
+            </div>
+            
+            <div class="tab-content active" id="eq-tab">
+                <h3>Parametric EQ</h3>
+                <div class="eq-band">
+                    <h4>Low Band</h4>
+                    <label>Frequency: <input type="range" class="eq-freq" data-band="low" min="20" max="500" value="100"> <span class="eq-freq-value">100 Hz</span></label>
+                    <label>Gain: <input type="range" class="eq-gain" data-band="low" min="-24" max="24" step="0.5" value="0"> <span class="eq-gain-value">0 dB</span></label>
+                    <label>Q: <input type="range" class="eq-q" data-band="low" min="0.1" max="10" step="0.1" value="1"> <span class="eq-q-value">1.0</span></label>
+                </div>
+                <div class="eq-band">
+                    <h4>Mid Band</h4>
+                    <label>Frequency: <input type="range" class="eq-freq" data-band="mid" min="200" max="5000" value="1000"> <span class="eq-freq-value">1000 Hz</span></label>
+                    <label>Gain: <input type="range" class="eq-gain" data-band="mid" min="-24" max="24" step="0.5" value="0"> <span class="eq-gain-value">0 dB</span></label>
+                    <label>Q: <input type="range" class="eq-q" data-band="mid" min="0.1" max="10" step="0.1" value="1"> <span class="eq-q-value">1.0</span></label>
+                </div>
+                <div class="eq-band">
+                    <h4>High Band</h4>
+                    <label>Frequency: <input type="range" class="eq-freq" data-band="high" min="2000" max="20000" value="8000"> <span class="eq-freq-value">8000 Hz</span></label>
+                    <label>Gain: <input type="range" class="eq-gain" data-band="high" min="-24" max="24" step="0.5" value="0"> <span class="eq-gain-value">0 dB</span></label>
+                    <label>Q: <input type="range" class="eq-q" data-band="high" min="0.1" max="10" step="0.1" value="1"> <span class="eq-q-value">1.0</span></label>
+                </div>
+            </div>
+
+            <div class="tab-content" id="compression-tab">
+                <h3>Compressor</h3>
+                <label>Threshold: <input type="range" class="comp-threshold" min="-60" max="0" value="-24"> <span class="comp-threshold-value">-24 dB</span></label>
+                <label>Knee: <input type="range" class="comp-knee" min="0" max="40" value="30"> <span class="comp-knee-value">30 dB</span></label>
+                <label>Ratio: <input type="range" class="comp-ratio" min="1" max="20" step="0.1" value="4"> <span class="comp-ratio-value">4:1</span></label>
+                <label>Attack: <input type="range" class="comp-attack" min="0" max="1" step="0.001" value="0.003"> <span class="comp-attack-value">3 ms</span></label>
+                <label>Release: <input type="range" class="comp-release" min="0" max="1" step="0.001" value="0.25"> <span class="comp-release-value">250 ms</span></label>
+            </div>
+
+            <div class="tab-content" id="effects-tab">
+                <h3>Effects</h3>
+                <div class="effect-section">
+                    <h4>Delay</h4>
+                    <label>Time: <input type="range" class="delay-time" min="0" max="2" step="0.01" value="0.5"> <span class="delay-time-value">500 ms</span></label>
+                    <label>Feedback: <input type="range" class="delay-feedback" min="0" max="0.9" step="0.01" value="0.3"> <span class="delay-feedback-value">30%</span></label>
+                    <label>Mix: <input type="range" class="delay-mix" min="0" max="1" step="0.01" value="0"> <span class="delay-mix-value">0%</span></label>
+                </div>
+                <div class="effect-section">
+                    <h4>Reverb</h4>
+                    <label>Decay: <input type="range" class="reverb-decay" min="0" max="10" step="0.1" value="2"> <span class="reverb-decay-value">2.0 s</span></label>
+                    <label>Mix: <input type="range" class="reverb-mix" min="0" max="1" step="0.01" value="0"> <span class="reverb-mix-value">0%</span></label>
+                </div>
+            </div>
+
+            <div class="tab-content" id="automation-tab">
+                <h3>Automation</h3>
+                <div class="automation-controls">
+                    <label>Parameter: 
+                        <select class="automation-param">
+                            <option value="volume">Volume</option>
+                            <option value="delay">Delay Mix</option>
+                            <option value="reverb">Reverb Mix</option>
+                        </select>
+                    </label>
+                    <button class="add-automation-point">Add Point at Playhead</button>
+                    <div class="automation-list" id="automationList">
+                        <!-- Automation points will be listed here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="audio-engine.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
