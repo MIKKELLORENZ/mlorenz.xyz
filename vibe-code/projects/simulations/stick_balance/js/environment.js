@@ -50,6 +50,7 @@ class Environment {
         this.stepCount = 0;
         this.episodeOver = false;
         this.totalReward = 0;
+        this.lastAction = undefined; // Reset for smooth control reward
 
         return { ...this.state, wind: this.currentWind, windMax: this.maxWindStrength || 0 };
     }
@@ -95,6 +96,17 @@ class Environment {
         // Small control cost to discourage unnecessary large actions
         const actMag = Math.abs(action);
         reward -= 0.005 * actMag;
+        
+        // Bonus for smooth control (penalize large changes in action)
+        if (this.lastAction !== undefined) {
+            const actionChange = Math.abs(action - this.lastAction);
+            reward -= 0.01 * actionChange; // Encourage smooth control
+        }
+        this.lastAction = action;
+        
+        // Long-term stability bonus - grows with time balanced
+        const stabilityBonus = Math.min(this.stepCount / 1000, 2.0); // Caps at +2 after 1000 steps
+        reward += stabilityBonus;
 
         return reward;
     }

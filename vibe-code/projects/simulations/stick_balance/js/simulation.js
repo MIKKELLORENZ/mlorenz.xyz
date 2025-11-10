@@ -176,6 +176,8 @@ document.addEventListener('DOMContentLoaded', () => {
             this.animationId = null;
             this.updateInterval = 20; // milliseconds between physics updates
             this.lastUpdateTime = 0;
+            this.lastRenderTime = 0;
+            this.renderInterval = 33; // ~30 FPS for rendering (separate from physics)
             
             // Force learning flag to ensure weights are updated
             this.forceLearn = true;
@@ -199,6 +201,14 @@ document.addEventListener('DOMContentLoaded', () => {
             // New record notification
             this.newRecordNotification = null;
             this.bestDurationSoFar = 0;
+            
+            // Add chart update throttling
+            this.lastChartUpdate = 0;
+            this.chartUpdateInterval = 2000; // Update charts max once per 2 seconds
+            
+            // Add frame skip for better performance
+            this.frameSkip = 0;
+            this.maxFrameSkip = 2; // Render every 3rd physics update max
         }
 
         // Get current parameter values
@@ -454,43 +464,48 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.animationId = null;
             }
 
-            // Stop bird sound
+            // Stop and cleanup all audio
             if (this.birdSound) {
                 this.birdSound.pause();
                 this.birdSound.currentTime = 0;
             }
 
-            // Stop gravel sound
             if (this.gravelSound) {
                 this.gravelSound.pause();
                 this.gravelSound.currentTime = 0;
+                this.gravelSoundStarted = false;
             }
 
-            // Stop all fallen sounds
             if (this.fallenSounds) {
                 this.fallenSounds.forEach(sound => {
                     sound.pause();
                     sound.currentTime = 0;
                 });
             }
+            
+            // Clear any pending timers or callbacks
+            this.frameSkip = 0;
         }
         
         // Reset the simulation
         reset() {
             this.stop();
             
-            // Reset charts
-            rewardsChart.data.labels = [];
-            rewardsChart.data.datasets[0].data = [];
-            rewardsChart.update();
+            // Clean up renderer resources properly
+            if (this.renderer) {
+                this.renderer.cleanup();
+            }
             
-            durationChart.data.labels = [];
-            durationChart.data.datasets[0].data = [];
-            durationChart.update();
+            // Clear charts more efficiently
+            const clearChart = (chart) => {
+                chart.data.labels.length = 0;
+                chart.data.datasets[0].data.length = 0;
+                chart.update('none');
+            };
             
-            weightChangeChart.data.labels = [];
-            weightChangeChart.data.datasets[0].data = [];
-            weightChangeChart.update();
+            clearChart(rewardsChart);
+            clearChart(durationChart);
+            clearChart(weightChangeChart);
             
             // Reset stats display
             episodeCounter.textContent = '0';
@@ -527,6 +542,10 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Render just the background
             this.renderBackgroundOnly();
+            
+            // Reset performance counters
+            this.lastChartUpdate = 0;
+            this.frameSkip = 0;
         }
         
         // Display a new record notification
@@ -593,8 +612,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         
-        // Update charts with latest data
+        /**
+         * Update charts with latest data (throttled)
+         */
         updateCharts() {
+            const now = performance.now();
+            
+            // Throttle chart updates to reduce performance impact
+            if (now - this.lastChartUpdate < this.chartUpdateInterval) {
+                return;
+            }
+            this.lastChartUpdate = now;
+            
             const stats = this.agent.getStats();
             const timestep = this.environment.physics.timestep;
             
@@ -629,56 +658,57 @@ document.addEventListener('DOMContentLoaded', () => {
                 avgReward100.textContent = stats.avgRewardLast100.toFixed(1);
             }
             
-            // Update charts every episode (removed the previous condition)
+            // Limit the number of data points more aggressively
+            const maxDataPoints = 300; // Reduced from 500
             
-            // Limit the number of data points to prevent excessive memory usage
-            const maxDataPoints = 100;
-            
-            // Update reward chart
+            // Update reward chart with decimation for performance
             const rewardData = [...stats.episodeRewards];
+            let decimatedRewardData = rewardData;
             if (rewardData.length > maxDataPoints) {
-                // Only keep the most recent data points
-                rewardData.splice(0, rewardData.length - maxDataPoints);
+                const decimationFactor = Math.ceil(rewardData.length / maxDataPoints);
+                decimatedRewardData = rewardData.filter((_, i) => i % decimationFactor === 0);
             }
             
             rewardsChart.data.labels = Array.from(
-                { length: rewardData.length }, 
-                (_, i) => (stats.episodeCount - rewardData.length + i + 1).toString()
+                { length: decimatedRewardData.length }, 
+                (_, i) => (i * (rewardData.length / decimatedRewardData.length)).toFixed(0)
             );
-            rewardsChart.data.datasets[0].data = rewardData;
-            rewardsChart.update('none'); // Use 'none' mode for better performance
+            rewardsChart.data.datasets[0].data = decimatedRewardData;
+            rewardsChart.update('none'); // 'none' disables animations
             
-            // Update duration chart (convert steps to seconds)
+            // Update duration chart with decimation
             const durationData = [...stats.episodeDurations].map(steps => steps * timestep);
+            let decimatedDurationData = durationData;
             if (durationData.length > maxDataPoints) {
-                // Only keep the most recent data points
-                durationData.splice(0, durationData.length - maxDataPoints);
+                const decimationFactor = Math.ceil(durationData.length / maxDataPoints);
+                decimatedDurationData = durationData.filter((_, i) => i % decimationFactor === 0);
             }
             
             durationChart.data.labels = Array.from(
-                { length: durationData.length }, 
-                (_, i) => (stats.episodeCount - durationData.length + i + 1).toString()
+                { length: decimatedDurationData.length }, 
+                (_, i) => (i * (durationData.length / decimatedDurationData.length)).toFixed(0)
             );
-            durationChart.data.datasets[0].data = durationData;
+            durationChart.data.datasets[0].data = decimatedDurationData;
             durationChart.options.scales.y.title = {
                 display: true,
                 text: 'Duration (seconds)'
             };
-            durationChart.update('none'); // Use 'none' mode for better performance
+            durationChart.update('none');
             
-            // Update weight change chart
+            // Update weight change chart with decimation
             const weightChangeData = [...stats.weightChanges];
+            let decimatedWeightData = weightChangeData;
             if (weightChangeData.length > maxDataPoints) {
-                // Only keep the most recent data points
-                weightChangeData.splice(0, weightChangeData.length - maxDataPoints);
+                const decimationFactor = Math.ceil(weightChangeData.length / maxDataPoints);
+                decimatedWeightData = weightChangeData.filter((_, i) => i % decimationFactor === 0);
             }
             
             weightChangeChart.data.labels = Array.from(
-                { length: weightChangeData.length }, 
-                (_, i) => (stats.episodeCount - weightChangeData.length + i + 1).toString()
+                { length: decimatedWeightData.length }, 
+                (_, i) => (i * (weightChangeData.length / decimatedWeightData.length)).toFixed(0)
             );
-            weightChangeChart.data.datasets[0].data = weightChangeData;
-            weightChangeChart.update('none'); // Use 'none' mode for better performance
+            weightChangeChart.data.datasets[0].data = decimatedWeightData;
+            weightChangeChart.update('none');
         }
         
         /**
@@ -688,10 +718,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!this.isRunning) return;
             
             const now = performance.now();
-            const elapsed = now - this.lastUpdateTime;
+            const physicsElapsed = now - this.lastUpdateTime;
+            const renderElapsed = now - this.lastRenderTime;
             
             // Update physics at fixed time steps
-            if (elapsed >= this.updateInterval) {
+            if (physicsElapsed >= this.updateInterval) {
                 this.lastUpdateTime = now;
                 
                 try {
@@ -776,10 +807,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     this.episodeSteps++;
                     this.totalSteps++;
                     
-                    // Render current state - limit framerate for performance
-                    // Only render every other frame when episode count is high
-                    const shouldRender = this.agent.episodeCount < 30 || this.totalSteps % 2 === 0;
+                    // Implement frame skipping for rendering
+                    this.frameSkip++;
+                    const shouldRender = this.frameSkip >= this.maxFrameSkip || renderElapsed >= this.renderInterval;
+                    
                     if (shouldRender) {
+                        this.frameSkip = 0;
+                        this.lastRenderTime = now;
                         this.renderer.render(this.currentState, result.wind, this.agent.episodeCount);
                     }
                     
@@ -791,10 +825,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         // Decay exploration rate
                         this.agent.decayExploration();
                         
-                        // More efficient episode end handling
-                        // Only update charts every few episodes to reduce performance impact
-                        if (this.agent.episodeCount % 5 === 0 || this.agent.episodeCount < 20) {
+                        // Update charts only every N episodes for better performance
+                        if (this.agent.episodeCount % 5 === 0) {
                             this.updateCharts();
+                        } else {
+                            // Still update basic stats
+                            episodeCounter.textContent = this.agent.episodeCount;
+                            const bestDurationSeconds = this.agent.bestDuration * timestep;
+                            bestDuration.textContent = bestDurationSeconds.toFixed(1) + 's';
                         }
                         
                         // Log episode info less frequently as training progresses
@@ -820,9 +858,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         this.currentState = this.environment.reset();
                         this.episodeSteps = 0;
                         
-                        // Manage memory periodically to prevent memory leaks
-                        if (this.agent.episodeCount % 10 === 0) {
+                        // Manage memory more aggressively
+                        if (this.agent.episodeCount % 25 === 0) { // Changed from 50 to 25
                             this.agent.manageMemoryUsage();
+                            
+                            // Force garbage collection if available
+                            if (window.gc) {
+                                window.gc();
+                            }
                         }
                     }
                 } catch (error) {
@@ -834,7 +877,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             
-            // Continue animation loop with optimal scheduling to prevent slowdowns
+            // Continue animation loop
             this.animationId = requestAnimationFrame(() => this.animationLoop());
         }
         

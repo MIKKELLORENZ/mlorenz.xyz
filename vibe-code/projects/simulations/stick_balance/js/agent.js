@@ -23,9 +23,17 @@ class Agent {
         this.batchSize = 128;
         this.minReplaySize = 500; // Reduced from 1000 for faster initial learning
 
+        // Prioritized Experience Replay
+        this.priorities = [];
+        this.priorityAlpha = 0.6; // How much to use priorities (0=uniform, 1=full priority)
+        this.priorityBeta = 0.4;  // Importance sampling weight (increases to 1)
+        this.priorityBetaIncrement = 0.001;
+        this.priorityEpsilon = 0.01; // Small constant to ensure non-zero probabilities
+
         // Double DQN / target update
         this.stepCount = 0;
         this.tau = 0.005;          // soft update every step
+        this.targetUpdateFreq = 4; // Only update target every N steps for more stability
 
         // Networks
         this.mainNetwork = this.createNetwork();
@@ -51,6 +59,9 @@ class Agent {
         this.initialWeights = this.copyWeights(this.mainNetwork);
 
         this.avgRewardLast100 = 0;
+        
+        // Gradient clipping for stability
+        this.maxGradNorm = 10.0; // Clip gradients to this L2 norm
     }
 
     _createAdamState(templateNet) {
@@ -154,8 +165,9 @@ class Agent {
         let best = 0;
         for (let i = 1; i < output.length; i++) if (output[i] > output[best]) best = i;
         
-        // Add small epsilon-greedy even when exploiting to prevent getting stuck
-        if (Math.random() < 0.05) {
+        // After exploration is low, be fully deterministic for long-term stability
+        // Only add noise during high exploration phase
+        if (this.explorationRate > 0.15 && Math.random() < 0.05) {
             const alternatives = [Math.max(0, best - 1), best, Math.min(this.outputSize - 1, best + 1)];
             return this.indexToAction(alternatives[Math.floor(Math.random() * alternatives.length)]);
         }
@@ -163,22 +175,66 @@ class Agent {
     }
 
     addExperience(state, action, reward, nextState, done) {
-        if (this.replayBuffer.length >= this.replayBufferSize) this.replayBuffer.shift();
+        if (this.replayBuffer.length >= this.replayBufferSize) {
+            this.replayBuffer.shift();
+            this.priorities.shift();
+        }
         this.replayBuffer.push({
             state: { ...state },
             action, reward,
             nextState: { ...nextState },
             done
         });
+        
+        // New experiences get max priority to ensure they're sampled
+        const maxPriority = this.priorities.length > 0 ? Math.max(...this.priorities) : 1.0;
+        this.priorities.push(maxPriority);
     }
 
     sampleBatch() {
         if (this.replayBuffer.length < this.minReplaySize) return null;
+        
+        // Prioritized sampling
         const batch = new Array(this.batchSize);
-        for (let i = 0; i < this.batchSize; i++) {
-            batch[i] = this.replayBuffer[Math.floor(Math.random() * this.replayBuffer.length)];
+        const indices = new Array(this.batchSize);
+        const weights = new Array(this.batchSize);
+        
+        // Calculate sampling probabilities
+        const alpha = this.priorityAlpha;
+        let prioritySum = 0;
+        const probs = new Array(this.priorities.length);
+        for (let i = 0; i < this.priorities.length; i++) {
+            probs[i] = Math.pow(this.priorities[i] + this.priorityEpsilon, alpha);
+            prioritySum += probs[i];
         }
-        return batch;
+        
+        // Sample with replacement based on priorities
+        for (let i = 0; i < this.batchSize; i++) {
+            let rand = Math.random() * prioritySum;
+            let idx = 0;
+            let cumSum = 0;
+            for (idx = 0; idx < probs.length; idx++) {
+                cumSum += probs[idx];
+                if (rand <= cumSum) break;
+            }
+            indices[i] = Math.min(idx, this.replayBuffer.length - 1);
+            batch[i] = this.replayBuffer[indices[i]];
+            
+            // Importance sampling weight
+            const prob = probs[indices[i]] / prioritySum;
+            weights[i] = Math.pow(this.replayBuffer.length * prob, -this.priorityBeta);
+        }
+        
+        // Normalize weights
+        const maxWeight = Math.max(...weights);
+        for (let i = 0; i < weights.length; i++) {
+            weights[i] /= maxWeight;
+        }
+        
+        // Increase beta over time (anneal to 1.0)
+        this.priorityBeta = Math.min(1.0, this.priorityBeta + this.priorityBetaIncrement);
+        
+        return { batch, indices, weights };
     }
 
     // Huber loss gradient
@@ -187,8 +243,10 @@ class Agent {
         return a <= delta ? error : Math.sign(error) * delta;
     }
 
-    trainOnBatch(batch) {
-        if (!batch) return 0;
+    trainOnBatch(batchData) {
+        if (!batchData) return 0;
+        
+        const { batch, indices, weights } = batchData;
 
         // Accumulate grads
         const gW1 = new Array(this.mainNetwork.w1.length).fill(0);
@@ -197,8 +255,12 @@ class Agent {
         const gB2 = new Array(this.mainNetwork.b2.length).fill(0);
 
         let totalLoss = 0;
+        const newPriorities = new Array(batch.length);
 
-        for (const exp of batch) {
+        for (let batchIdx = 0; batchIdx < batch.length; batchIdx++) {
+            const exp = batch[batchIdx];
+            const weight = weights[batchIdx];
+            
             const { state, action, reward, nextState, done } = exp;
 
             // Q(s,·)
@@ -216,11 +278,15 @@ class Agent {
             const aIdx = this.actionToIndex(action);
             const target = reward + bootstrap;
 
+            // TD error for priority update
+            const tdError = Math.abs(qCurrent[aIdx] - target);
+            newPriorities[batchIdx] = tdError;
+
             // Huber loss on the chosen action output only; others target themselves
             const targetVec = qCurrent.slice();
             targetVec[aIdx] = target;
 
-            // Backprop (one pass)
+            // Backprop (one pass) - scale by importance sampling weight
             const hidden = fMain.hidden;
             const input = fMain.input;
 
@@ -228,7 +294,7 @@ class Agent {
             const outputError = new Array(this.outputSize).fill(0);
             for (let i = 0; i < this.outputSize; i++) {
                 const err = (qCurrent[i] - targetVec[i]);
-                const grad = this._huberGrad(err); // dL/dQ
+                const grad = this._huberGrad(err) * weight; // Apply IS weight
                 outputError[i] = grad;
                 gB2[i] += grad;
                 for (let j = 0; j < this.hiddenSize; j++) {
@@ -253,17 +319,32 @@ class Agent {
                 }
             }
         }
+        
+        // Update priorities in buffer
+        for (let i = 0; i < indices.length; i++) {
+            this.priorities[indices[i]] = newPriorities[i];
+        }
+
+        // Calculate gradient norm for clipping
+        let gradNorm = 0;
+        for (let i = 0; i < gW1.length; i++) gradNorm += gW1[i] * gW1[i];
+        for (let i = 0; i < gB1.length; i++) gradNorm += gB1[i] * gB1[i];
+        for (let i = 0; i < gW2.length; i++) gradNorm += gW2[i] * gW2[i];
+        for (let i = 0; i < gB2.length; i++) gradNorm += gB2[i] * gB2[i];
+        gradNorm = Math.sqrt(gradNorm);
+        
+        // Global gradient clipping
+        const clipScale = gradNorm > this.maxGradNorm ? this.maxGradNorm / gradNorm : 1.0;
 
         // Apply grads with Adam
         this.adamStep++;
         const t = this.adamStep;
         const lr = this.learningRate;
         const b1 = this.adamBeta1, b2 = this.adamBeta2, eps = this.adamEps;
-        const clip = g => Math.max(-5, Math.min(5, g));
 
         // w1
         for (let i = 0; i < this.mainNetwork.w1.length; i++) {
-            const grad = clip(gW1[i] / batch.length);
+            const grad = (gW1[i] / batch.length) * clipScale;
             this.opt.w1m[i] = b1 * this.opt.w1m[i] + (1 - b1) * grad;
             this.opt.w1v[i] = b2 * this.opt.w1v[i] + (1 - b2) * grad * grad;
             const mHat = this.opt.w1m[i] / (1 - Math.pow(b1, t));
@@ -272,7 +353,7 @@ class Agent {
         }
         // b1
         for (let i = 0; i < this.mainNetwork.b1.length; i++) {
-            const grad = clip(gB1[i] / batch.length);
+            const grad = (gB1[i] / batch.length) * clipScale;
             this.opt.b1m[i] = b1 * this.opt.b1m[i] + (1 - b1) * grad;
             this.opt.b1v[i] = b2 * this.opt.b1v[i] + (1 - b2) * grad * grad;
             const mHat = this.opt.b1m[i] / (1 - Math.pow(b1, t));
@@ -281,7 +362,7 @@ class Agent {
         }
         // w2
         for (let i = 0; i < this.mainNetwork.w2.length; i++) {
-            const grad = clip(gW2[i] / batch.length);
+            const grad = (gW2[i] / batch.length) * clipScale;
             this.opt.w2m[i] = b1 * this.opt.w2m[i] + (1 - b1) * grad;
             this.opt.w2v[i] = b2 * this.opt.w2v[i] + (1 - b2) * grad * grad;
             const mHat = this.opt.w2m[i] / (1 - Math.pow(b1, t));
@@ -290,7 +371,7 @@ class Agent {
         }
         // b2
         for (let i = 0; i < this.mainNetwork.b2.length; i++) {
-            const grad = clip(gB2[i] / batch.length);
+            const grad = (gB2[i] / batch.length) * clipScale;
             this.opt.b2m[i] = b1 * this.opt.b2m[i] + (1 - b1) * grad;
             this.opt.b2v[i] = b2 * this.opt.b2v[i] + (1 - b2) * grad * grad;
             const mHat = this.opt.b2m[i] / (1 - Math.pow(b1, t));
@@ -308,9 +389,13 @@ class Agent {
             // Adaptive number of updates per step - more aggressive early on
             const updates = this.episodeCount < 50 ? 8 : (this.episodeCount < 150 ? 6 : (this.episodeCount < 300 ? 4 : 2));
             for (let k = 0; k < updates; k++) {
-                const batch = this.sampleBatch();
-                this.trainOnBatch(batch);
-                this.softUpdateTarget();
+                const batchData = this.sampleBatch();
+                this.trainOnBatch(batchData);
+                
+                // Only update target network every N steps for more stability
+                if (this.stepCount % this.targetUpdateFreq === 0) {
+                    this.softUpdateTarget();
+                }
             }
         }
         this.stepCount++;
@@ -369,13 +454,22 @@ class Agent {
     }
 
     manageMemoryUsage() {
-        if (this.episodeDurations.length > 2000) {
-            this.episodeDurations = this.episodeDurations.slice(-1000);
-            this.episodeRewards = this.episodeRewards.slice(-1000);
-            this.weightChanges = this.weightChanges.slice(-1000);
+        // Trim episode history more aggressively
+        const maxHistory = 500; // Reduced from 1000
+        if (this.episodeDurations.length > maxHistory) {
+            this.episodeDurations = this.episodeDurations.slice(-maxHistory);
+            this.episodeRewards = this.episodeRewards.slice(-maxHistory);
+            this.weightChanges = this.weightChanges.slice(-maxHistory);
+        }
+        
+        // Trim replay buffer if it's too large - more aggressive
+        const bufferTarget = this.replayBufferSize;
+        if (this.replayBuffer.length > bufferTarget) {
+            // Keep only the most recent experiences
+            this.replayBuffer = this.replayBuffer.slice(-bufferTarget);
         }
     }
-
+    
     verifyLearning() {
     const sumW1 = this.mainNetwork.w1.reduce((a, b) => a + Math.abs(b), 0);
     const sumW2 = this.mainNetwork.w2.reduce((a, b) => a + Math.abs(b), 0);

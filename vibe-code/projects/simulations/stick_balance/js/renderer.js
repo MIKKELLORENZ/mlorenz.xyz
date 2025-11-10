@@ -8,6 +8,14 @@ class Renderer {
         this.ctx = canvas.getContext('2d');
         this.environment = environment;
         
+        // Validate essential components
+        if (!this.canvas || !this.ctx) {
+            throw new Error('Invalid canvas or context');
+        }
+        if (!this.environment || typeof this.environment.getWorldInfo !== 'function') {
+            throw new Error('Invalid environment object');
+        }
+        
         // Get world size information
         const worldInfo = environment.getWorldInfo();
         this.worldWidth = worldInfo.width;
@@ -17,18 +25,22 @@ class Renderer {
         
         // Pixel scaling
         this.resizeCanvas();
-        window.addEventListener('resize', () => this.resizeCanvas());
         
-        // Cloud properties
+        // Store bound resize handler for cleanup
+        this.resizeHandler = () => this.resizeCanvas();
+        window.addEventListener('resize', this.resizeHandler);
+        
+        // Cloud properties - initialize once
         this.clouds = [];
-        this.initClouds();
+        this.cloudsInitialized = false;
         
-        // Wind stream particles
+        // Wind stream particles - initialize once
         this.windStreams = [];
-        this.initWindStreams();
+        this.windStreamsInitialized = false;
         
         // Generate grass tufts for more visual detail
-        this.grassTufts = this.generateGrassTufts();
+        this.grassTufts = [];
+        this.grassTuftsInitialized = false;
         
         // Wind indicator smoothing
         this.smoothWindRotation = 0;
@@ -40,8 +52,14 @@ class Renderer {
      */
     resizeCanvas() {
         const container = this.canvas.parentElement;
-        this.canvas.width = container.clientWidth;
-        this.canvas.height = container.clientHeight;
+        if (!container) {
+            console.warn('Canvas has no parent element, using default dimensions');
+            this.canvas.width = 800;
+            this.canvas.height = 500;
+        } else {
+            this.canvas.width = container.clientWidth;
+            this.canvas.height = container.clientHeight;
+        }
         
         // Calculate scale factor (pixels per meter)
         this.scale = this.canvas.width / (this.worldWidth * 1.2); // Add some padding
@@ -49,6 +67,20 @@ class Renderer {
         // Make sure there's extra room at the bottom for the wheels
         const groundOffset = this.wheelRadius * 1.5 * this.scale;
         this.groundLevel = this.canvas.height - groundOffset;
+        
+        // Initialize particles only once
+        if (!this.cloudsInitialized) {
+            this.initClouds();
+            this.cloudsInitialized = true;
+        }
+        if (!this.windStreamsInitialized) {
+            this.initWindStreams();
+            this.windStreamsInitialized = true;
+        }
+        if (!this.grassTuftsInitialized) {
+            this.grassTufts = this.generateGrassTufts();
+            this.grassTuftsInitialized = true;
+        }
     }
     
     /**
@@ -97,6 +129,7 @@ class Renderer {
         return {
             x: Math.random() * this.worldWidth - this.worldWidth / 2,
             y: Math.random() * 6, // Height between 0-6 meters (increased range)
+            baseY: Math.random() * 6, // Store base Y position for wave motion
             length: Math.random() * 0.5 + 0.2, // Length between 0.2-0.7 meters (increased)
             alpha: Math.random() * 0.4 + 0.2, // Transparency between 0.2-0.6 (more visible)
             speed: 0, // Will be updated based on wind
@@ -193,8 +226,9 @@ class Renderer {
         const ctx = this.ctx;
         const groundLevel = this.worldToScreen(0, 0).y;
         
-        // Calculate wind effect on grass
-        const normalizedWind = windForce / this.environment.maxWindStrength || 0;
+        // Calculate wind effect on grass - prevent division by zero
+        const maxWind = this.environment.maxWindStrength || 1;
+        const normalizedWind = windForce / maxWind;
         const windSway = normalizedWind * 8; // Max 8 pixel sway
         
         this.grassTufts.forEach(tuft => {
@@ -230,7 +264,9 @@ class Renderer {
         // Update and draw each cloud
         sortedClouds.forEach(cloud => {
             // Update cloud position based on wind, with enhanced parallax effect
-            const normalizedWind = windForce / this.environment.maxWindStrength;
+            // Prevent division by zero
+            const maxWind = this.environment.maxWindStrength || 1;
+            const normalizedWind = windForce / maxWind;
             
             // Enhanced parallax: background clouds move slower, foreground clouds move faster
             const parallaxMultiplier = 0.3 + (cloud.depth * 1.4); // Range from 0.3 to 1.7
@@ -276,8 +312,9 @@ class Renderer {
     drawWindStreams(windForce) {
         const ctx = this.ctx;
         
-        // More prominent wind visualization
-        const normalizedWind = windForce / this.environment.maxWindStrength;
+        // More prominent wind visualization - prevent division by zero
+        const maxWind = this.environment.maxWindStrength || 1;
+        const normalizedWind = windForce / maxWind;
         
         // Enhanced wind properties for better visibility
         const minSpeed = 0.03;
@@ -293,10 +330,10 @@ class Renderer {
             stream.speed = effectiveWind * 0.15 + (Math.sign(effectiveWind) || 1) * minSpeed;
             stream.x += stream.speed;
             
-            // Enhanced wavy motion for more dynamic appearance
+            // Enhanced wavy motion for more dynamic appearance - use baseY to prevent drift
             const waveAmplitude = 0.03 + windMagnitude * 0.12;
             const waveFreq = 400 + windMagnitude * 200; // Faster waves with stronger wind
-            stream.y += Math.sin(performance.now() / waveFreq + stream.waveOffset) * waveAmplitude;
+            stream.y = stream.baseY + Math.sin(performance.now() / waveFreq + stream.waveOffset) * waveAmplitude;
             
             // Screen wrapping
             if (stream.x > this.worldWidth / 2) {
@@ -304,6 +341,10 @@ class Renderer {
             } else if (stream.x < -this.worldWidth / 2) {
                 stream.x = this.worldWidth / 2;
             }
+            
+            // Clamp Y position to prevent going off-screen
+            stream.y = Math.max(0.1, Math.min(6, stream.y));
+            stream.baseY = Math.max(0.1, Math.min(6, stream.baseY));
             
             // Calculate screen coordinates
             const { x: startX, y: startY } = this.worldToScreen(stream.x, stream.y);
@@ -480,8 +521,9 @@ class Renderer {
         const arrow = document.getElementById('windArrow');
         if (!arrow) return;
         
-        // Normalize wind to -1 to 1 range
-        const normalizedWind = windForce / this.environment.maxWindStrength;
+        // Normalize wind to -1 to 1 range - prevent division by zero
+        const maxWind = this.environment.maxWindStrength || 1;
+        const normalizedWind = windForce / maxWind;
         
         // Calculate target rotation and strength
         const targetRotation = normalizedWind < 0 ? 180 : 0;
@@ -510,6 +552,32 @@ class Renderer {
     }
     
     /**
+     * Clean up resources to prevent memory leaks
+     */
+    cleanup() {
+        // Remove event listener to prevent memory leak
+        if (this.resizeHandler) {
+            window.removeEventListener('resize', this.resizeHandler);
+            this.resizeHandler = null;
+        }
+        
+        // Clear arrays - don't just reassign
+        if (this.clouds) this.clouds.length = 0;
+        if (this.windStreams) this.windStreams.length = 0;
+        if (this.grassTufts) this.grassTufts.length = 0;
+        
+        // Reset initialization flags so they can be recreated
+        this.cloudsInitialized = false;
+        this.windStreamsInitialized = false;
+        this.grassTuftsInitialized = false;
+        
+        // Clear canvas
+        if (this.ctx) {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+    }
+    
+    /**
      * Render the entire scene
      * @param {Object} state - Current physics state
      * @param {number} windForce - Current wind force
@@ -533,7 +601,7 @@ class Renderer {
             // Sanitize windForce
             const safeWindForce = isFinite(windForce) ? windForce : 0;
             
-            // Clear canvas
+            // Clear canvas with a single operation
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
             
             // Draw scene elements (pass windForce to background for grass movement)
@@ -552,9 +620,8 @@ class Renderer {
             this.updateWindIndicator(safeWindForce);
         } catch (error) {
             console.error("Error in render method:", error);
-            // If rendering fails, at least draw the background
+            // If rendering fails, at least clear the canvas
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            this.drawBackground(0);
         }
     }
 };
