@@ -32,6 +32,7 @@ class Environment {
     reset() {
         this.episodeCount++;
         this.state = this.physics.createInitialState(this.initialAngleVariation);
+        this.state.lastAction = 0; // Track last action for jerk penalty
 
         // Simple curriculum: gradually increase initial angle variation
         if (this.episodeCount % 50 === 0 && this.initialAngleVariation < 10) {
@@ -50,9 +51,8 @@ class Environment {
         this.stepCount = 0;
         this.episodeOver = false;
         this.totalReward = 0;
-        this.lastAction = undefined; // Reset for smooth control reward
 
-        return { ...this.state, wind: this.currentWind, windMax: this.maxWindStrength || 0 };
+        return { ...this.state, wind: this.currentWind, windMax: this.maxWindStrength || 0, lastAction: 0 };
     }
 
     updateWind() {
@@ -80,33 +80,43 @@ class Environment {
         const angle = nextState.stickAngle;
         const uprightBonus = Math.exp(-40 * angle * angle); // ~1 near 0, drops fast
         reward += 3.5 * uprightBonus;
+        
+        // Stability bonus: reward low angular velocity (encourages damping oscillations)
+        const angVel = nextState.stickAngularVel;
+        const stabilityBonus = Math.exp(-2 * angVel * angVel); // Reward being still
+        reward += 1.5 * stabilityBonus;
 
         // Centering bonus - reward being near the middle of the map
         const x = nextState.platformPos;
         const centeringBonus = Math.exp(-0.5 * x * x); // ~1 at center, drops with distance
-        reward += 0.05 * centeringBonus;
+        reward += 0.1 * centeringBonus;
+        
+        // Future-oriented: if cart is far from center and moving away, penalize more
+        const movingAway = x * nextState.platformVel > 0 && Math.abs(x) > 2;
+        if (movingAway) {
+            reward -= 0.5;
+        }
+        
+        // Future-oriented: if cart is far from center but moving toward it, reward
+        const movingToward = x * nextState.platformVel < 0 && Math.abs(x) > 2;
+        if (movingToward) {
+            reward += 0.3;
+        }
 
         // Position penalty (keep near center) - reduced to allow more movement
         reward -= 0.005 * x * x;
 
         // Velocity penalties (small) - very gentle
         reward -= 0.001 * nextState.platformVel * nextState.platformVel;
-        reward -= 0.0005 * nextState.stickAngularVel * nextState.stickAngularVel;
+
+        // Action smoothness: penalize large changes in action (jerk)
+        const prevAction = prevState.lastAction || 0;
+        const actionChange = Math.abs(action - prevAction);
+        reward -= 0.01 * actionChange;
 
         // Small control cost to discourage unnecessary large actions
         const actMag = Math.abs(action);
         reward -= 0.005 * actMag;
-        
-        // Bonus for smooth control (penalize large changes in action)
-        if (this.lastAction !== undefined) {
-            const actionChange = Math.abs(action - this.lastAction);
-            reward -= 0.01 * actionChange; // Encourage smooth control
-        }
-        this.lastAction = action;
-        
-        // Long-term stability bonus - grows with time balanced
-        const stabilityBonus = Math.min(this.stepCount / 1000, 2.0); // Caps at +2 after 1000 steps
-        reward += stabilityBonus;
 
         return reward;
     }
@@ -114,6 +124,7 @@ class Environment {
     step(action) {
         const wind = this.updateWind();
         const next = this.physics.update(this.state, action, wind);
+        next.lastAction = action; // Store for next iteration
 
         const done = this.physics.hasStickFallen(next) || this.stepCount >= this.maxSteps;
         const reward = this.calculateReward(this.state, action, next, done);
@@ -122,7 +133,7 @@ class Environment {
         this.state = next;
 
         return {
-            state: { ...this.state, wind: this.currentWind, windMax: this.maxWindStrength || 0 },
+            state: { ...this.state, wind: this.currentWind, windMax: this.maxWindStrength || 0, lastAction: action },
             reward,
             done,
             wind: this.currentWind,

@@ -307,11 +307,13 @@ document.addEventListener('DOMContentLoaded', () => {
             this.fallenSounds = [
                 this.sounds.fallen,
                 new Audio(this.sounds.fallen.src),
+                new Audio(this.sounds.fallen.src),
+                new Audio(this.sounds.fallen.src),
                 new Audio(this.sounds.fallen.src)
             ];
             // Set a lower volume for all fallen sound instances
             this.fallenSounds.forEach(sound => {
-                sound.volume = 0.3; // Lower volume from default 1.0 to 0.3
+                sound.volume = 0.8; // Increase for clear audibility
             });
             this.currentFallenSoundIndex = 0;
             
@@ -490,6 +492,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset the simulation
         reset() {
             this.stop();
+            // Show a quick reset overlay on manual reset as well
+            this.showResetOverlay();
             
             // Clean up renderer resources properly
             if (this.renderer) {
@@ -611,6 +615,49 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error("Error showing record notification:", error);
             }
         }
+
+        // Show a faint 'Reset' text over the canvas that fades out after 0.5s
+        showResetOverlay() {
+            try {
+                const container = canvas.parentElement;
+                if (!container) return;
+
+                // Remove any existing overlay
+                const existing = container.querySelector('.reset-overlay');
+                if (existing) {
+                    existing.remove();
+                }
+
+                const overlay = document.createElement('div');
+                overlay.className = 'reset-overlay';
+                Object.assign(overlay.style, {
+                    position: 'absolute',
+                    left: '50%',
+                    top: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    color: 'rgba(255,255,255,0.9)',
+                    textShadow: '0 2px 6px rgba(0,0,0,0.6)',
+                    fontSize: '40px',
+                    fontWeight: 'bold',
+                    pointerEvents: 'none',
+                    zIndex: '1000',
+                    opacity: '1',
+                    transition: 'opacity 0.5s ease-out'
+                });
+                overlay.textContent = 'Reset';
+                container.appendChild(overlay);
+
+                // Fade out and remove after 0.5s
+                requestAnimationFrame(() => {
+                    overlay.style.opacity = '0';
+                });
+                setTimeout(() => {
+                    overlay.remove();
+                }, 500);
+            } catch (e) {
+                console.warn('Failed to show reset overlay', e);
+            }
+        }
         
         /**
          * Update charts with latest data (throttled)
@@ -635,17 +682,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Update best duration (in seconds)
             bestDuration.textContent = bestDurationSeconds.toFixed(1) + 's';
             
-            // Check if new record was achieved
-            if (bestDurationSeconds > this.bestDurationSoFar) {
-                // Play new record sound
-                this.newRecordSound.play().catch(err => console.error("Error playing new record sound:", err));
-                
-                // Show notification
-                this.showNewRecordNotification(bestDurationSeconds);
-                
-                // Update recorded best duration
-                this.bestDurationSoFar = bestDurationSeconds;
-            }
+            // Note: new-record handling now occurs immediately at episode end (not throttled)
             
             // Update last reward
             lastReward.textContent = stats.lastReward.toFixed(1);
@@ -658,36 +695,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 avgReward100.textContent = stats.avgRewardLast100.toFixed(1);
             }
             
-            // Limit the number of data points more aggressively
-            const maxDataPoints = 300; // Reduced from 500
+            // Rolling window of last 100 episodes
+            const maxDataPoints = 100;
             
             // Update reward chart with decimation for performance
-            const rewardData = [...stats.episodeRewards];
-            let decimatedRewardData = rewardData;
-            if (rewardData.length > maxDataPoints) {
-                const decimationFactor = Math.ceil(rewardData.length / maxDataPoints);
-                decimatedRewardData = rewardData.filter((_, i) => i % decimationFactor === 0);
-            }
+            const rewardData = stats.episodeRewards.slice(-maxDataPoints);
+            const decimatedRewardData = rewardData; // already windowed
             
-            rewardsChart.data.labels = Array.from(
-                { length: decimatedRewardData.length }, 
-                (_, i) => (i * (rewardData.length / decimatedRewardData.length)).toFixed(0)
-            );
+            rewardsChart.data.labels = Array.from({ length: decimatedRewardData.length }, (_, i) => `${stats.episodeRewards.length - rewardData.length + i + 1}`);
             rewardsChart.data.datasets[0].data = decimatedRewardData;
             rewardsChart.update('none'); // 'none' disables animations
             
             // Update duration chart with decimation
-            const durationData = [...stats.episodeDurations].map(steps => steps * timestep);
-            let decimatedDurationData = durationData;
-            if (durationData.length > maxDataPoints) {
-                const decimationFactor = Math.ceil(durationData.length / maxDataPoints);
-                decimatedDurationData = durationData.filter((_, i) => i % decimationFactor === 0);
-            }
+            const durationData = stats.episodeDurations.slice(-maxDataPoints).map(steps => steps * timestep);
+            const decimatedDurationData = durationData; // already windowed
             
-            durationChart.data.labels = Array.from(
-                { length: decimatedDurationData.length }, 
-                (_, i) => (i * (durationData.length / decimatedDurationData.length)).toFixed(0)
-            );
+            durationChart.data.labels = Array.from({ length: decimatedDurationData.length }, (_, i) => `${stats.episodeDurations.length - durationData.length + i + 1}`);
             durationChart.data.datasets[0].data = decimatedDurationData;
             durationChart.options.scales.y.title = {
                 display: true,
@@ -696,17 +719,10 @@ document.addEventListener('DOMContentLoaded', () => {
             durationChart.update('none');
             
             // Update weight change chart with decimation
-            const weightChangeData = [...stats.weightChanges];
-            let decimatedWeightData = weightChangeData;
-            if (weightChangeData.length > maxDataPoints) {
-                const decimationFactor = Math.ceil(weightChangeData.length / maxDataPoints);
-                decimatedWeightData = weightChangeData.filter((_, i) => i % decimationFactor === 0);
-            }
+            const weightChangeData = stats.weightChanges.slice(-maxDataPoints);
+            const decimatedWeightData = weightChangeData; // already windowed
             
-            weightChangeChart.data.labels = Array.from(
-                { length: decimatedWeightData.length }, 
-                (_, i) => (i * (weightChangeData.length / decimatedWeightData.length)).toFixed(0)
-            );
+            weightChangeChart.data.labels = Array.from({ length: decimatedWeightData.length }, (_, i) => `${stats.weightChanges.length - weightChangeData.length + i + 1}`);
             weightChangeChart.data.datasets[0].data = decimatedWeightData;
             weightChangeChart.update('none');
         }
@@ -822,6 +838,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         // Record episode statistics
                         this.agent.endEpisode(this.episodeSteps, result.totalReward);
                         
+                        // Immediate new-record detection (not throttled)
+                        const bestDurationSeconds = this.agent.bestDuration * this.environment.physics.timestep;
+                        if (bestDurationSeconds > this.bestDurationSoFar && this.newRecordSound) {
+                            // Play new record sound immediately
+                            try { this.newRecordSound.currentTime = 0; } catch {}
+                            this.newRecordSound.play().catch(err => console.error('Error playing new record sound:', err));
+                            this.showNewRecordNotification(bestDurationSeconds);
+                            this.bestDurationSoFar = bestDurationSeconds;
+                        }
+
                         // Decay exploration rate
                         this.agent.decayExploration();
                         
@@ -843,15 +869,38 @@ document.addEventListener('DOMContentLoaded', () => {
                             );
                         }
                         
-                        // Play fallen sound if needed
-                        if (this.environment.physics.hasStickFallen(this.currentState) && this.fallenSounds) {
+                        // Play fallen sound immediately and show overlay when the stick actually fell
+                        if (this.fallenSounds && this.environment.physics.hasStickFallen(result.state)) {
+                            // Temporarily duck/pause gravel so fallen is clearly audible
+                            let resumeGravel = false;
+                            if (this.gravelSound && this.gravelSoundStarted && !this.gravelSound.paused) {
+                                try {
+                                    this.gravelSound.pause();
+                                    resumeGravel = true;
+                                } catch {}
+                            }
+
                             // Rotate through fallen sound instances to allow overlapping
                             const fallenSound = this.fallenSounds[this.currentFallenSoundIndex];
-                            fallenSound.currentTime = 0;
-                            fallenSound.play().catch(err => console.error("Error playing fallen sound:", err));
-                            
+                            try { fallenSound.currentTime = 0; } catch {}
+                            fallenSound.play().catch(err => console.error('Error playing fallen sound:', err));
                             // Move to next sound instance
                             this.currentFallenSoundIndex = (this.currentFallenSoundIndex + 1) % this.fallenSounds.length;
+
+                            // Show faint reset overlay synced with fallen sound duration (0.5s)
+                            this.showResetOverlay();
+
+                            // Resume gravel after 0.5s
+                            if (resumeGravel) {
+                                setTimeout(() => {
+                                    try {
+                                        // Only resume if we are still running
+                                        if (this.isRunning && this.gravelSound && this.gravelSound.paused) {
+                                            this.gravelSound.play().catch(() => {});
+                                        }
+                                    } catch {}
+                                }, 500);
+                            }
                         }
                         
                         // Reset environment for next episode

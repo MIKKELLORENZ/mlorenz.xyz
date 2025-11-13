@@ -12,28 +12,31 @@ class Agent {
         this.minExplorationRate = params.minExplorationRate || 0.05;
         this.explorationDecay = params.explorationDecay || 0.995;
 
-        // Net sizes
-        this.inputSize = 7;        // x, xdot, theta, thetadot, wind, sin(theta), cos(theta)
-        this.hiddenSize = 128;
-        this.outputSize = 9;       // fewer, stronger discrete actions
+    // Net sizes (reverted to single hidden layer for performance)
+    this.inputSize = 7;        // x, xdot, theta, thetadot, wind, sin(theta), cos(theta)
+    this.hiddenSize = 128;     // Single hidden layer
+    this.outputSize = 9;       // fewer, stronger discrete actions
 
         // Replay
         this.replayBuffer = [];
         this.replayBufferSize = 50000;
         this.batchSize = 128;
         this.minReplaySize = 500; // Reduced from 1000 for faster initial learning
-
+        
         // Prioritized Experience Replay
-        this.priorities = [];
-        this.priorityAlpha = 0.6; // How much to use priorities (0=uniform, 1=full priority)
-        this.priorityBeta = 0.4;  // Importance sampling weight (increases to 1)
-        this.priorityBetaIncrement = 0.001;
-        this.priorityEpsilon = 0.01; // Small constant to ensure non-zero probabilities
+        this.usePER = true;
+        this.perAlpha = 0.6;      // How much prioritization to use
+        this.perBeta = 0.4;       // Importance sampling correction
+        this.perBetaIncrement = 0.001; // Anneal to 1.0 over time
+        this.perEpsilon = 1e-6;   // Small constant to prevent zero priority
 
         // Double DQN / target update
         this.stepCount = 0;
         this.tau = 0.005;          // soft update every step
-        this.targetUpdateFreq = 4; // Only update target every N steps for more stability
+        
+        // Action smoothing for temporal coherence
+        this.lastAction = 0;
+        this.actionSmoothingFactor = 0.3; // Blend between last action and new action
 
         // Networks
         this.mainNetwork = this.createNetwork();
@@ -59,9 +62,6 @@ class Agent {
         this.initialWeights = this.copyWeights(this.mainNetwork);
 
         this.avgRewardLast100 = 0;
-        
-        // Gradient clipping for stability
-        this.maxGradNorm = 10.0; // Clip gradients to this L2 norm
     }
 
     _createAdamState(templateNet) {
@@ -112,7 +112,7 @@ class Agent {
     // Scaling helpers
     _tanhClip(v, s) { return Math.tanh(v / s); }
 
-    // Forward pass with consistent scaling
+    // Forward pass with consistent scaling (single hidden layer)
     forwardPass(network, state) {
         // Robust normalization
         const windMax = (state.windMax && state.windMax > 0) ? state.windMax : 10;
@@ -126,15 +126,14 @@ class Agent {
             Math.sin(theta),
             Math.cos(theta)
         ];
-
-        // Hidden
+        // Hidden layer
         const hidden = new Array(this.hiddenSize);
         for (let i = 0; i < this.hiddenSize; i++) {
             let sum = network.b1[i];
             for (let j = 0; j < this.inputSize; j++) sum += input[j] * network.w1[j * this.hiddenSize + i];
             hidden[i] = sum > 0 ? sum : 0; // ReLU
         }
-        // Output (Q-values)
+        // Output layer (Q-values)
         const output = new Array(this.outputSize);
         for (let i = 0; i < this.outputSize; i++) {
             let sum = network.b2[i];
@@ -159,82 +158,106 @@ class Agent {
 
     selectAction(state) {
         if (Math.random() < this.explorationRate) {
-            return this.indexToAction(Math.floor(Math.random() * this.outputSize));
+            const randomAction = this.indexToAction(Math.floor(Math.random() * this.outputSize));
+            // Apply action smoothing even to random actions for temporal coherence
+            const smoothedAction = this.actionSmoothingFactor * this.lastAction + 
+                                   (1 - this.actionSmoothingFactor) * randomAction;
+            this.lastAction = smoothedAction;
+            return smoothedAction;
         }
         const { output } = this.forwardPass(this.mainNetwork, state);
         let best = 0;
         for (let i = 1; i < output.length; i++) if (output[i] > output[best]) best = i;
         
-        // After exploration is low, be fully deterministic for long-term stability
-        // Only add noise during high exploration phase
-        if (this.explorationRate > 0.15 && Math.random() < 0.05) {
+        // Add small epsilon-greedy even when exploiting to prevent getting stuck
+        if (Math.random() < 0.05) {
             const alternatives = [Math.max(0, best - 1), best, Math.min(this.outputSize - 1, best + 1)];
-            return this.indexToAction(alternatives[Math.floor(Math.random() * alternatives.length)]);
+            const selectedAction = this.indexToAction(alternatives[Math.floor(Math.random() * alternatives.length)]);
+            // Apply action smoothing
+            const smoothedAction = this.actionSmoothingFactor * this.lastAction + 
+                                   (1 - this.actionSmoothingFactor) * selectedAction;
+            this.lastAction = smoothedAction;
+            return smoothedAction;
         }
-        return this.indexToAction(best);
+        
+        const selectedAction = this.indexToAction(best);
+        // Apply action smoothing for temporal coherence
+        const smoothedAction = this.actionSmoothingFactor * this.lastAction + 
+                               (1 - this.actionSmoothingFactor) * selectedAction;
+        this.lastAction = smoothedAction;
+        return smoothedAction;
     }
 
     addExperience(state, action, reward, nextState, done) {
-        if (this.replayBuffer.length >= this.replayBufferSize) {
-            this.replayBuffer.shift();
-            this.priorities.shift();
-        }
+        if (this.replayBuffer.length >= this.replayBufferSize) this.replayBuffer.shift();
+        
+        // For PER: initialize with max priority
+        const maxPriority = this.replayBuffer.length > 0 
+            ? Math.max(...this.replayBuffer.map(e => e.priority || 1))
+            : 1;
+        
         this.replayBuffer.push({
             state: { ...state },
             action, reward,
             nextState: { ...nextState },
-            done
+            done,
+            priority: maxPriority // New experiences get high priority
         });
-        
-        // New experiences get max priority to ensure they're sampled
-        const maxPriority = this.priorities.length > 0 ? Math.max(...this.priorities) : 1.0;
-        this.priorities.push(maxPriority);
     }
 
     sampleBatch() {
         if (this.replayBuffer.length < this.minReplaySize) return null;
         
-        // Prioritized sampling
-        const batch = new Array(this.batchSize);
-        const indices = new Array(this.batchSize);
-        const weights = new Array(this.batchSize);
-        
-        // Calculate sampling probabilities
-        const alpha = this.priorityAlpha;
-        let prioritySum = 0;
-        const probs = new Array(this.priorities.length);
-        for (let i = 0; i < this.priorities.length; i++) {
-            probs[i] = Math.pow(this.priorities[i] + this.priorityEpsilon, alpha);
-            prioritySum += probs[i];
+        if (!this.usePER) {
+            // Uniform sampling (original behavior)
+            const batch = new Array(this.batchSize);
+            for (let i = 0; i < this.batchSize; i++) {
+                batch[i] = this.replayBuffer[Math.floor(Math.random() * this.replayBuffer.length)];
+            }
+            return batch;
         }
+        
+        // Prioritized sampling
+        const priorities = this.replayBuffer.map(e => 
+            Math.pow(e.priority + this.perEpsilon, this.perAlpha)
+        );
+        const sumPriorities = priorities.reduce((a, b) => a + b, 0);
+        const probs = priorities.map(p => p / sumPriorities);
+        
+        const batch = [];
+        const indices = [];
+        const weights = [];
         
         // Sample with replacement based on priorities
         for (let i = 0; i < this.batchSize; i++) {
-            let rand = Math.random() * prioritySum;
+            let r = Math.random();
+            let cumProb = 0;
             let idx = 0;
-            let cumSum = 0;
-            for (idx = 0; idx < probs.length; idx++) {
-                cumSum += probs[idx];
-                if (rand <= cumSum) break;
+            
+            for (let j = 0; j < this.replayBuffer.length; j++) {
+                cumProb += probs[j];
+                if (r <= cumProb) {
+                    idx = j;
+                    break;
+                }
             }
-            indices[i] = Math.min(idx, this.replayBuffer.length - 1);
-            batch[i] = this.replayBuffer[indices[i]];
+            
+            batch.push(this.replayBuffer[idx]);
+            indices.push(idx);
             
             // Importance sampling weight
-            const prob = probs[indices[i]] / prioritySum;
-            weights[i] = Math.pow(this.replayBuffer.length * prob, -this.priorityBeta);
+            const weight = Math.pow(this.replayBuffer.length * probs[idx], -this.perBeta);
+            weights.push(weight);
         }
         
         // Normalize weights
         const maxWeight = Math.max(...weights);
-        for (let i = 0; i < weights.length; i++) {
-            weights[i] /= maxWeight;
-        }
+        const normalizedWeights = weights.map(w => w / maxWeight);
         
-        // Increase beta over time (anneal to 1.0)
-        this.priorityBeta = Math.min(1.0, this.priorityBeta + this.priorityBetaIncrement);
+        // Anneal beta toward 1.0
+        this.perBeta = Math.min(1.0, this.perBeta + this.perBetaIncrement);
         
-        return { batch, indices, weights };
+        return { experiences: batch, indices, weights: normalizedWeights };
     }
 
     // Huber loss gradient
@@ -246,22 +269,24 @@ class Agent {
     trainOnBatch(batchData) {
         if (!batchData) return 0;
         
-        const { batch, indices, weights } = batchData;
+        // Handle both PER and uniform sampling
+        const batch = this.usePER ? batchData.experiences : batchData;
+        const weights = this.usePER ? batchData.weights : new Array(batch.length).fill(1);
+        const indices = this.usePER ? batchData.indices : null;
 
         // Accumulate grads
-        const gW1 = new Array(this.mainNetwork.w1.length).fill(0);
-        const gB1 = new Array(this.mainNetwork.b1.length).fill(0);
-        const gW2 = new Array(this.mainNetwork.w2.length).fill(0);
-        const gB2 = new Array(this.mainNetwork.b2.length).fill(0);
+    const gW1 = new Array(this.mainNetwork.w1.length).fill(0);
+    const gB1 = new Array(this.mainNetwork.b1.length).fill(0);
+    const gW2 = new Array(this.mainNetwork.w2.length).fill(0);
+    const gB2 = new Array(this.mainNetwork.b2.length).fill(0);
 
         let totalLoss = 0;
-        const newPriorities = new Array(batch.length);
+        const tdErrors = []; // For updating priorities
 
         for (let batchIdx = 0; batchIdx < batch.length; batchIdx++) {
             const exp = batch[batchIdx];
-            const weight = weights[batchIdx];
-            
             const { state, action, reward, nextState, done } = exp;
+            const weight = weights[batchIdx];
 
             // Q(s,·)
             const fMain = this.forwardPass(this.mainNetwork, state);
@@ -278,15 +303,15 @@ class Agent {
             const aIdx = this.actionToIndex(action);
             const target = reward + bootstrap;
 
-            // TD error for priority update
+            // TD error for PER
             const tdError = Math.abs(qCurrent[aIdx] - target);
-            newPriorities[batchIdx] = tdError;
+            tdErrors.push(tdError);
 
             // Huber loss on the chosen action output only; others target themselves
             const targetVec = qCurrent.slice();
             targetVec[aIdx] = target;
 
-            // Backprop (one pass) - scale by importance sampling weight
+            // Backprop (now with 3 layers)
             const hidden = fMain.hidden;
             const input = fMain.input;
 
@@ -294,24 +319,22 @@ class Agent {
             const outputError = new Array(this.outputSize).fill(0);
             for (let i = 0; i < this.outputSize; i++) {
                 const err = (qCurrent[i] - targetVec[i]);
-                const grad = this._huberGrad(err) * weight; // Apply IS weight
+                const grad = this._huberGrad(err) * weight;
                 outputError[i] = grad;
                 gB2[i] += grad;
                 for (let j = 0; j < this.hiddenSize; j++) {
                     gW2[j * this.outputSize + i] += grad * hidden[j];
                 }
-                // loss for logging (approx)
-                totalLoss += 0.5 * Math.min(err * err, Math.abs(err));
+                totalLoss += weight * 0.5 * Math.min(err * err, Math.abs(err));
             }
 
-            // Hidden
+            // Hidden layer backprop
             const hiddenError = new Array(this.hiddenSize).fill(0);
             for (let i = 0; i < this.hiddenSize; i++) {
                 let e = 0;
                 for (let j = 0; j < this.outputSize; j++) {
                     e += outputError[j] * this.mainNetwork.w2[i * this.outputSize + j];
                 }
-                // ReLU derivative
                 hiddenError[i] = (hidden[i] > 0 ? e : 0);
                 gB1[i] += hiddenError[i];
                 for (let j = 0; j < this.inputSize; j++) {
@@ -320,31 +343,23 @@ class Agent {
             }
         }
         
-        // Update priorities in buffer
-        for (let i = 0; i < indices.length; i++) {
-            this.priorities[indices[i]] = newPriorities[i];
+        // Update priorities in replay buffer for PER
+        if (this.usePER && indices) {
+            for (let i = 0; i < indices.length; i++) {
+                this.replayBuffer[indices[i]].priority = tdErrors[i];
+            }
         }
-
-        // Calculate gradient norm for clipping
-        let gradNorm = 0;
-        for (let i = 0; i < gW1.length; i++) gradNorm += gW1[i] * gW1[i];
-        for (let i = 0; i < gB1.length; i++) gradNorm += gB1[i] * gB1[i];
-        for (let i = 0; i < gW2.length; i++) gradNorm += gW2[i] * gW2[i];
-        for (let i = 0; i < gB2.length; i++) gradNorm += gB2[i] * gB2[i];
-        gradNorm = Math.sqrt(gradNorm);
-        
-        // Global gradient clipping
-        const clipScale = gradNorm > this.maxGradNorm ? this.maxGradNorm / gradNorm : 1.0;
 
         // Apply grads with Adam
         this.adamStep++;
         const t = this.adamStep;
         const lr = this.learningRate;
         const b1 = this.adamBeta1, b2 = this.adamBeta2, eps = this.adamEps;
+        const clip = g => Math.max(-5, Math.min(5, g));
 
         // w1
         for (let i = 0; i < this.mainNetwork.w1.length; i++) {
-            const grad = (gW1[i] / batch.length) * clipScale;
+            const grad = clip(gW1[i] / batch.length);
             this.opt.w1m[i] = b1 * this.opt.w1m[i] + (1 - b1) * grad;
             this.opt.w1v[i] = b2 * this.opt.w1v[i] + (1 - b2) * grad * grad;
             const mHat = this.opt.w1m[i] / (1 - Math.pow(b1, t));
@@ -353,7 +368,7 @@ class Agent {
         }
         // b1
         for (let i = 0; i < this.mainNetwork.b1.length; i++) {
-            const grad = (gB1[i] / batch.length) * clipScale;
+            const grad = clip(gB1[i] / batch.length);
             this.opt.b1m[i] = b1 * this.opt.b1m[i] + (1 - b1) * grad;
             this.opt.b1v[i] = b2 * this.opt.b1v[i] + (1 - b2) * grad * grad;
             const mHat = this.opt.b1m[i] / (1 - Math.pow(b1, t));
@@ -362,7 +377,7 @@ class Agent {
         }
         // w2
         for (let i = 0; i < this.mainNetwork.w2.length; i++) {
-            const grad = (gW2[i] / batch.length) * clipScale;
+            const grad = clip(gW2[i] / batch.length);
             this.opt.w2m[i] = b1 * this.opt.w2m[i] + (1 - b1) * grad;
             this.opt.w2v[i] = b2 * this.opt.w2v[i] + (1 - b2) * grad * grad;
             const mHat = this.opt.w2m[i] / (1 - Math.pow(b1, t));
@@ -371,7 +386,7 @@ class Agent {
         }
         // b2
         for (let i = 0; i < this.mainNetwork.b2.length; i++) {
-            const grad = (gB2[i] / batch.length) * clipScale;
+            const grad = clip(gB2[i] / batch.length);
             this.opt.b2m[i] = b1 * this.opt.b2m[i] + (1 - b1) * grad;
             this.opt.b2v[i] = b2 * this.opt.b2v[i] + (1 - b2) * grad * grad;
             const mHat = this.opt.b2m[i] / (1 - Math.pow(b1, t));
@@ -389,13 +404,9 @@ class Agent {
             // Adaptive number of updates per step - more aggressive early on
             const updates = this.episodeCount < 50 ? 8 : (this.episodeCount < 150 ? 6 : (this.episodeCount < 300 ? 4 : 2));
             for (let k = 0; k < updates; k++) {
-                const batchData = this.sampleBatch();
-                this.trainOnBatch(batchData);
-                
-                // Only update target network every N steps for more stability
-                if (this.stepCount % this.targetUpdateFreq === 0) {
-                    this.softUpdateTarget();
-                }
+                const batch = this.sampleBatch();
+                this.trainOnBatch(batch);
+                this.softUpdateTarget();
             }
         }
         this.stepCount++;
@@ -431,6 +442,9 @@ class Agent {
 
         this.avgRewardLast100 = this.episodeRewards.slice(-100)
             .reduce((a, b) => a + b, 0) / Math.min(100, this.episodeRewards.length);
+        
+        // Reset action smoothing for new episode
+        this.lastAction = 0;
     }
 
     decayExploration() {

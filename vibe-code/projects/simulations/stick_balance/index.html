@@ -12,7 +12,18 @@
             <canvas id="simulationCanvas"></canvas>
             <div class="wind-indicator">
                 <h3>Wind</h3>
-                <div id="windArrow"></div>
+                <div class="wind-row">
+                    <div id="windArrow" aria-label="wind direction"></div>
+                    <div id="windSpeed" aria-live="polite">0.0 m/s</div>
+                </div>
+            </div>
+            <div class="accel-indicator">
+                <h3>Thrust</h3>
+                <div class="accel-bar" aria-label="thrust meter">
+                    <div class="accel-fill accel-left" id="accelLeft"></div>
+                    <div class="accel-center-line"></div>
+                    <div class="accel-fill accel-right" id="accelRight"></div>
+                </div>
             </div>
         </div>
         
