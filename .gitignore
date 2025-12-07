@@ -1,2 +1,5 @@
 *.keras
 *.pyc
+vibe-code/projects/games/mall_walk/generate-cert.ps1
+vibe-code/projects/games/mall_walk/key.pem
+vibe-code/projects/games/mall_walk/cert.pem

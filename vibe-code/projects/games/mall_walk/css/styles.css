@@ -1,0 +1,1101 @@
+/* ========================================
+   MALL WALK '92 - Vaporwave Stylesheet
+   ======================================== */
+
+/* CSS Variables - Vaporwave Color Palette */
+:root {
+    --interaction-bg: rgba(0, 0, 0, 0.7);
+
+    --neon-pink: #ff71ce;
+    --neon-blue: #01cdfe;
+    --neon-green: #05ffa1;
+    --neon-purple: #b967ff;
+    --neon-yellow: #fffb96;
+    --deep-purple: #1a0a2e;
+    --soft-purple: #dda0dd;
+    --coral: #ff7f50;
+    --teal: #00ced1;
+    --chrome: #c0c0c0;
+    --white: #ffffff;
+    --black: #0a0a0a;
+    --gradient-sky: linear-gradient(180deg, #ffafbd 0%, #ffc3a0 50%, #c9d6ff 100%);
+}
+
+/* Reset & Base */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: 'Syncopate', sans-serif;
+    background: var(--deep-purple);
+    color: var(--white);
+    /* Prevent zooming and scrolling on mobile */
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Hidden utility class */
+.hidden {
+    display: none !important;
+}
+
+/* Desktop/Mobile visibility helpers */
+.mobile-only {
+    display: none !important;
+}
+
+.desktop-only {
+    display: block;
+}
+
+/* Show mobile elements on touch devices */
+@media (pointer: coarse), (max-width: 768px) {
+    .mobile-only {
+        display: block !important;
+    }
+    
+    .desktop-only {
+        display: none !important;
+    }
+}
+
+/* ========================================
+   LOADING SCREEN
+   ======================================== */
+#loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #1a0a2e 0%, #2d1b4e 50%, #1a0a2e 100%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.loading-content {
+    text-align: center;
+    position: relative;
+}
+
+.mall-title {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 4rem;
+    color: var(--neon-pink);
+    text-shadow: 
+        0 0 10px var(--neon-pink),
+        0 0 20px var(--neon-pink),
+        0 0 40px var(--neon-pink),
+        0 0 80px var(--neon-purple);
+    letter-spacing: 0.2em;
+    animation: neonFlicker 2s infinite alternate;
+}
+
+.mall-subtitle {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 2rem;
+    color: var(--neon-blue);
+    text-shadow: 
+        0 0 10px var(--neon-blue),
+        0 0 20px var(--neon-blue),
+        0 0 40px var(--neon-blue);
+    margin-top: 0.5rem;
+    letter-spacing: 0.5em;
+}
+
+.loading-bar-container {
+    width: 300px;
+    height: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 2px solid var(--neon-blue);
+    border-radius: 10px;
+    margin: 2rem auto;
+    overflow: hidden;
+    box-shadow: 
+        0 0 10px var(--neon-blue),
+        inset 0 0 10px rgba(1, 205, 254, 0.2);
+}
+
+.loading-bar {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, var(--neon-pink), var(--neon-blue), var(--neon-purple));
+    background-size: 200% 100%;
+    animation: gradientMove 1s linear infinite;
+    transition: width 0.3s ease;
+}
+
+.loading-text {
+    font-size: 0.8rem;
+    color: var(--neon-green);
+    text-transform: uppercase;
+    letter-spacing: 0.3em;
+    animation: blink 1s infinite;
+}
+
+/* Palm decorations for loading screen */
+.palm-decoration {
+    position: absolute;
+    width: 100px;
+    height: 150px;
+    background: linear-gradient(to top, var(--neon-green), transparent);
+    opacity: 0.3;
+    clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+}
+
+.palm-decoration.left {
+    left: -150px;
+    bottom: -50px;
+    transform: rotate(-15deg);
+}
+
+.palm-decoration.right {
+    right: -150px;
+    bottom: -50px;
+    transform: rotate(15deg);
+}
+
+/* ========================================
+   START SCREEN
+   ======================================== */
+#start-screen,
+#name-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #1a0a2e 0%, #2d1b4e 50%, #1a0a2e 100%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 999;
+}
+
+.start-content {
+    text-align: center;
+}
+
+/* Name input container */
+.name-input-container {
+    margin: 2rem 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+.name-label {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 0.8rem;
+    color: var(--neon-blue);
+    text-shadow: 0 0 10px var(--neon-blue);
+    letter-spacing: 0.2em;
+}
+
+.neon-input {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 1.2rem;
+    padding: 1rem 2rem;
+    background: rgba(0, 0, 0, 0.6);
+    border: 3px solid var(--neon-blue);
+    color: var(--white);
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    outline: none;
+    transition: all 0.3s ease;
+    box-shadow: 
+        0 0 10px var(--neon-blue),
+        inset 0 0 10px rgba(1, 205, 254, 0.2);
+    width: 300px;
+}
+
+.neon-input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.neon-input:focus {
+    border-color: var(--neon-pink);
+    box-shadow: 
+        0 0 20px var(--neon-pink),
+        0 0 40px var(--neon-pink),
+        inset 0 0 15px rgba(255, 113, 206, 0.3);
+}
+
+.tagline {
+    font-size: 1.2rem;
+    color: var(--soft-purple);
+    margin: 1rem 0 2rem;
+    font-style: italic;
+    letter-spacing: 0.2em;
+}
+
+.neon-button {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 1rem;
+    padding: 1.5rem 3rem;
+    background: transparent;
+    border: 3px solid var(--neon-pink);
+    color: var(--neon-pink);
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    box-shadow: 
+        0 0 10px var(--neon-pink),
+        0 0 20px rgba(255, 113, 206, 0.5),
+        inset 0 0 10px rgba(255, 113, 206, 0.2);
+}
+
+.neon-button:hover {
+    background: var(--neon-pink);
+    color: var(--deep-purple);
+    box-shadow: 
+        0 0 20px var(--neon-pink),
+        0 0 40px var(--neon-pink),
+        0 0 60px var(--neon-pink);
+    transform: scale(1.05);
+}
+
+.neon-button:active {
+    transform: scale(0.98);
+}
+
+.controls-hint {
+    margin-top: 3rem;
+    font-size: 0.7rem;
+    color: var(--neon-blue);
+    opacity: 0.8;
+    letter-spacing: 0.1em;
+}
+
+.controls-hint p {
+    margin: 0.5rem 0;
+}
+
+/* Glitch effect */
+.glitch {
+    position: relative;
+}
+
+.glitch::before,
+.glitch::after {
+    content: attr(data-text);
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.glitch::before {
+    animation: glitch-1 2s infinite linear alternate-reverse;
+    color: var(--neon-blue);
+    z-index: -1;
+}
+
+.glitch::after {
+    animation: glitch-2 3s infinite linear alternate-reverse;
+    color: var(--neon-green);
+    z-index: -2;
+}
+
+/* ========================================
+   HUD (Heads Up Display)
+   ======================================== */
+#hud {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.hud-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem 2rem;
+}
+
+.mall-name {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 0.8rem;
+    color: var(--neon-pink);
+    text-shadow: 
+        0 0 5px var(--neon-pink),
+        0 0 10px var(--neon-pink);
+    letter-spacing: 0.2em;
+}
+
+.hud-controls {
+    pointer-events: auto;
+}
+
+.hud-button {
+    background: rgba(0, 0, 0, 0.6);
+    border: 2px solid var(--neon-blue);
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 0 10px rgba(1, 205, 254, 0.3);
+}
+
+.hud-button:hover {
+    background: rgba(1, 205, 254, 0.2);
+    box-shadow: 0 0 20px rgba(1, 205, 254, 0.5);
+    transform: scale(1.1);
+}
+
+.hud-button:active {
+    transform: scale(0.95);
+}
+
+.current-time {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 0.8rem;
+    color: var(--neon-blue);
+    text-shadow: 
+        0 0 5px var(--neon-blue),
+        0 0 10px var(--neon-blue);
+    background: rgba(0, 0, 0, 0.5);
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--neon-blue);
+    border-radius: 5px;
+}
+
+.hud-bottom {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 1.5rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.now-playing {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 0.8rem 1.5rem;
+    border: 1px solid var(--neon-purple);
+    border-radius: 5px;
+    font-size: 0.7rem;
+    color: var(--soft-purple);
+}
+
+.music-icon {
+    color: var(--neon-green);
+    animation: musicPulse 0.5s infinite alternate;
+    font-size: 1rem;
+}
+
+.track-name {
+    letter-spacing: 0.1em;
+}
+
+/* Connection status */
+.connection-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 0.8rem 1.5rem;
+    border: 1px solid var(--neon-blue);
+    border-radius: 5px;
+    font-size: 0.7rem;
+    color: var(--neon-blue);
+    margin-left: auto;
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+}
+
+.status-dot.online {
+    background: var(--neon-green);
+    box-shadow: 0 0 10px var(--neon-green);
+}
+
+.status-dot.offline {
+    background: var(--coral);
+    box-shadow: 0 0 10px var(--coral);
+    animation: blink 1s infinite;
+}
+
+.status-text {
+    letter-spacing: 0.1em;
+}
+
+/* Player count */
+.player-count {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 0.6rem;
+    color: var(--neon-green);
+    text-shadow: 0 0 5px var(--neon-green);
+    background: rgba(0, 0, 0, 0.5);
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--neon-green);
+    border-radius: 5px;
+}
+
+/* Voice indicator */
+.voice-indicator {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, calc(-50% + 80px));
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    background: rgba(5, 255, 161, 0.2);
+    padding: 1rem 2rem;
+    border: 2px solid var(--neon-green);
+    border-radius: 10px;
+    font-family: 'Press Start 2P', cursive;
+    font-size: 0.7rem;
+    color: var(--neon-green);
+    box-shadow: 
+        0 0 20px var(--neon-green),
+        inset 0 0 15px rgba(5, 255, 161, 0.3);
+    animation: voicePulse 0.5s ease-in-out infinite alternate;
+    z-index: 102;
+}
+
+.voice-icon {
+    font-size: 1.2rem;
+    animation: micPulse 0.3s ease-in-out infinite alternate;
+}
+
+.voice-text {
+    letter-spacing: 0.2em;
+    text-shadow: 0 0 10px var(--neon-green);
+}
+
+@keyframes voicePulse {
+    0% {
+        box-shadow: 
+            0 0 20px var(--neon-green),
+            inset 0 0 15px rgba(5, 255, 161, 0.3);
+    }
+    100% {
+        box-shadow: 
+            0 0 40px var(--neon-green),
+            inset 0 0 25px rgba(5, 255, 161, 0.5);
+    }
+}
+
+@keyframes micPulse {
+    0% { transform: scale(1); }
+    100% { transform: scale(1.2); }
+}
+
+/* Audio test button */
+.audio-test-container {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    z-index: 101;
+    pointer-events: auto;
+}
+
+.audio-test-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid var(--neon-purple);
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    cursor: pointer;
+    font-family: 'Press Start 2P', cursive;
+    font-size: 0.5rem;
+    color: var(--neon-purple);
+    transition: all 0.3s ease;
+    box-shadow: 0 0 10px rgba(185, 103, 255, 0.3);
+}
+
+.audio-test-btn:hover {
+    background: rgba(185, 103, 255, 0.2);
+    box-shadow: 0 0 20px rgba(185, 103, 255, 0.5);
+    transform: scale(1.05);
+}
+
+.audio-test-btn.active {
+    background: rgba(5, 255, 161, 0.2);
+    border-color: var(--neon-green);
+    color: var(--neon-green);
+    box-shadow: 0 0 20px rgba(5, 255, 161, 0.5);
+    animation: testPulse 1s ease-in-out infinite alternate;
+}
+
+.test-icon {
+    font-size: 1rem;
+}
+
+.test-text {
+    letter-spacing: 0.1em;
+}
+
+@keyframes testPulse {
+    0% {
+        box-shadow: 0 0 10px rgba(5, 255, 161, 0.3);
+    }
+    100% {
+        box-shadow: 0 0 25px rgba(5, 255, 161, 0.7);
+    }
+}
+
+/* Loopback indicator */
+.loopback-indicator {
+    position: fixed;
+    top: 130px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(185, 103, 255, 0.2);
+    padding: 0.6rem 1rem;
+    border: 2px solid var(--neon-purple);
+    border-radius: 8px;
+    font-family: 'Press Start 2P', cursive;
+    font-size: 0.45rem;
+    color: var(--neon-purple);
+    box-shadow: 0 0 15px rgba(185, 103, 255, 0.4);
+    animation: loopbackPulse 0.8s ease-in-out infinite alternate;
+    z-index: 101;
+    max-width: 200px;
+    text-align: center;
+    line-height: 1.4;
+}
+
+.loopback-icon {
+    font-size: 1rem;
+    animation: speakerPulse 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes loopbackPulse {
+    0% {
+        box-shadow: 0 0 10px rgba(185, 103, 255, 0.3);
+    }
+    100% {
+        box-shadow: 0 0 25px rgba(185, 103, 255, 0.6);
+    }
+}
+
+@keyframes speakerPulse {
+    0% { transform: scale(1); }
+    100% { transform: scale(1.15); }
+}
+
+/* ========================================
+   PAUSE MENU
+   ======================================== */
+#pause-menu {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(26, 10, 46, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 500;
+    backdrop-filter: blur(10px);
+}
+
+.pause-content {
+    text-align: center;
+}
+
+.pause-content h2 {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 3rem;
+    color: var(--neon-blue);
+    text-shadow: 
+        0 0 10px var(--neon-blue),
+        0 0 20px var(--neon-blue),
+        0 0 40px var(--neon-blue);
+    margin-bottom: 2rem;
+    letter-spacing: 0.3em;
+}
+
+.pause-info {
+    margin-top: 2rem;
+    font-size: 0.8rem;
+    color: var(--soft-purple);
+    opacity: 0.7;
+}
+
+/* ========================================
+   GAME CONTAINER
+   ======================================== */
+#game-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    touch-action: none; /* Prevent browser gestures on mobile */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+#game-container canvas {
+    display: block;
+    touch-action: none;
+}
+
+/* ========================================
+   ANIMATIONS
+   ======================================== */
+@keyframes neonFlicker {
+    0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
+        text-shadow: 
+            0 0 10px var(--neon-pink),
+            0 0 20px var(--neon-pink),
+            0 0 40px var(--neon-pink),
+            0 0 80px var(--neon-purple);
+    }
+    20%, 24%, 55% {
+        text-shadow: none;
+    }
+}
+
+@keyframes gradientMove {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.3; }
+}
+
+@keyframes glitch-1 {
+    0% { clip-path: inset(40% 0 61% 0); transform: translate(-2px, -2px); }
+    20% { clip-path: inset(92% 0 1% 0); transform: translate(1px, 2px); }
+    40% { clip-path: inset(43% 0 1% 0); transform: translate(-1px, 1px); }
+    60% { clip-path: inset(25% 0 58% 0); transform: translate(2px, -1px); }
+    80% { clip-path: inset(54% 0 7% 0); transform: translate(-2px, 2px); }
+    100% { clip-path: inset(58% 0 43% 0); transform: translate(1px, -2px); }
+}
+
+@keyframes glitch-2 {
+    0% { clip-path: inset(65% 0 15% 0); transform: translate(2px, 2px); }
+    20% { clip-path: inset(10% 0 85% 0); transform: translate(-1px, -2px); }
+    40% { clip-path: inset(80% 0 5% 0); transform: translate(1px, -1px); }
+    60% { clip-path: inset(15% 0 70% 0); transform: translate(-2px, 1px); }
+    80% { clip-path: inset(45% 0 40% 0); transform: translate(2px, -2px); }
+    100% { clip-path: inset(30% 0 55% 0); transform: translate(-1px, 2px); }
+}
+
+@keyframes musicPulse {
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(1.2); opacity: 0.7; }
+}
+
+/* ========================================
+   CROSSHAIR (optional)
+   ======================================== */
+.crosshair {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px;
+    height: 20px;
+    pointer-events: none;
+    z-index: 101;
+}
+
+.crosshair::before,
+.crosshair::after {
+    content: '';
+    position: absolute;
+    background: rgba(255, 255, 255, 0.5);
+}
+
+.crosshair::before {
+    width: 2px;
+    height: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.crosshair::after {
+    width: 100%;
+    height: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+/* ========================================
+   INTERACTION HINT
+   ======================================== */
+.interaction-hint {
+    position: fixed;
+    bottom: 40%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--interaction-bg);
+    color: var(--neon-green);
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    font-family: 'Press Start 2P', cursive;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    border: 2px solid var(--neon-green);
+    box-shadow: 0 0 15px var(--neon-green);
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 100;
+}
+
+/* ========================================
+   MOBILE CONTROLS
+   ======================================== */
+.mobile-controls {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 102;
+}
+
+/* Show on touch devices */
+@media (pointer: coarse), (max-width: 768px) {
+    .mobile-controls {
+        display: block;
+    }
+    
+    /* Hide crosshair on mobile */
+    .crosshair {
+        display: none;
+    }
+    
+    /* Hide desktop controls hint */
+    .controls-hint {
+        display: none;
+    }
+}
+
+/* Joystick Zone (left side) */
+.joystick-zone {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    width: 150px;
+    height: 150px;
+    pointer-events: auto;
+    touch-action: none;
+}
+
+.joystick-base {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 120px;
+    height: 120px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 3px solid var(--neon-blue);
+    border-radius: 50%;
+    box-shadow: 
+        0 0 20px rgba(1, 205, 254, 0.3),
+        inset 0 0 30px rgba(1, 205, 254, 0.1);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.joystick-thumb {
+    width: 50px;
+    height: 50px;
+    background: linear-gradient(135deg, var(--neon-pink), var(--neon-purple));
+    border: 2px solid var(--white);
+    border-radius: 50%;
+    box-shadow: 
+        0 0 15px var(--neon-pink),
+        0 0 30px rgba(255, 113, 206, 0.5);
+    transition: box-shadow 0.2s ease;
+    pointer-events: none;
+}
+
+.joystick-thumb.active {
+    box-shadow: 
+        0 0 25px var(--neon-pink),
+        0 0 50px var(--neon-pink);
+}
+
+/* Look Zone (right side for camera) */
+.look-zone {
+    position: absolute;
+    top: 80px;
+    right: 0;
+    width: 50%;
+    height: calc(100% - 250px);
+    pointer-events: auto;
+    touch-action: none;
+    /* Debug border - remove in production */
+    /* border: 2px dashed rgba(255, 113, 206, 0.3); */
+}
+
+/* Talk Button */
+.talk-button {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    width: 100px;
+    height: 140px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 3px solid var(--neon-green);
+    border-radius: 15px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    pointer-events: auto;
+    touch-action: none;
+    box-shadow: 
+        0 0 15px rgba(5, 255, 161, 0.3),
+        inset 0 0 20px rgba(5, 255, 161, 0.1);
+    transition: all 0.2s ease;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.talk-button.active {
+    background: rgba(5, 255, 161, 0.3);
+    box-shadow: 
+        0 0 30px var(--neon-green),
+        inset 0 0 30px rgba(5, 255, 161, 0.3);
+}
+
+.talk-button.locked {
+    background: rgba(5, 255, 161, 0.5);
+    border-color: var(--neon-yellow);
+    box-shadow: 
+        0 0 40px var(--neon-green),
+        0 0 20px var(--neon-yellow),
+        inset 0 0 30px rgba(5, 255, 161, 0.4);
+}
+
+.talk-icon {
+    font-size: 2rem;
+    transition: transform 0.2s ease;
+}
+
+.talk-button.active .talk-icon {
+    transform: scale(1.2);
+    animation: talkPulse 0.3s ease-in-out infinite alternate;
+}
+
+.talk-text {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 0.4rem;
+    color: var(--neon-green);
+    text-align: center;
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 5px var(--neon-green);
+}
+
+.talk-slider-track {
+    width: 60px;
+    height: 30px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 2px solid var(--neon-green);
+    border-radius: 15px;
+    margin-top: 5px;
+    position: relative;
+    overflow: hidden;
+}
+
+.talk-slider-thumb {
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 24px;
+    background: var(--neon-green);
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--neon-green);
+    transition: bottom 0.1s ease;
+}
+
+.talk-button.locked .talk-slider-thumb {
+    bottom: calc(100% - 26px);
+    background: var(--neon-yellow);
+    box-shadow: 0 0 15px var(--neon-yellow);
+}
+
+.slide-hint {
+    font-family: 'Press Start 2P', cursive;
+    font-size: 0.3rem;
+    color: var(--soft-purple);
+    opacity: 0.7;
+    margin-top: 3px;
+}
+
+.talk-button.locked .slide-hint {
+    opacity: 0;
+}
+
+@keyframes talkPulse {
+    0% { transform: scale(1.2); }
+    100% { transform: scale(1.35); }
+}
+
+/* Mobile Action Buttons */
+.mobile-action-btn {
+    position: absolute;
+    width: 50px;
+    height: 50px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 2px solid var(--neon-purple);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+    touch-action: manipulation;
+    box-shadow: 0 0 10px rgba(185, 103, 255, 0.3);
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.mobile-action-btn:active {
+    transform: scale(0.9);
+    box-shadow: 0 0 20px rgba(185, 103, 255, 0.6);
+}
+
+.mobile-action-btn .action-icon {
+    font-size: 1.5rem;
+}
+
+.daynight-btn {
+    bottom: 180px;
+    right: 30px;
+}
+
+/* Now playing - make clickable on mobile */
+@media (pointer: coarse), (max-width: 768px) {
+    .now-playing {
+        pointer-events: auto;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    
+    .now-playing:active {
+        transform: scale(0.95);
+        box-shadow: 0 0 15px var(--neon-purple);
+    }
+}
+
+.now-playing.muted {
+    opacity: 0.6;
+    border-color: var(--coral);
+}
+
+.now-playing.muted .music-icon {
+    animation: none;
+}
+
+/* ========================================
+   RESPONSIVE ADJUSTMENTS
+   ======================================== */
+@media (max-width: 768px) {
+    .mall-title {
+        font-size: 2rem;
+    }
+    
+    .mall-subtitle {
+        font-size: 1rem;
+    }
+    
+    .neon-button {
+        font-size: 0.7rem;
+        padding: 1rem 2rem;
+    }
+    
+    .loading-bar-container {
+        width: 200px;
+    }
+    
+    .hud-top {
+        padding: 1rem;
+    }
+    
+    .mall-name, .current-time {
+        font-size: 0.6rem;
+    }
+    
+    .player-count {
+        font-size: 0.5rem;
+        padding: 0.3rem 0.6rem;
+    }
+    
+    .hud-bottom {
+        padding: 1rem;
+        padding-bottom: 180px; /* Make room for mobile controls */
+    }
+    
+    .now-playing, .connection-status {
+        font-size: 0.5rem;
+        padding: 0.5rem 0.8rem;
+    }
+    
+    .voice-indicator {
+        top: auto;
+        bottom: 180px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 0.5rem;
+        padding: 0.6rem 1rem;
+    }
+    
+    .loopback-indicator {
+        top: auto;
+        bottom: 240px;
+        right: 50%;
+        transform: translateX(50%);
+    }
+    
+    .interaction-hint {
+        bottom: 50%;
+        font-size: 0.5rem;
+        padding: 0.5rem 1rem;
+    }
+}

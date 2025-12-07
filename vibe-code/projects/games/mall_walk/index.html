@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Mall Walk '92 - A Vaporwave Experience</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+        <div class="loading-content">
+            <h1 class="mall-title">MALL WALK</h1>
+            <h2 class="mall-subtitle">'92</h2>
+            <div class="loading-bar-container">
+                <div class="loading-bar" id="loading-bar"></div>
+            </div>
+            <p class="loading-text" id="loading-text">Initializing...</p>
+            <div class="palm-decoration left"></div>
+            <div class="palm-decoration right"></div>
+        </div>
+    </div>
+
+    <!-- Name Entry Screen (after loading) -->
+    <div id="name-screen" class="hidden">
+        <div class="start-content">
+            <h1 class="mall-title glitch" data-text="MALL WALK">MALL WALK</h1>
+            <h2 class="mall-subtitle">'92</h2>
+            <p class="tagline">~ Multiplayer Vaporwave Experience ~</p>
+            <div class="name-input-container">
+                <label for="player-name" class="name-label">ENTER YOUR NAME</label>
+                <input type="text" id="player-name" class="neon-input" placeholder="VISITOR" maxlength="16" autocomplete="off">
+            </div>
+            <button id="enter-button" class="neon-button">
+                <span>ENTER THE MALL</span>
+            </button>
+            <div class="controls-hint desktop-only">
+                <p>WASD or Arrow Keys to move</p>
+                <p>Mouse to look around</p>
+                <p>Hold E to talk • Hold R to test mic • ESC to pause</p>
+            </div>
+            <div class="controls-hint mobile-only">
+                <p>Left joystick to move</p>
+                <p>Swipe right side to look around</p>
+                <p>Tap mic button to talk • Slide up to lock</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start Screen (after loading) -->
+    <div id="start-screen" class="hidden">
+        <div class="start-content">
+            <h1 class="mall-title glitch" data-text="MALL WALK">MALL WALK</h1>
+            <h2 class="mall-subtitle">'92</h2>
+            <p class="tagline">~ A Vaporwave Experience ~</p>
+            <button id="start-button" class="neon-button">
+                <span>CLICK TO ENTER</span>
+            </button>
+            <div class="controls-hint desktop-only">
+                <p>WASD or Arrow Keys to move</p>
+                <p>Mouse to look around</p>
+                <p>M to mute • N to toggle day/night • ESC to pause</p>
+            </div>
+            <div class="controls-hint mobile-only">
+                <p>Left joystick to move</p>
+                <p>Swipe right side to look around</p>
+                <p>Tap 🌙 button for day/night</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden">
+        <div class="hud-top">
+            <div class="mall-name">SUNSET PLAZA MALL</div>
+            <div class="player-count" id="player-count">1 visitor</div>
+            <div class="current-time" id="current-time">12:00 PM</div>
+        </div>
+        
+        <!-- Mobile Controls -->
+        <div id="mobile-controls" class="mobile-controls">
+            <!-- Movement Joystick (left side) -->
+            <div id="joystick-zone" class="joystick-zone">
+                <div id="joystick-base" class="joystick-base">
+                    <div id="joystick-thumb" class="joystick-thumb"></div>
+                </div>
+            </div>
+            
+            <!-- Look/Camera touch area (right side, covers most of right half) -->
+            <div id="look-zone" class="look-zone"></div>
+            
+            <!-- Talk Button (right side, bottom) -->
+            <div id="talk-button" class="talk-button">
+                <span class="talk-icon">🎤</span>
+                <span class="talk-text">HOLD TO TALK</span>
+                <div class="talk-slider-track">
+                    <div id="talk-slider-thumb" class="talk-slider-thumb"></div>
+                </div>
+                <span class="slide-hint">↑ SLIDE TO LOCK</span>
+            </div>
+            
+            <!-- Day/Night Toggle Button -->
+            <button id="mobile-daynight-btn" class="mobile-action-btn daynight-btn">
+                <span class="action-icon">🌙</span>
+            </button>
+        </div>
+        <!-- Voice chat indicator -->
+        <div id="voice-indicator" class="voice-indicator hidden">
+            <span class="voice-icon">🎤</span>
+            <span class="voice-text">TRANSMITTING...</span>
+        </div>
+        <!-- Loopback indicator -->
+        <div id="loopback-indicator" class="loopback-indicator hidden">
+            <span class="loopback-icon">🔊</span>
+            <span class="loopback-text">MIC TEST - Release R to stop</span>
+        </div>
+        <!-- Interaction hint -->
+        <div id="interaction-hint" class="interaction-hint hidden">Click to toggle lights</div>
+        <div class="crosshair"></div>
+        <div class="hud-bottom">
+            <div class="now-playing" id="now-playing" role="button" tabindex="0">
+                <span class="music-icon" id="music-icon">♪</span>
+                <span class="track-name">Ambient Mall Sounds</span>
+            </div>
+            <div class="connection-status" id="connection-status">
+                <span class="status-dot offline"></span>
+                <span class="status-text">Connecting...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pause Menu -->
+    <div id="pause-menu" class="hidden">
+        <div class="pause-content">
+            <h2>PAUSED</h2>
+            <button id="resume-button" class="neon-button">RESUME</button>
+            <div class="pause-info">
+                <p>Click anywhere or press ESC to resume</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Canvas Container -->
+    <div id="game-container"></div>
+
+    <!-- Three.js and addons -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <!-- Game Scripts -->
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

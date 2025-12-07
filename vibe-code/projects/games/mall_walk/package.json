@@ -1,0 +1,23 @@
+{
+  "name": "mall-walk-92-server",
+  "version": "1.0.0",
+  "description": "Multiplayer signaling server for Mall Walk '92",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:http": "set USE_HTTPS=false && node server.js",
+    "dev": "node server.js",
+    "generate-cert": "powershell -ExecutionPolicy Bypass -File generate-cert.ps1"
+  },
+  "keywords": [
+    "webrtc",
+    "multiplayer",
+    "vaporwave",
+    "mall"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2"
+  }
+}
