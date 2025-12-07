@@ -24,6 +24,15 @@ export class Stores {
             hamsterWaitTime: 0,
             hamsterBounds: null
         };
+        
+        // Laundromat and cafe animations
+        this.laundromatAnimations = null;
+        this.cafeAnimations = null;
+        
+        // Performance: throttle updates
+        this.updateCounter = 0;
+        this.signUpdateInterval = 3;  // Update signs every 3rd frame
+        this.animalUpdateInterval = 2; // Update animals every 2nd frame
     }
 
     build() {
@@ -4098,7 +4107,13 @@ export class Stores {
         if (!deltaTime || isNaN(deltaTime)) deltaTime = 0.016;
         if (!time || isNaN(time)) time = 0;
         
-        // Animate neon signs (subtle flicker/pulse)
+        // Performance: increment update counter
+        this.updateCounter++;
+        const shouldUpdateSigns = (this.updateCounter % this.signUpdateInterval) === 0;
+        const shouldUpdateAnimals = (this.updateCounter % this.animalUpdateInterval) === 0;
+        
+        // Animate neon signs (throttled - subtle flicker/pulse)
+        if (shouldUpdateSigns) {
         this.animatedSigns.forEach(sign => {
             if (!sign || !sign.light) return;
             
@@ -4116,11 +4131,13 @@ export class Stores {
             
             sign.light.intensity = Math.max(0.5, Math.min(1.5, 1 + flicker));
         });
+        } // end sign throttle
 
         // ========================================
-        // PET STORE ANIMATIONS
+        // PET STORE ANIMATIONS (throttled)
         // ========================================
         
+        if (shouldUpdateAnimals) {
         // Animate dog running stochastically
         if (this.petStoreAnimations.dog && this.petStoreAnimations.dogBounds) {
             const dog = this.petStoreAnimations.dog;
@@ -4295,6 +4312,7 @@ export class Stores {
                 drumData.drum.rotation.z += drumData.direction * drumData.speed * deltaTime;
             });
         }
+        } // end animal/mechanical throttle
     }
 
     getStoreData() {

@@ -675,7 +675,7 @@ class MallWalkGame {
         if (this.player) {
             this.player.update(deltaTime);
             
-            // Send position update to network
+            // Send position update to network (already throttled in networkManager)
             if (this.networkManager && this.networkManager.isConnected) {
                 const pos = this.player.getPosition();
                 const dir = this.player.getDirection();
@@ -688,35 +688,40 @@ class MallWalkGame {
             }
         }
         
-        // Update avatars
+        // Update avatars (lightweight)
         if (this.avatarManager) {
             const cameraPos = this.player ? this.player.getPosition() : null;
             this.avatarManager.update(deltaTime, cameraPos);
         }
         
-        // Update decorations (animations)
+        // Update decorations (animations) - internally throttled
         if (this.decorations) {
             this.decorations.update(deltaTime, this.elapsedTime);
         }
         
-        // Update stores (sign animations)
+        // Update stores (sign animations) - internally throttled
         if (this.stores) {
             this.stores.update(deltaTime, this.elapsedTime);
         }
         
-        // Update audio
+        // Update audio - internally throttled
         if (this.audioManager && this.player) {
             const playerPosition = this.player.getPosition();
             this.audioManager.update(playerPosition);
         }
         
-        // Update mall animations
+        // Update mall animations (lightweight - just escalators)
         if (this.mall) {
             this.mall.update(deltaTime);
         }
         
-        // Check for interactable objects in view
-        this.checkInteraction();
+        // Check for interactable objects in view (throttle to every 5 frames)
+        if (!this._interactionCheckCounter) this._interactionCheckCounter = 0;
+        this._interactionCheckCounter++;
+        if (this._interactionCheckCounter >= 5) {
+            this._interactionCheckCounter = 0;
+            this.checkInteraction();
+        }
         
         // Update HUD time
         this.updateSimulatedTime(deltaTime);

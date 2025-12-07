@@ -15,6 +15,10 @@ export class Decorations {
         this.groups = [];  // Track groups for disposal
         this.lightSwitch = null;  // Physical light switch for day/night toggle
         this.lightSwitchLight = null;  // Indicator light on switch
+        
+        // Performance: throttle updates
+        this.updateCounter = 0;
+        this.particleUpdateInterval = 2; // Update particles every 2nd frame
     }
 
     build() {
@@ -204,8 +208,8 @@ export class Decorations {
     }
 
     createDustParticles() {
-        // Floating dust particles in the light beams
-        const particleCount = 150;
+        // Floating dust particles in the light beams (reduced count for performance)
+        const particleCount = 50; // Reduced from 150
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
         const velocities = [];
@@ -1456,7 +1460,11 @@ export class Decorations {
         // Use safe time value to prevent floating point issues with large numbers
         const safeTime = time % 10000;
         
-        // Animate palm fronds and other objects
+        // Performance: increment update counter
+        this.updateCounter++;
+        const shouldUpdateParticles = (this.updateCounter % this.particleUpdateInterval) === 0;
+        
+        // Animate palm fronds and other objects (lightweight, run every frame)
         this.animatedObjects.forEach(item => {
             if (!item || !item.object) return;
             
@@ -1508,7 +1516,8 @@ export class Decorations {
             }
         });
 
-        // Update water particles
+        // Update water particles (throttled for performance)
+        if (shouldUpdateParticles) {
         this.waterParticles.forEach(particle => {
             if (!particle || !particle.points || !particle.points.geometry) return;
             
@@ -1562,9 +1571,10 @@ export class Decorations {
             
             positions.needsUpdate = true;
         });
+        } // end water particles throttle
 
-        // Update dust particles
-        if (this.dustParticles && this.dustParticles.geometry) {
+        // Update dust particles (throttled for performance)
+        if (shouldUpdateParticles && this.dustParticles && this.dustParticles.geometry) {
             const positions = this.dustParticles.geometry.attributes.position;
             if (!positions) return;
             

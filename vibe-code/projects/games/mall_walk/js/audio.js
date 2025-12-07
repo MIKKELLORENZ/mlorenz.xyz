@@ -45,6 +45,10 @@ export class AudioManager {
         // Current playing info
         this.currentClosestSource = null;
         this.nowPlayingElement = null;
+        
+        // Performance: throttle listener position updates
+        this.lastUpdateTime = 0;
+        this.updateInterval = 100; // Update every 100ms instead of every frame
     }
 
     async init() {
@@ -231,6 +235,11 @@ export class AudioManager {
     update(playerPosition) {
         if (!this.isInitialized || this.sources.length === 0) return;
         if (!playerPosition) return;
+        
+        // Throttle updates for performance
+        const now = Date.now();
+        if (now - this.lastUpdateTime < this.updateInterval) return;
+        this.lastUpdateTime = now;
         
         // Validate player position
         const px = playerPosition.x || 0;

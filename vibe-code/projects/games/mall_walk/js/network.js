@@ -42,9 +42,9 @@ export class NetworkManager {
         this.heartbeatPeriod = 10000;     // Send heartbeat every 10 seconds
         this.connectionTimeout = 60000;   // Consider dead after 60 seconds of no response
         
-        // Update rate limiting
+        // Update rate limiting - reduced from 20/sec to 10/sec for better performance
         this.lastUpdateTime = 0;
-        this.updateInterval = 50; // 20 updates per second
+        this.updateInterval = 100; // 10 updates per second (was 50ms/20 per sec)
         
         // Server URL - default to localhost, can be configured
         this.serverUrl = this.getServerUrl();
@@ -353,8 +353,13 @@ export class NetworkManager {
             if (data.position) {
                 player.position = data.position;
                 
-                // Update distance-based audio (volume and stereo pan)
-                this.updateSpatialAudio(data.id, data.position);
+                // Throttle spatial audio updates (every 3rd update per player)
+                if (!player._audioUpdateCounter) player._audioUpdateCounter = 0;
+                player._audioUpdateCounter++;
+                if (player._audioUpdateCounter >= 3) {
+                    player._audioUpdateCounter = 0;
+                    this.updateSpatialAudio(data.id, data.position);
+                }
             }
             if (data.rotation !== undefined) player.rotation = data.rotation;
             if (data.isTalking !== undefined) player.isTalking = data.isTalking;
@@ -458,39 +463,24 @@ export class NetworkManager {
         
         // Use multiple STUN servers and free TURN servers for better connectivity
         // Optimized for high-latency international connections
+        // Simplified ICE configuration - fewer servers = faster connection
         const config = {
             iceServers: [
-                // Google STUN servers
+                // Primary STUN server (Google - fast, reliable)
                 { urls: 'stun:stun.l.google.com:19302' },
+                // Backup STUN
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                // Twilio STUN (free)
-                { urls: 'stun:global.stun.twilio.com:3478' },
-                // Free TURN servers from metered.ca (demo credentials - limited)
+                // TURN server for NAT traversal (essential for voice)
                 {
-                    urls: 'turn:a.relay.metered.ca:80',
-                    username: 'e8c914bfcbdb0ed63f81e271',
-                    credential: 'pNL/6OsuXBxBVfOz'
-                },
-                {
-                    urls: 'turn:a.relay.metered.ca:80?transport=tcp',
-                    username: 'e8c914bfcbdb0ed63f81e271',
-                    credential: 'pNL/6OsuXBxBVfOz'
-                },
-                {
-                    urls: 'turn:a.relay.metered.ca:443',
-                    username: 'e8c914bfcbdb0ed63f81e271',
-                    credential: 'pNL/6OsuXBxBVfOz'
-                },
-                {
-                    urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+                    urls: [
+                        'turn:a.relay.metered.ca:80',
+                        'turn:a.relay.metered.ca:443'
+                    ],
                     username: 'e8c914bfcbdb0ed63f81e271',
                     credential: 'pNL/6OsuXBxBVfOz'
                 }
             ],
-            iceCandidatePoolSize: 10,
-            iceTransportPolicy: 'all',
+            iceCandidatePoolSize: 2, // Reduced from 10 - faster initial connection
             bundlePolicy: 'max-bundle',
             rtcpMuxPolicy: 'require'
         };
@@ -699,13 +689,16 @@ export class NetworkManager {
                 params.encodings = [{}];
             }
             
-            // Set maximum bitrate to 8kbps for that retro dial-up feel
-            params.encodings[0].maxBitrate = 8000; // 8 kbps
+            // Set maximum bitrate to 24kbps - more reliable than 8kbps while still low
+            // 8kbps caused issues with some WebRTC implementations
+            params.encodings[0].maxBitrate = 24000; // 24 kbps (was 8kbps)
+            params.encodings[0].priority = 'high';
+            params.encodings[0].networkPriority = 'high';
             
             await sender.setParameters(params);
-            console.log('✓ Audio bitrate set to 8kbps (retro mode)');
+            console.log('✓ Audio bitrate set to 24kbps');
         } catch (error) {
-            console.log('Could not set low bitrate:', error.message);
+            console.log('Could not set bitrate:', error.message);
         }
     }
     
@@ -805,10 +798,11 @@ export class NetworkManager {
                 return false;
             }
             
-            // Create audio context first for processing
+            // Create audio context for processing
+            // Note: Use default sample rate for better compatibility - low bitrate encoding handles retro feel
             if (!this.audioContext) {
                 this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                    sampleRate: 8000 // Low sample rate for retro dial-up feel
+                    latencyHint: 'interactive' // Prioritize low latency over quality
                 });
             }
             

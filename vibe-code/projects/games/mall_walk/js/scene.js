@@ -69,22 +69,24 @@ export class MallScene {
         // Load sky textures for day/night backgrounds
         this.loadSkyTextures();
 
-        // Create camera
+        // Create camera with reduced far plane for better performance
         this.camera = new THREE.PerspectiveCamera(
             75,
             window.innerWidth / window.innerHeight,
             0.1,
-            500
+            200  // Reduced from 500 - mall isn't that big
         );
         this.camera.position.set(0, 2, 0);
 
-        // Create renderer
+        // Create renderer with performance optimizations
         this.renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            powerPreference: 'high-performance'
+            antialias: window.devicePixelRatio < 2, // Disable AA on high DPI for performance
+            powerPreference: 'high-performance',
+            stencil: false,  // Disable stencil buffer if not needed
+            depth: true
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Limit pixel ratio for performance
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25)); // Further limit pixel ratio
         this.renderer.shadowMap.enabled = false; // Disable shadows for better performance
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.2;
