@@ -61,9 +61,8 @@ export class Mall {
         // Decorative floor patterns
         this.createFloorPatterns(floorGroup, 0);
 
-        // Second floor walkways (on both sides) - with holes for escalators
+        // Second floor - full floor with precise holes for escalators only
         const secondFloorY = MALL_CONFIG.floorHeight;
-        const walkwayWidth = (MALL_CONFIG.width - MALL_CONFIG.aisleWidth) / 2;
 
         const walkwayMaterial = new THREE.MeshStandardMaterial({
             color: COLORS.marble,
@@ -71,13 +70,25 @@ export class Mall {
             metalness: 0.1
         });
 
-        // Escalator positions (z coordinates where we need holes)
-        const escalatorZPositions = [-25, 25];
+        // Escalator configuration
+        const xOffset = MALL_CONFIG.aisleWidth / 2 + 5; // Where escalators are positioned
+        const escalatorPairWidth = 8; // Width to cut out for escalator pair (2 escalators + divider)
         const escalatorHoleLength = 15; // Length of hole for escalator
         
-        // Create segmented walkways with holes for escalators
-        this.createSegmentedWalkway(floorGroup, walkwayMaterial, walkwayWidth, secondFloorY, -1, escalatorZPositions, escalatorHoleLength);
-        this.createSegmentedWalkway(floorGroup, walkwayMaterial, walkwayWidth, secondFloorY, 1, escalatorZPositions, escalatorHoleLength);
+        // Escalator hole definitions: { x, z, width, length }
+        const escalatorHoles = [
+            // Left side escalators at z=-25
+            { x: -xOffset, z: -25, width: escalatorPairWidth, length: escalatorHoleLength },
+            // Right side escalators at z=-25  
+            { x: xOffset, z: -25, width: escalatorPairWidth, length: escalatorHoleLength },
+            // Left side escalators at z=25
+            { x: -xOffset, z: 25, width: escalatorPairWidth, length: escalatorHoleLength },
+            // Right side escalators at z=25
+            { x: xOffset, z: 25, width: escalatorPairWidth, length: escalatorHoleLength }
+        ];
+
+        // Create the second floor as multiple segments around escalator holes
+        this.createSecondFloorWithHoles(floorGroup, walkwayMaterial, secondFloorY, escalatorHoles);
 
         // Add patterns to second floor
         this.createFloorPatterns(floorGroup, secondFloorY + 0.26);
@@ -85,8 +96,103 @@ export class Mall {
         this.scene.add(floorGroup);
     }
 
+    createSecondFloorWithHoles(parent, material, floorY, holes) {
+        const mallWidth = MALL_CONFIG.width;
+        const mallLength = MALL_CONFIG.length;
+        const aisleWidth = MALL_CONFIG.aisleWidth;
+        const floorThickness = 0.5;
+        
+        // Calculate walkway width on each side (space between aisle and mall edge)
+        const walkwayWidth = (mallWidth - aisleWidth) / 2;
+        
+        // Left walkway X position (center of left walkway)
+        const leftWalkwayX = -aisleWidth / 2 - walkwayWidth / 2;
+        // Right walkway X position (center of right walkway)
+        const rightWalkwayX = aisleWidth / 2 + walkwayWidth / 2;
+        
+        // Get holes for each side
+        const leftHoles = holes.filter(h => h.x < 0).sort((a, b) => a.z - b.z);
+        const rightHoles = holes.filter(h => h.x > 0).sort((a, b) => a.z - b.z);
+        
+        // Create left walkway with holes
+        this.createWalkwayWithPreciseHoles(parent, material, floorY, floorThickness,
+            leftWalkwayX, walkwayWidth, mallLength, leftHoles);
+        
+        // Create right walkway with holes
+        this.createWalkwayWithPreciseHoles(parent, material, floorY, floorThickness,
+            rightWalkwayX, walkwayWidth, mallLength, rightHoles);
+    }
+    
+    createWalkwayWithPreciseHoles(parent, material, floorY, thickness, centerX, width, length, holes) {
+        // Sort holes by Z position
+        const sortedHoles = [...holes].sort((a, b) => a.z - b.z);
+        
+        let currentZ = -length / 2;
+        
+        for (let i = 0; i <= sortedHoles.length; i++) {
+            let sectionEndZ;
+            let holeAtThisZ = null;
+            
+            if (i < sortedHoles.length) {
+                holeAtThisZ = sortedHoles[i];
+                sectionEndZ = holeAtThisZ.z - holeAtThisZ.length / 2;
+            } else {
+                sectionEndZ = length / 2;
+            }
+            
+            const sectionLength = sectionEndZ - currentZ;
+            
+            // Create solid walkway section before the hole
+            if (sectionLength > 0.5) {
+                const sectionGeom = new THREE.BoxGeometry(width, thickness, sectionLength);
+                const section = new THREE.Mesh(sectionGeom, material);
+                section.position.set(centerX, floorY, currentZ + sectionLength / 2);
+                parent.add(section);
+            }
+            
+            // If there's a hole, create floor sections on either side of it
+            if (holeAtThisZ) {
+                const holeLength = holeAtThisZ.length;
+                const holeWidth = holeAtThisZ.width;
+                const holeZCenter = holeAtThisZ.z;
+                const holeCenterX = holeAtThisZ.x;
+                
+                // Calculate the hole's position relative to this walkway
+                const walkwayLeftEdge = centerX - width / 2;
+                const walkwayRightEdge = centerX + width / 2;
+                const holeLeftEdge = holeCenterX - holeWidth / 2;
+                const holeRightEdge = holeCenterX + holeWidth / 2;
+                
+                // Floor strip on the left side of the hole (toward mall edge)
+                const leftStripWidth = holeLeftEdge - walkwayLeftEdge;
+                if (leftStripWidth > 0.1) {
+                    const leftStrip = new THREE.Mesh(
+                        new THREE.BoxGeometry(leftStripWidth, thickness, holeLength),
+                        material
+                    );
+                    leftStrip.position.set(walkwayLeftEdge + leftStripWidth / 2, floorY, holeZCenter);
+                    parent.add(leftStrip);
+                }
+                
+                // Floor strip on the right side of the hole (toward atrium)
+                const rightStripWidth = walkwayRightEdge - holeRightEdge;
+                if (rightStripWidth > 0.1) {
+                    const rightStrip = new THREE.Mesh(
+                        new THREE.BoxGeometry(rightStripWidth, thickness, holeLength),
+                        material
+                    );
+                    rightStrip.position.set(holeRightEdge + rightStripWidth / 2, floorY, holeZCenter);
+                    parent.add(rightStrip);
+                }
+                
+                currentZ = holeZCenter + holeLength / 2;
+            }
+        }
+    }
+
     createSegmentedWalkway(parent, material, walkwayWidth, floorY, side, holePositions, holeLength) {
-        // side: -1 for left, 1 for right
+        // This method is kept for compatibility but no longer used
+        // The new createSecondFloorWithHoles method handles the entire second floor
         const xPos = side * (MALL_CONFIG.aisleWidth / 2 + walkwayWidth / 2);
         const totalLength = MALL_CONFIG.length;
         
@@ -121,8 +227,17 @@ export class Mall {
         // Create geometric floor pattern inspired by 90s malls
         const patternSpacing = 15;
         const colors = [COLORS.teal, COLORS.neonPink, COLORS.neonYellow, COLORS.softPurple];
+        
+        // Determine if this is the second floor (y > 0)
+        const isSecondFloor = yOffset > 1;
+        const aisleHalfWidth = MALL_CONFIG.aisleWidth / 2; // 12.5
 
         for (let x = -30; x <= 30; x += patternSpacing) {
+            // Skip center atrium area on second floor
+            if (isSecondFloor && Math.abs(x) < aisleHalfWidth) {
+                continue;
+            }
+            
             for (let z = -50; z <= 50; z += patternSpacing) {
                 // Diamond pattern - raised slightly more to prevent z-fighting
                 const diamondGeometry = new THREE.PlaneGeometry(3.5, 3.5);

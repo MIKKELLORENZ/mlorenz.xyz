@@ -381,136 +381,407 @@ export class Decorations {
         const waterGroup = new THREE.Group();
         waterGroup.name = 'waterFeature';
 
-        // Main fountain basin - simple cylinder (simplified from octagon for performance)
-        const basinGeometry = new THREE.CylinderGeometry(5, 5, 0.6, 8);
+        // ========================================
+        // MAIN FOUNTAIN BASIN - Tiered octagonal design
+        // ========================================
+        
+        // Outer basin ring (octagonal)
+        const outerBasinGeometry = new THREE.CylinderGeometry(6, 6.5, 0.8, 8);
         const basinMaterial = new THREE.MeshStandardMaterial({
-            color: COLORS.marblePink,
+            color: 0xd4c4b4,  // Cream marble
             roughness: 0.2,
             metalness: 0.1
         });
-        const basin = new THREE.Mesh(basinGeometry, basinMaterial);
-        basin.position.y = 0.3;
-        waterGroup.add(basin);
-
-        // Water surface (fixed to be visible from all angles)
-        const waterGeometry = new THREE.CircleGeometry(4.5, 16);
+        const outerBasin = new THREE.Mesh(outerBasinGeometry, basinMaterial);
+        outerBasin.position.y = 0.4;
+        waterGroup.add(outerBasin);
+        
+        // Inner basin wall (creates the lip)
+        const innerWallGeometry = new THREE.CylinderGeometry(5.2, 5.2, 0.9, 8, 1, true);
+        const innerWall = new THREE.Mesh(innerWallGeometry, basinMaterial);
+        innerWall.position.y = 0.45;
+        waterGroup.add(innerWall);
+        
+        // Basin floor (darker)
+        const basinFloorGeometry = new THREE.CylinderGeometry(5.2, 5.2, 0.1, 8);
+        const basinFloorMaterial = new THREE.MeshStandardMaterial({
+            color: 0x446688,  // Blue-ish pool floor
+            roughness: 0.4
+        });
+        const basinFloor = new THREE.Mesh(basinFloorGeometry, basinFloorMaterial);
+        basinFloor.position.y = 0.05;
+        waterGroup.add(basinFloor);
+        
+        // ========================================
+        // WATER SURFACE with ripple effect
+        // ========================================
+        const waterGeometry = new THREE.CircleGeometry(5, 32);
         const waterMaterial = new THREE.MeshStandardMaterial({
-            color: 0x40E0D0,
+            color: 0x40c8d8,
             transparent: true,
-            opacity: 0.8,
-            roughness: 0.1,
-            metalness: 0.2,
+            opacity: 0.75,
+            roughness: 0.05,
+            metalness: 0.3,
             side: THREE.DoubleSide,
             depthWrite: false
         });
-
         const water = new THREE.Mesh(waterGeometry, waterMaterial);
         water.rotation.x = -Math.PI / 2;
-        water.position.y = 0.6;
+        water.position.y = 0.55;
         waterGroup.add(water);
-
-        // Store water for animation
+        
+        // Store water for ripple animation
         this.animatedObjects.push({
             object: water,
             type: 'water',
             time: 0
         });
-
-        // Central fountain spout
-        const spoutGeometry = new THREE.CylinderGeometry(0.3, 0.5, 2, 16);
+        
+        // ========================================
+        // CENTER PEDESTAL AND SCULPTURE
+        // ========================================
+        
+        // Pedestal base (in water)
+        const pedestalBase = new THREE.Mesh(
+            new THREE.CylinderGeometry(1.2, 1.4, 0.3, 8),
+            basinMaterial
+        );
+        pedestalBase.position.y = 0.55;
+        waterGroup.add(pedestalBase);
+        
+        // Pedestal column
+        const pedestalColumn = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.6, 0.8, 2.0, 8),
+            new THREE.MeshStandardMaterial({
+                color: 0xc8b8a8,
+                roughness: 0.25,
+                metalness: 0.15
+            })
+        );
+        pedestalColumn.position.y = 1.7;
+        waterGroup.add(pedestalColumn);
+        
+        // Upper bowl (water flows from here)
+        const upperBowlGeometry = new THREE.CylinderGeometry(1.0, 0.6, 0.4, 12);
+        const upperBowl = new THREE.Mesh(upperBowlGeometry, basinMaterial);
+        upperBowl.position.y = 2.9;
+        waterGroup.add(upperBowl);
+        
+        // Upper bowl water surface
+        const upperWater = new THREE.Mesh(
+            new THREE.CircleGeometry(0.9, 16),
+            new THREE.MeshStandardMaterial({
+                color: 0x60d8e8,
+                transparent: true,
+                opacity: 0.8,
+                roughness: 0.05
+            })
+        );
+        upperWater.rotation.x = -Math.PI / 2;
+        upperWater.position.y = 3.05;
+        waterGroup.add(upperWater);
+        
+        // ========================================
+        // CENTER SPOUT - The main water jet
+        // ========================================
+        const spoutGeometry = new THREE.CylinderGeometry(0.15, 0.2, 0.8, 12);
         const spoutMaterial = new THREE.MeshStandardMaterial({
-            color: COLORS.teal,
-            metalness: 0.7,
-            roughness: 0.2
+            color: 0x88aacc,
+            metalness: 0.8,
+            roughness: 0.15
         });
         const spout = new THREE.Mesh(spoutGeometry, spoutMaterial);
-        spout.position.y = 1.5;
+        spout.position.y = 3.4;
         waterGroup.add(spout);
-
-        // Decorative top
-        const topGeometry = new THREE.SphereGeometry(0.6, 16, 16);
-        const top = new THREE.Mesh(topGeometry, spoutMaterial);
-        top.position.y = 2.8;
-        waterGroup.add(top);
-
-        // Water jet particles (simplified representation)
-        this.createWaterJet(waterGroup);
-
-        // Neon ring around fountain
-        const neonRingGeometry = new THREE.TorusGeometry(5.2, 0.08, 8, 32);
+        
+        // Decorative top finial
+        const finial = new THREE.Mesh(
+            new THREE.SphereGeometry(0.25, 16, 12),
+            spoutMaterial
+        );
+        finial.position.y = 3.95;
+        waterGroup.add(finial);
+        
+        // ========================================
+        // WATER JETS - Central and cascading
+        // ========================================
+        this.createImprovedWaterJets(waterGroup);
+        
+        // ========================================
+        // CASCADING WATER EFFECT (from upper bowl)
+        // ========================================
+        this.createCascadingWater(waterGroup);
+        
+        // ========================================
+        // DECORATIVE ELEMENTS
+        // ========================================
+        
+        // Neon ring around outer basin
+        const neonRingGeometry = new THREE.TorusGeometry(6.3, 0.06, 8, 32);
         const neonMaterial = new THREE.MeshStandardMaterial({
             color: COLORS.neonBlue,
             emissive: COLORS.neonBlue,
-            emissiveIntensity: 2
+            emissiveIntensity: 1.5
         });
         const neonRing = new THREE.Mesh(neonRingGeometry, neonMaterial);
         neonRing.rotation.x = Math.PI / 2;
-        neonRing.position.y = 0.35;
+        neonRing.position.y = 0.82;
         waterGroup.add(neonRing);
-
-        // Underwater lights removed for performance - neon ring provides glow effect
-
-        // Position the fountain in the center
+        
+        // Secondary neon ring (pink)
+        const neonRing2 = new THREE.Mesh(
+            new THREE.TorusGeometry(5.8, 0.04, 8, 32),
+            new THREE.MeshStandardMaterial({
+                color: COLORS.neonPink,
+                emissive: COLORS.neonPink,
+                emissiveIntensity: 1.2
+            })
+        );
+        neonRing2.rotation.x = Math.PI / 2;
+        neonRing2.position.y = 0.1;
+        waterGroup.add(neonRing2);
+        
+        // Underwater lights
+        const underwaterLightColors = [0x00ffff, 0xff00ff, 0x00ff88, 0xffff00];
+        for (let i = 0; i < 4; i++) {
+            const angle = (i / 4) * Math.PI * 2;
+            const light = new THREE.Mesh(
+                new THREE.SphereGeometry(0.15, 8, 6),
+                new THREE.MeshStandardMaterial({
+                    color: underwaterLightColors[i],
+                    emissive: underwaterLightColors[i],
+                    emissiveIntensity: 2.0,
+                    transparent: true,
+                    opacity: 0.8
+                })
+            );
+            light.position.set(
+                Math.cos(angle) * 3.5,
+                0.25,
+                Math.sin(angle) * 3.5
+            );
+            waterGroup.add(light);
+            
+            // Store for animation
+            this.animatedObjects.push({
+                object: light,
+                type: 'underwaterLight',
+                baseIntensity: 2.0,
+                phase: i * Math.PI / 2,
+                time: 0
+            });
+        }
+        
+        // Coin glints on bottom (pennies!)
+        for (let i = 0; i < 15; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * 4;
+            const coin = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.04, 0.04, 0.01, 8),
+                new THREE.MeshStandardMaterial({
+                    color: Math.random() > 0.5 ? 0xb87333 : 0xc0c0c0,  // Copper or silver
+                    metalness: 0.9,
+                    roughness: 0.3
+                })
+            );
+            coin.position.set(
+                Math.cos(angle) * dist,
+                0.11,
+                Math.sin(angle) * dist
+            );
+            coin.rotation.x = Math.random() * 0.2;
+            waterGroup.add(coin);
+        }
+        
+        // Position the fountain in the mall center
         waterGroup.position.set(0, 0, -15);
         this.scene.add(waterGroup);
     }
 
-    createWaterJet(parent) {
-        // Simplified water jet representation
-        const jetGeometry = new THREE.CylinderGeometry(0.05, 0.1, 1.5, 6, 1, true);
+    createImprovedWaterJets(parent) {
+        // ========================================
+        // CENTRAL WATER JET (main upward spray)
+        // ========================================
+        const mainJetGroup = new THREE.Group();
+        mainJetGroup.name = 'mainWaterJet';
+        
+        // Main jet stream (animated cylinder)
+        const jetGeometry = new THREE.CylinderGeometry(0.08, 0.12, 1.8, 12, 4, true);
         const jetMaterial = new THREE.MeshStandardMaterial({
-            color: 0x87CEEB,
+            color: 0xaaddff,
             transparent: true,
-            opacity: 0.5,
-            roughness: 0.1
+            opacity: 0.6,
+            roughness: 0.05,
+            side: THREE.DoubleSide
         });
-
-        // Central jet
-        const centralJet = new THREE.Mesh(jetGeometry, jetMaterial);
-        centralJet.position.y = 3.5;
-        parent.add(centralJet);
-
+        const mainJet = new THREE.Mesh(jetGeometry, jetMaterial);
+        mainJet.position.y = 4.9;
+        mainJetGroup.add(mainJet);
+        
+        // Jet spray top (spreading water)
+        const sprayTop = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+            new THREE.MeshStandardMaterial({
+                color: 0xcceeff,
+                transparent: true,
+                opacity: 0.5
+            })
+        );
+        sprayTop.position.y = 5.8;
+        sprayTop.scale.set(1, 0.5, 1);
+        mainJetGroup.add(sprayTop);
+        
+        parent.add(mainJetGroup);
+        
+        // Store for animation
         this.animatedObjects.push({
-            object: centralJet,
+            object: mainJetGroup,
             type: 'jet',
             time: 0
         });
-
-        // Spray particles
-        const particleCount = 20;
+        
+        // ========================================
+        // SIDE SPRAY JETS (4 angled jets)
+        // ========================================
+        for (let i = 0; i < 4; i++) {
+            const angle = (i / 4) * Math.PI * 2 + Math.PI / 4;
+            const sideJet = new THREE.Group();
+            
+            // Angled water stream
+            const sideJetMesh = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.03, 0.05, 0.8, 8, 2, true),
+                new THREE.MeshStandardMaterial({
+                    color: 0xaaddff,
+                    transparent: true,
+                    opacity: 0.5
+                })
+            );
+            sideJetMesh.position.y = 0.4;
+            sideJet.add(sideJetMesh);
+            
+            sideJet.position.set(
+                Math.cos(angle) * 0.5,
+                3.8,
+                Math.sin(angle) * 0.5
+            );
+            sideJet.rotation.z = -0.5;
+            sideJet.rotation.y = -angle;
+            
+            parent.add(sideJet);
+            
+            this.animatedObjects.push({
+                object: sideJet,
+                type: 'sideJet',
+                phase: i * Math.PI / 2,
+                time: 0
+            });
+        }
+        
+        // ========================================
+        // WATER DROPLETS/PARTICLES
+        // ========================================
+        const particleCount = 40;
         const particleGeometry = new THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
         const velocities = [];
-
+        
         for (let i = 0; i < particleCount; i++) {
-            positions[i * 3] = 0;
-            positions[i * 3 + 1] = 3 + Math.random() * 2;
-            positions[i * 3 + 2] = 0;
-
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * 0.5;
+            positions[i * 3] = Math.cos(angle) * radius;
+            positions[i * 3 + 1] = 4.5 + Math.random() * 2;
+            positions[i * 3 + 2] = Math.sin(angle) * radius;
+            
             velocities.push({
-                x: (Math.random() - 0.5) * 0.1,
-                y: Math.random() * 0.1,
-                z: (Math.random() - 0.5) * 0.1
+                x: (Math.random() - 0.5) * 0.08,
+                y: 0.05 + Math.random() * 0.1,
+                z: (Math.random() - 0.5) * 0.08,
+                life: Math.random()
             });
         }
-
+        
         particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
+        
         const particleMaterial = new THREE.PointsMaterial({
             color: 0xffffff,
-            size: 0.1,
+            size: 0.08,
             transparent: true,
-            opacity: 0.6
+            opacity: 0.7,
+            sizeAttenuation: true
         });
-
+        
         const particles = new THREE.Points(particleGeometry, particleMaterial);
         parent.add(particles);
-
+        
         this.waterParticles.push({
             points: particles,
             velocities: velocities,
-            positions: positions
+            positions: positions,
+            baseY: 4.5
         });
+    }
+
+    createCascadingWater(parent) {
+        // Water falling from upper bowl to lower basin
+        const cascadeCount = 8;
+        
+        for (let i = 0; i < cascadeCount; i++) {
+            const angle = (i / cascadeCount) * Math.PI * 2;
+            
+            // Water stream
+            const streamGeometry = new THREE.CylinderGeometry(0.04, 0.06, 2.2, 6, 4, true);
+            const streamMaterial = new THREE.MeshStandardMaterial({
+                color: 0xaaddff,
+                transparent: true,
+                opacity: 0.4,
+                roughness: 0.05,
+                side: THREE.DoubleSide
+            });
+            
+            const stream = new THREE.Mesh(streamGeometry, streamMaterial);
+            stream.position.set(
+                Math.cos(angle) * 0.85,
+                1.8,
+                Math.sin(angle) * 0.85
+            );
+            
+            // Slight outward angle
+            stream.rotation.z = 0.15;
+            stream.rotation.y = -angle;
+            
+            parent.add(stream);
+            
+            // Splash at bottom
+            const splash = new THREE.Mesh(
+                new THREE.RingGeometry(0.1, 0.25, 12),
+                new THREE.MeshStandardMaterial({
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 0.4,
+                    side: THREE.DoubleSide
+                })
+            );
+            splash.rotation.x = -Math.PI / 2;
+            splash.position.set(
+                Math.cos(angle) * 1.2,
+                0.58,
+                Math.sin(angle) * 1.2
+            );
+            parent.add(splash);
+            
+            // Store for animation
+            this.animatedObjects.push({
+                object: stream,
+                type: 'cascade',
+                phase: i * Math.PI / 4,
+                time: 0
+            });
+        }
+    }
+
+    createWaterJet(parent) {
+        // Legacy method - now handled by createImprovedWaterJets
+        // Kept for compatibility
     }
 
     createPlanters() {
@@ -1199,12 +1470,32 @@ export class Decorations {
                     }
                     break;
                 case 'water':
-                    // Subtle wave effect on water surface
-                    item.object.position.y = 0.6 + Math.sin(safeTime * 2) * 0.02;
+                    // Subtle wave effect on water surface with ripples
+                    item.object.position.y = 0.55 + Math.sin(safeTime * 2) * 0.015 + Math.sin(safeTime * 3.7) * 0.01;
                     break;
                 case 'jet':
-                    // Pulsing water jet
-                    item.object.scale.y = 1 + Math.sin(safeTime * 5) * 0.1;
+                    // Pulsing water jet with scale and position variation
+                    item.object.scale.y = 1 + Math.sin(safeTime * 5) * 0.12;
+                    item.object.scale.x = 1 + Math.sin(safeTime * 4) * 0.05;
+                    item.object.scale.z = 1 + Math.sin(safeTime * 4.5) * 0.05;
+                    item.object.position.y = Math.sin(safeTime * 3) * 0.03;
+                    break;
+                case 'sideJet':
+                    // Side jets pulse with phase offset
+                    const phase = item.phase || 0;
+                    item.object.scale.y = 0.8 + Math.sin(safeTime * 4 + phase) * 0.3;
+                    break;
+                case 'cascade':
+                    // Cascading water slight variation
+                    const cascadePhase = item.phase || 0;
+                    item.object.scale.y = 1 + Math.sin(safeTime * 3 + cascadePhase) * 0.08;
+                    item.object.material.opacity = 0.35 + Math.sin(safeTime * 2 + cascadePhase) * 0.1;
+                    break;
+                case 'underwaterLight':
+                    // Pulsing underwater lights
+                    const lightPhase = item.phase || 0;
+                    const intensity = item.baseIntensity || 2.0;
+                    item.object.material.emissiveIntensity = intensity * (0.7 + Math.sin(safeTime * 1.5 + lightPhase) * 0.3);
                     break;
                 case 'rotate':
                     const rotSpeed = item.speed || 0.5;
@@ -1226,6 +1517,7 @@ export class Decorations {
             
             const posArray = positions.array;
             const velocities = particle.velocities;
+            const baseY = particle.baseY || 3;
             
             if (!velocities) return;
             
@@ -1237,14 +1529,33 @@ export class Decorations {
                 
                 // Move particles
                 posArray[i * 3] += vel.x;
-                posArray[i * 3 + 1] += vel.y - 0.01; // Gravity
+                posArray[i * 3 + 1] += vel.y - 0.015; // Gravity
                 posArray[i * 3 + 2] += vel.z;
+                
+                // Life cycle for particles
+                if (vel.life !== undefined) {
+                    vel.life -= deltaTime * 0.5;
+                    if (vel.life <= 0) {
+                        // Reset particle
+                        const angle = Math.random() * Math.PI * 2;
+                        const radius = Math.random() * 0.3;
+                        posArray[i * 3] = Math.cos(angle) * radius;
+                        posArray[i * 3 + 1] = baseY + 1 + Math.random() * 1.5;
+                        posArray[i * 3 + 2] = Math.sin(angle) * radius;
+                        vel.x = (Math.random() - 0.5) * 0.08;
+                        vel.y = 0.03 + Math.random() * 0.08;
+                        vel.z = (Math.random() - 0.5) * 0.08;
+                        vel.life = 0.5 + Math.random() * 0.5;
+                    }
+                }
 
                 // Reset particles that fall below water level or have invalid values
                 if (posArray[i * 3 + 1] < 0.6 || isNaN(posArray[i * 3 + 1])) {
-                    posArray[i * 3] = (Math.random() - 0.5) * 0.5;
-                    posArray[i * 3 + 1] = 3 + Math.random() * 1.5;
-                    posArray[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = Math.random() * 0.3;
+                    posArray[i * 3] = Math.cos(angle) * radius;
+                    posArray[i * 3 + 1] = baseY + Math.random() * 1.5;
+                    posArray[i * 3 + 2] = Math.sin(angle) * radius;
                     vel.y = Math.random() * 0.1;
                 }
             }
