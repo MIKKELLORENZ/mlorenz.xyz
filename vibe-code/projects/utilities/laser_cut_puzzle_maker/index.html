@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laser Cut Puzzle Maker</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Fabric.js for canvas manipulation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <!-- ImageTracerJS: raster -> vector tracing (for real SVG paths) -->
+    <script src="https://cdn.jsdelivr.net/npm/imagetracerjs@1.2.6/imagetracer_v1.2.6.js"></script>
+    <!-- Google Fonts for variety -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Bangers&family=Dancing+Script&family=Lobster&family=Montserrat&family=Open+Sans&family=Oswald&family=Playfair+Display&family=Roboto&family=Pacifico&family=Permanent+Marker&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <header>
+                <h1>Puzzle Maker</h1>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 16px;">Create custom laser-ready jigsaw puzzles</p>
+            </header>
+            
+            <section class="control-group">
+                <h2><i data-lucide="settings-2" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></i> 1. Canvas Settings</h2>
+                <div class="input-row">
+                    <label>Width (px)</label>
+                    <input type="number" id="canvas-width" value="800">
+                </div>
+                <div class="input-row">
+                    <label>Height (px)</label>
+                    <input type="number" id="canvas-height" value="600">
+                </div>
+            </section>
+
+            <section class="control-group disabled" id="object-controls" aria-disabled="true">
+                <h2><i data-lucide="edit-3" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></i> 2. Edit Selected</h2>
+                <div id="image-processing-controls">
+                    <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Threshold Algorithm</label>
+                    <select id="threshold-type">
+                        <option value="threshold" selected>Simple Threshold</option>
+                        <option value="hdr">HDR Threshold</option>
+                        <option value="grayscale">Grayscale</option>
+                    </select>
+                    <div id="hdr-slider-container" style="display: none;">
+                        <div class="input-row">
+                            <label>HDR Strength</label>
+                            <div class="slider-group">
+                                <input type="range" id="hdr-strength" min="0" max="100" value="50">
+                                <span class="slider-value" id="hdr-strength-val">50</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="checkbox-row">
+                        <input type="checkbox" id="vectorize-enabled" checked>
+                        <label for="vectorize-enabled">Vector trace (SVG paths)</label>
+                    </div>
+                    <div class="input-row" style="margin-top: 12px;">
+                        <label>Quality</label>
+                        <select id="vectorize-quality" style="width: 120px; margin-bottom: 0;">
+                            <option value="fast">Fast</option>
+                            <option value="smooth" selected>Smooth</option>
+                            <option value="detailed">Detailed</option>
+                        </select>
+                    </div>
+                    <div id="smoothing-slider-container" class="input-row" style="margin-top: 12px;">
+                        <label>Smoothing</label>
+                        <div class="slider-group">
+                            <input type="range" id="smooth-radius" min="0" max="12" value="2">
+                            <span class="slider-value" id="smooth-radius-val">2</span>
+                        </div>
+                    </div>
+                    <div id="threshold-slider-container" class="input-row" style="margin-top: 12px;">
+                        <label>Threshold</label>
+                        <div class="slider-group">
+                            <input type="range" id="threshold-level" min="0" max="255" value="128">
+                            <span class="slider-value" id="threshold-level-val">128</span>
+                        </div>
+                    </div>
+                </div>
+                <button id="delete-btn" class="btn-danger" style="margin-top: 16px;">
+                    <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+                    Delete Selected
+                </button>
+            </section>
+
+            <section class="control-group">
+                <h2><i data-lucide="type" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></i> 3. Add Text</h2>
+                <button id="add-text-btn">
+                    <i data-lucide="plus-circle" style="width: 16px; height: 16px;"></i>
+                    Add New Text Box
+                </button>
+                <div id="text-controls" style="display: none; margin-top: 12px;">
+                    <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Font Family</label>
+                    <select id="font-family">
+                        <option value="Arial">Arial</option>
+                        <option value="Roboto">Roboto</option>
+                        <option value="Montserrat">Montserrat</option>
+                        <option value="Playfair Display">Playfair Display</option>
+                        <option value="Lobster">Lobster</option>
+                        <option value="Dancing Script">Dancing Script</option>
+                        <option value="Bangers">Bangers</option>
+                        <option value="Pacifico">Pacifico</option>
+                        <option value="Permanent Marker">Permanent Marker</option>
+                        <option value="Oswald">Oswald</option>
+                    </select>
+                    <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Text Content</label>
+                    <input type="text" id="text-string" placeholder="Enter text...">
+                </div>
+            </section>
+
+            <div class="hint" style="text-align: left; margin-top: auto;">
+                <div style="display: flex; align-items: flex-start; gap: 8px;">
+                    <i data-lucide="info" style="width: 16px; height: 16px; color: var(--accent-color); flex-shrink: 0; margin-top: 2px;"></i>
+                    <p style="margin: 0;"><strong>Tip:</strong> Drag and drop images directly onto the canvas to add them to your puzzle.</p>
+                </div>
+            </div>
+        </aside>
+
+        <main class="canvas-area" id="canvas-drop-zone">
+            <div class="ruler-wrapper">
+                <div class="canvas-toolbar" aria-label="History controls">
+                    <button id="undo-btn" class="icon-btn" type="button" aria-label="Undo" title="Undo"><i data-lucide="undo-2" style="width: 18px; height: 18px;"></i></button>
+                    <button id="redo-btn" class="icon-btn" type="button" aria-label="Redo" title="Redo"><i data-lucide="redo-2" style="width: 18px; height: 18px;"></i></button>
+                    <div style="width: 1px; height: 24px; background: var(--border-color); margin: 0 4px;"></div>
+                    <button id="default-view-btn" class="toolbar-btn" type="button" title="Reset zoom and pan">
+                        <i data-lucide="maximize" style="width: 14px; height: 14px;"></i>
+                        Default view
+                    </button>
+                </div>
+                <div id="ruler-x" class="ruler x-ruler"></div>
+                <div id="ruler-y" class="ruler y-ruler"></div>
+                <div id="canvas-container" style="position: relative;">
+                    <div id="empty-state-placeholder" class="empty-state">
+                        <i data-lucide="image-plus" style="width: 48px; height: 48px; color: #cbd5e1; margin-bottom: 16px;"></i>
+                        <p>Drag and drop image here</p>
+                        <span style="font-size: 0.875rem; color: #94a3b8;">to start creating your puzzle</span>
+                    </div>
+                    <div id="canvas-loading" class="canvas-loading" style="display: none;">
+                        <div class="loading-spinner">
+                            <i data-lucide="loader-2" style="width: 32px; height: 32px; color: var(--accent-color);"></i>
+                        </div>
+                    </div>
+                    <canvas id="main-canvas"></canvas>
+                </div>
+            </div>
+        </main>
+
+        <aside class="sidebar sidebar-right">
+            <section class="control-group">
+                <h2><i data-lucide="puzzle" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></i> 4. Puzzle Settings</h2>
+                <div class="input-row">
+                    <label>Style</label>
+                    <select id="puzzle-style" style="width: 160px; margin-bottom: 0;">
+                        <option value="classic">Classic Jigsaw</option>
+                        <option value="geometric">Geometric (Square)</option>
+                        <option value="wavy">Wavy (Sine)</option>
+                        <option value="triangular">Triangular</option>
+                        <option value="honeycomb">Honeycomb (Hex)</option>
+                        <option value="shards">Random Shards</option>
+                        <option value="brick">Brick / Offset</option>
+                        <option value="curved">Curved Edges</option>
+                        <option value="diamond">Diamond Grid</option>
+                        <option value="organic">Organic (Bezier)</option>
+                        <option value="strips">Horizontal Strips</option>
+                        <option value="columns">Vertical Columns</option>
+                    </select>
+                </div>
+                <div class="input-row">
+                    <label>Columns</label>
+                    <input type="number" id="puzzle-cols" value="5" min="2" max="50">
+                </div>
+                <div class="input-row">
+                    <label>Rows</label>
+                    <input type="number" id="puzzle-rows" value="4" min="2" max="50">
+                </div>
+                <div class="input-row">
+                    <label>Tab Size</label>
+                    <div class="slider-group">
+                        <input type="range" id="tab-size" min="10" max="40" value="20">
+                        <span class="slider-value" id="tab-size-val">20</span>
+                    </div>
+                </div>
+                <div class="input-row">
+                    <label>Jitter</label>
+                    <div class="slider-group">
+                        <input type="range" id="jitter" min="0" max="20" value="5">
+                        <span class="slider-value" id="jitter-val">5</span>
+                    </div>
+                </div>
+                <button id="generate-puzzle" style="margin-top: 8px; background-color: #f1f5f9; color: var(--primary-color); border: 1px solid var(--border-color);">
+                    <i data-lucide="refresh-cw" style="width: 16px; height: 16px;"></i>
+                    Regenerate Randomly
+                </button>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="show-puzzle" checked>
+                    <label for="show-puzzle">Show Puzzle Overlay</label>
+                </div>
+            </section>
+
+            <section class="control-group">
+                <h2><i data-lucide="download" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></i> 5. Export</h2>
+                <button id="export-svg" class="btn-success">
+                    <i data-lucide="file-output" style="width: 20px; height: 20px;"></i>
+                    Export SVG for Laser
+                </button>
+                <div class="hint">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 4px;">
+                        <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; background: #000; border-radius: 50%;"></span> Engrave</span>
+                        <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; background: #f00; border-radius: 50%;"></span> Cut</span>
+                    </div>
+                    Ready for Glowforge, LightBurn, etc.
+                </div>
+            </section>
+        </aside>
+    </div>
+
+    <script src="script.js"></script>
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+    </script>
+</body>
+</html>
+
