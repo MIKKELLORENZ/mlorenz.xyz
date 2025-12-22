@@ -839,8 +839,29 @@ deleteBtn.addEventListener('click', () => {
 // --- Puzzle Generation ---
 generatePuzzleBtn.addEventListener('click', generatePuzzle);
 
+function isPuzzlePathObject(obj) {
+    if (!obj) return false;
+    if (obj.isPuzzlePath) return true;
+
+    // Back-compat / heuristic: older sessions may have puzzle paths without the flag.
+    // Treat non-selectable transparent red paths as puzzle cut indicators.
+    const stroke = (typeof obj.stroke === 'string') ? obj.stroke.toLowerCase() : '';
+    const fill = (typeof obj.fill === 'string') ? obj.fill.toLowerCase() : '';
+    return (
+        obj.type === 'path' &&
+        stroke === UI_CUT_STROKE_COLOR &&
+        fill === 'transparent' &&
+        obj.selectable === false &&
+        obj.evented === false
+    );
+}
+
+function getAllPuzzlePathObjects() {
+    return canvas.getObjects().filter(isPuzzlePathObject);
+}
+
 function removeAllPuzzlePaths() {
-    const puzzleObjects = canvas.getObjects().filter(obj => obj && obj.isPuzzlePath);
+    const puzzleObjects = getAllPuzzlePathObjects();
     if (puzzleObjects.length === 0) return;
 
     if (canvas.getActiveObject() && canvas.getActiveObject().isPuzzlePath) {
@@ -1221,11 +1242,11 @@ function generatePuzzle() {
 });
 
 showPuzzleCheckbox.addEventListener('change', () => {
-    if (puzzlePath) {
-        const shouldShow = showPuzzleCheckbox.checked && hasAnyImages();
-        puzzlePath.set('opacity', shouldShow ? 1 : 0);
-        canvas.renderAll();
-    }
+    const shouldShow = showPuzzleCheckbox.checked && hasAnyImages();
+    const puzzleObjects = getAllPuzzlePathObjects();
+    if (puzzleObjects.length === 0) return;
+    puzzleObjects.forEach(p => p.set('opacity', shouldShow ? 1 : 0));
+    canvas.renderAll();
 });
 
 // --- Export SVG ---
@@ -1235,16 +1256,20 @@ exportSvgBtn.addEventListener('click', () => {
     // 2. Puzzle paths should be red stroke, very thin.
     // 3. Clip everything to the canvas boundary.
     
-    const originalOpacity = puzzlePath ? puzzlePath.opacity : 0;
-    const originalStrokeWidth = puzzlePath ? puzzlePath.strokeWidth : 0;
-    
-    if (puzzlePath) {
-        puzzlePath.set({
+    const puzzleObjects = getAllPuzzlePathObjects();
+    const originalPuzzleState = puzzleObjects.map(p => ({
+        obj: p,
+        opacity: p.opacity,
+        strokeWidth: p.strokeWidth
+    }));
+
+    puzzleObjects.forEach(p => {
+        p.set({
             opacity: 1,
             stroke: UI_CUT_STROKE_COLOR,
             strokeWidth: EXPORT_CUT_STROKE_WIDTH
         });
-    }
+    });
 
     let svg = canvas.toSVG({
         suppressPreamble: false,
@@ -1253,12 +1278,9 @@ exportSvgBtn.addEventListener('click', () => {
     });
 
     // Restore UI state
-    if (puzzlePath) {
-        puzzlePath.set({
-            opacity: originalOpacity,
-            strokeWidth: originalStrokeWidth
-        });
-    }
+    originalPuzzleState.forEach(({ obj, opacity, strokeWidth }) => {
+        obj.set({ opacity, strokeWidth });
+    });
     syncPuzzleStrokeForZoom();
     canvas.renderAll();
 
@@ -1332,7 +1354,9 @@ function restoreState(index) {
         // Re-link puzzlePath and re-apply processing on images
         puzzlePath = null;
         canvas.getObjects().forEach((obj) => {
-            if (obj && obj.isPuzzlePath) {
+            if (isPuzzlePathObject(obj)) {
+                // Ensure future operations can identify it reliably
+                obj.isPuzzlePath = true;
                 puzzlePath = obj;
                 obj.selectable = false;
                 obj.evented = false;
