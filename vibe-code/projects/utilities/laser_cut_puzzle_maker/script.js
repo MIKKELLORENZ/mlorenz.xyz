@@ -6,6 +6,7 @@ const canvas = new fabric.Canvas('main-canvas', {
 // State
 let puzzlePath = null;
 let selectedObject = null;
+let puzzlePathIdCounter = 0;
 
 // History (Undo/Redo)
 const MAX_HISTORY = 6; // current + 5 steps back
@@ -841,6 +842,7 @@ generatePuzzleBtn.addEventListener('click', generatePuzzle);
 
 function isPuzzlePathObject(obj) {
     if (!obj) return false;
+    if (typeof obj.puzzlePathId === 'number') return true;
     if (obj.isPuzzlePath) return true;
 
     // Back-compat / heuristic: older sessions may have puzzle paths without the flag.
@@ -870,6 +872,21 @@ function removeAllPuzzlePaths() {
 
     puzzleObjects.forEach(obj => canvas.remove(obj));
     puzzlePath = null;
+}
+
+function pruneStalePuzzlePaths(latest) {
+    const puzzleObjects = getAllPuzzlePathObjects();
+    if (puzzleObjects.length <= 1) return;
+    const keeper = latest || puzzleObjects[puzzleObjects.length - 1];
+    if (!keeper) return;
+    puzzleObjects.forEach(obj => {
+        if (obj !== keeper) {
+            canvas.remove(obj);
+        }
+    });
+    if (!latest) {
+        puzzlePath = keeper;
+    }
 }
 
 function generatePuzzle() {
@@ -999,14 +1016,20 @@ function generatePuzzle() {
     // Special case for Honeycomb (Hex)
     if (style === 'honeycomb') {
         pathData = ''; // Reset path data for hex
-        const hexW = cellW;
-        const hexH = cellH;
-        for (let r = 0; r <= rows; r++) {
-            for (let c = 0; c <= cols; c++) {
+        const honeycombCols = Math.max(1, cols);
+        const honeycombRows = Math.max(1, rows);
+        const hexW = width / (1.5 * honeycombCols + 0.5);
+        const hexH = height / (honeycombRows + 0.5);
+
+        for (let r = 0; r < honeycombRows; r++) {
+            for (let c = 0; c < honeycombCols; c++) {
                 const x = c * hexW * 1.5;
                 const y = r * hexH + (c % 2 === 0 ? 0 : hexH / 2);
-                
-                // Draw a hexagon
+
+                // Draw a hexagon, skipping any that would start outside the canvas
+                if (x + 2 * hexW < -0.5 || x > width + 0.5) continue;
+                if (y + hexH < -0.5 || y > height + 0.5) continue;
+
                 pathData += `M ${x + hexW * 0.5} ${y} `;
                 pathData += `L ${x + hexW * 1.5} ${y} `;
                 pathData += `L ${x + hexW * 2} ${y + hexH * 0.5} `;
@@ -1015,6 +1038,7 @@ function generatePuzzle() {
                 pathData += `L ${x} ${y + hexH * 0.5} Z `;
             }
         }
+        pathData += `M 0 0 L ${width} 0 L ${width} ${height} L 0 ${height} Z `;
     }
 
     // Brick / Offset pattern
@@ -1216,6 +1240,7 @@ function generatePuzzle() {
         pathData += `M 0 ${height} L ${width} ${height} `;
     }
 
+    const puzzleId = ++puzzlePathIdCounter;
     puzzlePath = new fabric.Path(pathData, {
         stroke: UI_CUT_STROKE_COLOR,
         strokeWidth: getCutStrokeWidthForZoom(),
@@ -1223,13 +1248,15 @@ function generatePuzzle() {
         selectable: false,
         evented: false,
         opacity: (showPuzzleCheckbox.checked && hasAnyImages()) ? 1 : 0,
-        isPuzzlePath: true
+        isPuzzlePath: true,
+        puzzlePathId: puzzleId
     });
 
     canvas.add(puzzlePath);
     puzzlePath.bringToFront();
     syncPuzzleStrokeForZoom();
     canvas.renderAll();
+    pruneStalePuzzlePaths(puzzlePath);
 }
 
 // Reactive Puzzle Settings
@@ -1255,6 +1282,18 @@ exportSvgBtn.addEventListener('click', () => {
     // 1. All images/text should be black fill.
     // 2. Puzzle paths should be red stroke, very thin.
     // 3. Clip everything to the canvas boundary.
+    const clipRect = new fabric.Rect({
+        left: 0,
+        top: 0,
+        width: canvas.width,
+        height: canvas.height,
+        absolutePositioned: true,
+        selectable: false,
+        evented: false
+    });
+    const prevClipPath = canvas.clipPath;
+    canvas.clipPath = clipRect;
+    canvas.requestRenderAll();
     
     const puzzleObjects = getAllPuzzlePathObjects();
     const originalPuzzleState = puzzleObjects.map(p => ({
@@ -1304,6 +1343,8 @@ exportSvgBtn.addEventListener('click', () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    canvas.clipPath = prevClipPath;
+    canvas.requestRenderAll();
 });
 
 // --- Undo / Redo ---
@@ -1357,6 +1398,7 @@ function restoreState(index) {
             if (isPuzzlePathObject(obj)) {
                 // Ensure future operations can identify it reliably
                 obj.isPuzzlePath = true;
+                obj.puzzlePathId = ++puzzlePathIdCounter;
                 puzzlePath = obj;
                 obj.selectable = false;
                 obj.evented = false;
@@ -1382,6 +1424,7 @@ function restoreState(index) {
         });
 
         if (puzzlePath) puzzlePath.bringToFront();
+        pruneStalePuzzlePaths(puzzlePath);
         syncPuzzleStrokeForZoom();
         canvas.renderAll();
         updateEditSelectedAvailability();

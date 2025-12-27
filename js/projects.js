@@ -86,6 +86,18 @@ document.addEventListener('DOMContentLoaded', function() {
             type: "iframe"
         },
 
+        {
+            id: "laser_cut_puzzle_maker",
+            title: "Laser Cut Puzzle Maker",
+            description: "Create custom laser-cut ready puzzles from your images.",
+            thumbnail: "../vibe-code/projects/utilities/laser_cut_puzzle_maker/thumbnail.jpg",
+            category: "utilities",
+            tags: ["laser cut", "puzzle", "image processing"],
+            date: "2025-12-27",
+            path: "projects/utilities/laser_cut_puzzle_maker/index.html",
+            type: "iframe"
+        },
+
 
 
     ];

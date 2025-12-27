@@ -8,6 +8,10 @@
 </head>
 <body>
     <div class="container">
+        <header>
+            <h1>HDR Studio</h1>
+            <p>Professional-grade high dynamic range enhancement</p>
+        </header>
         <main>
             <div class="upload-section">
                 <div class="upload-area" id="uploadArea">
@@ -36,31 +40,69 @@
                     <h3>HDR Enhancement</h3>
                     <div class="controls">
                         <div class="control-group">
-                            <label for="hdrBlend">Blend</label>
-                            <input type="range" id="hdrBlend" min="0" max="100" value="50">
-                            <span id="hdrBlendValue">50%</span>
-                            <small>Blend between original (0%) and HDR enhanced (100%)</small>
+                            <label for="hdrBlend">HDR Intensity</label>
+                            <input type="range" id="hdrBlend" min="0" max="100" value="70">
+                            <span id="hdrBlendValue">70%</span>
+                            <small>Overall strength of the HDR effect</small>
                         </div>
                         
                         <div class="control-group">
                             <label for="exposure">Exposure</label>
                             <input type="range" id="exposure" min="-2" max="2" step="0.1" value="0">
                             <span id="exposureValue">0.0</span>
-                            <small>Adjust overall brightness (-2 to +2 stops)</small>
+                            <small>Adjust overall brightness</small>
+                        </div>
+
+                        <div class="control-row">
+                            <div class="control-group half">
+                                <label for="shadows">Shadows</label>
+                                <input type="range" id="shadows" min="0" max="100" value="50">
+                                <span id="shadowsValue">50</span>
+                                <small>Lift dark areas</small>
+                            </div>
+                            <div class="control-group half">
+                                <label for="highlights">Highlights</label>
+                                <input type="range" id="highlights" min="0" max="100" value="50">
+                                <span id="highlightsValue">50</span>
+                                <small>Recover bright areas</small>
+                            </div>
+                        </div>
+
+                        <div class="control-row">
+                            <div class="control-group half">
+                                <label for="contrast">Contrast</label>
+                                <input type="range" id="contrast" min="0" max="200" value="100">
+                                <span id="contrastValue">100%</span>
+                                <small>Global contrast</small>
+                            </div>
+                            <div class="control-group half">
+                                <label for="detail">Detail</label>
+                                <input type="range" id="detail" min="0" max="100" value="100">
+                                <span id="detailValue">100</span>
+                                <small>Local contrast/clarity</small>
+                            </div>
+                        </div>
+                        
+                        <div class="control-row">
+                            <div class="control-group half">
+                                <label for="vibrance">Vibrance</label>
+                                <input type="range" id="vibrance" min="0" max="200" value="100">
+                                <span id="vibranceValue">100%</span>
+                                <small>Smart saturation</small>
+                            </div>
+                            <div class="control-group half">
+                                <label for="saturation">Saturation</label>
+                                <input type="range" id="saturation" min="0" max="200" value="100">
+                                <span id="saturationValue">100%</span>
+                                <small>Global color intensity</small>
+                            </div>
                         </div>
                         
                         <div class="control-group">
-                            <label for="vibrance">Vibrance</label>
-                            <input type="range" id="vibrance" min="0" max="200" value="100">
-                            <span id="vibranceValue">100%</span>
-                            <small>Enhance color saturation selectively (0% to 200%)</small>
-                        </div>
-                        
-                        <div class="control-group">
-                            <label for="transitionZone">Transition Zone</label>
-                            <input type="range" id="transitionZone" min="10" max="100" value="50">
+                            <label for="transitionZone">Smoothing</label>
+                            <input type="range" id="transitionZone" min="0" max="100" value="50">
                             <span id="transitionZoneValue">50%</span>
-                            <small>Control HDR effect transition smoothness (10% = sharp, 100% = smooth)</small>
+                            <small>HDR transition smoothness</small>
                         </div>
                     </div>
 

@@ -19,6 +19,16 @@
       --radius: 18px;
     }
 
+    [data-theme="dark"] {
+      --sky-top: #0b1026;
+      --sky-mid: #1a2a4a;
+      --sky-bottom: #2c3e50;
+      --glass-bg: rgba(0, 0, 0, 0.3);
+      --glass-stroke: rgba(255, 255, 255, 0.1);
+      --text-dark: #e0e6ed;
+      --muted: #a0aec0;
+    }
+
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; font-family: var(--counter-font); color: var(--text-dark); }
 
@@ -50,25 +60,40 @@
       text-shadow: 0 2px 0 rgba(255,255,255,0.9), 0 20px 60px rgba(0,0,0,0.15); }
 
     /* Controls */
-    .controls { display:flex; gap: 12px; align-items: stretch; flex-wrap: wrap; }
-    .row { display:flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .stack { display:flex; flex-direction: column; gap: 6px; }
-    label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity:.8; display:block; }
-    .note { font-size: 12px; opacity: .75; margin-top: -4px; }
-    input[type="number"], select {
-      height: 42px; border-radius: 12px; border:1px solid rgba(0,0,0,0.08);
-      background: rgba(255,255,255,0.65);
-      padding: 0 14px; font-size: 16px; font-weight: 600; color: var(--text-dark);
-      outline: none; box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 0 rgba(0,0,0,0.03); }
-    input[type="range"]{ width: 220px; }
+    .controls { display:flex; flex-direction: column; gap: 16px; }
+    .controls-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; width: 100%; }
+    
+    .inputs-group { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+    .actions-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-    .btn { height: 44px; border-radius: 12px; padding: 0 16px; font-weight: 800; font-size: 15px;
-      border: 0; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-      transition: transform .05s ease, box-shadow .2s ease, filter .2s ease; }
-    .btn:active { transform: translateY(1px); }
-    .primary { background: linear-gradient(180deg, #ffe08a, #ffcc33); }
-    .neutral { background: #ffffff; }
-    .right { margin-left:auto; display:flex; gap:10px; }
+    .stack { display:flex; flex-direction: column; gap: 6px; }
+    label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; opacity:.5; display:block; }
+    .note { font-size: 11px; opacity: .5; margin-top: 2px; white-space: nowrap; }
+    
+    input[type="number"], select {
+      height: 40px; border-radius: 10px; border:1px solid rgba(0,0,0,0.1);
+      background: rgba(255,255,255,0.8);
+      padding: 0 12px; font-size: 14px; font-weight: 600; color: var(--text-dark);
+      outline: none; box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
+      transition: all 0.2s ease; }
+    input#salary { width: 140px; }
+    select#mode, select#currency { width: 130px; }
+    
+    input[type="number"]:focus, select:focus { border-color: #ffcc33; background: #fff; box-shadow: 0 0 0 3px rgba(255,204,51,0.2); }
+    input[type="range"]{ width: 100%; min-width: 100px; }
+
+    .btn { height: 40px; border-radius: 10px; padding: 0 16px; font-weight: 800; font-size: 13px;
+      border: 0; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .btn:active { transform: translateY(0); }
+    
+    .btn.icon { width: 40px; padding: 0; font-size: 16px; }
+    .primary { background: #ffcc33; color: #7a5a00; }
+    .primary:hover { background: #ffd54b; }
+    .neutral { background: rgba(255,255,255,0.9); color: var(--text-dark); border: 1px solid rgba(0,0,0,0.05); }
+    .neutral:hover { background: #fff; }
 
     /* Panels (Visual & History side-by-side) */
     .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; }
@@ -82,36 +107,24 @@
 
     /* Coins */
     .coins-layer { position: fixed; inset: 0; overflow: hidden; z-index: 1; pointer-events: none; }
-    .coin { position: absolute; top: -120px; width: var(--sz); height: var(--sz); left: var(--x);
-      transform: translateY(-150px) rotateZ(0deg) rotateY(0deg);
-      will-change: transform, opacity; animation: fall var(--dur) cubic-bezier(.2,.6,.2,1.01) forwards;
-      filter: drop-shadow(0 6px 5px rgba(0,0,0,0.15)); perspective: 800px; }
+    #coinsCanvas { width: 100%; height: 100%; display: block; }
 
-    /* Coin face base (gold) */
-    .coin .face { position:absolute; inset:0; border-radius: 50%;
-      background:
-        radial-gradient(circle at 35% 35%, #fff8c6 0%, #fff2a6 18%, #ffe88a 19%, transparent 20%),
-        radial-gradient(circle at 50% 45%, #ffd54b 0%, #ffc72b 55%, #f0b018 75%, #c98d0a 100%);
-      border: 2px solid #f3c12b; box-shadow:
-        inset 0 2px 2px rgba(255,255,255,0.9),
-        inset 0 -6px 10px rgba(0,0,0,0.15),
-        inset 0 0 0 8px #ffde7a80,
-        0 2px 0 rgba(255,255,255,0.5); }
-    .coin.silver .face { background:
-      radial-gradient(circle at 35% 35%, #ffffff 0%, #f2f6ff 18%, #e6ecff 19%, transparent 20%),
-      radial-gradient(circle at 50% 45%, #e6eef7 0%, #d5deea 55%, #b8c4d4 75%, #9aa6b8 100%);
-      border-color:#cbd5df; }
-    .coin.copper .face { background:
-      radial-gradient(circle at 35% 35%, #ffe1c6 0%, #ffd0a6 18%, #ffbd88 19%, transparent 20%),
-      radial-gradient(circle at 50% 45%, #ffad6b 0%, #f08f3a 55%, #cd6f1d 75%, #a4550f 100%);
-      border-color:#e38a3f; }
-    .coin .face::before{ content:""; position:absolute; inset:10% 10%; border-radius:50%;
-      box-shadow: inset 0 10px 16px rgba(255,255,255,0.5), inset 0 -12px 20px rgba(0,0,0,0.15);
-      background: radial-gradient(circle at 60% 40%, #fff6 0 20%, transparent 55%); }
-    .coin .face::after{ content:""; position:absolute; inset:2% 2%; border-radius:50%; -webkit-mask: radial-gradient(circle, transparent 66%, #000 67%); mask: radial-gradient(circle, transparent 66%, #000 67%); background: repeating-conic-gradient(#ffd55a 0deg 6deg, #e2b642 6deg 12deg); opacity:.6; filter: saturate(1.1) brightness(1.02); }
-    .coin .symbol { position:absolute; inset:0; display:grid; place-items:center; border-radius:50%; font-weight: 900; color:#7a5a00; text-shadow: 0 1px 0 #fff9, 0 -1px 0 #0003, 0 0 12px #fff6; font-size: calc(var(--sz) * 0.42); line-height: 1; user-select: none; }
-    .coin.silver .symbol { color:#5b6777; } .coin.copper .symbol { color:#6a3a00; }
-    @keyframes fall { to { transform: translateY(calc(100vh + 200px)) rotateZ(540deg) rotateY(var(--ry, 360deg)); opacity: .98; } }
+    /* Milestones */
+    .milestone-toast {
+      position: fixed; bottom: 30px; right: 30px;
+      background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px);
+      padding: 16px 24px; border-radius: 20px; border: 1px solid var(--glass-stroke);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+      display: flex; align-items: center; gap: 12px;
+      transform: translateY(100px); opacity: 0;
+      transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      z-index: 100;
+    }
+    .milestone-toast.show { transform: translateY(0); opacity: 1; }
+    .milestone-icon { font-size: 24px; }
+    .milestone-text { display: flex; flex-direction: column; }
+    .milestone-title { font-weight: 800; font-size: 14px; color: var(--text-dark); }
+    .milestone-desc { font-size: 12px; color: var(--muted); }
 
     /* History chart */
     .history .panel-body { gap: 12px; }
@@ -125,45 +138,54 @@
 <body>
   <div class="sky" id="sky" aria-hidden="true"></div>
 
-  <div class="hud">
+  <button id="showHud" class="btn glass" style="position: fixed; top: 20px; left: 20px; z-index: 10; display: none; background: var(--glass-bg); backdrop-filter: blur(10px); border: 1px solid var(--glass-stroke);">⚙️ Settings</button>
+
+  <div class="hud" id="mainHud">
     <section class="card controls">
-      <div class="row" style="align-items:flex-start; gap:16px; width:100%;">
-        <div class="stack">
-          <label id="salaryLabel" for="salary">Monthly salary</label>
-          <input id="salary" type="number" min="0" step="100" placeholder="80000" inputmode="decimal"/>
-          <div id="calcNote" class="note">Based on 157.5 hrs/month (37.5×4.2)</div>
+      <div class="controls-row">
+        <div class="inputs-group">
+          <div class="stack">
+            <label id="salaryLabel" for="salary">Monthly salary</label>
+            <input id="salary" type="number" min="0" step="100" placeholder="80000" inputmode="decimal"/>
+            <div id="calcNote" class="note">Based on 157.5 hrs/month</div>
+          </div>
+          <div class="stack">
+            <label for="mode">Mode</label>
+            <select id="mode">
+              <option value="monthly">Per month</option>
+              <option value="hourly">Per hour</option>
+            </select>
+          </div>
+          <div class="stack">
+            <label for="currency">Currency</label>
+            <select id="currency">
+              <option value="DKK">DKK</option>
+              <option value="EUR">EUR</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+          <button class="btn primary" id="apply">Apply</button>
         </div>
-        <div class="stack">
-          <label for="mode">Mode</label>
-          <select id="mode">
-            <option value="monthly">Per month</option>
-            <option value="hourly">Per hour</option>
-          </select>
-        </div>
-        <div class="stack">
-          <label for="currency">Currency</label>
-          <select id="currency">
-            <option value="DKK">DKK</option>
-            <option value="EUR">EUR</option>
-            <option value="USD">USD</option>
-          </select>
-        </div>
-        <button class="btn neutral" id="apply" style="align-self:flex-end;">Apply</button>
-        <div class="right">
+        
+        <div class="actions-group">
+          <button class="btn neutral icon" id="muteToggle" title="Toggle Sound">🔊</button>
+          <button class="btn neutral icon" id="themeToggle" title="Toggle Dark Mode">🌓</button>
+          <div style="width: 1px; height: 24px; background: rgba(0,0,0,0.1); margin: 0 4px;"></div>
           <button class="btn primary" id="start">Start</button>
           <button class="btn neutral" id="pause">Pause</button>
           <button class="btn neutral" id="reset">Reset</button>
-          <button class="btn neutral" id="fullscreen" title="Toggle fullscreen">⛶</button>
+          <button class="btn neutral icon" id="fullscreen" title="Toggle fullscreen">⛶</button>
+          <button class="btn neutral icon" id="hideHud" title="Hide Controls">✕</button>
         </div>
       </div>
 
       <!-- Side-by-side panels -->
-      <div class="panels">
+      <div id="hudPanels" class="panels">
         <details class="panel" id="visualPanel">
           <summary>Visual settings</summary>
           <div class="panel-body">
             <div class="grid-2">
-              <div class="field"><label for="rate">Coins / minute</label><input id="rate" type="range" min="1" max="120" value="36"/><span id="rateVal" class="pill">36</span></div>
+              <div class="field"><label for="rate">Coins / minute</label><input id="rate" type="range" min="1" max="600" value="36"/><span id="rateVal" class="pill">36</span></div>
               <div class="field"><label for="fallMode">Fall pattern</label><select id="fallMode"><option value="constant">Constant</option><option value="natural">Natural</option></select></div>
               <div class="field"><label for="fallSpeed">Fall speed</label><input id="fallSpeed" type="range" min="3000" max="15000" step="250" value="7000" /><span id="fallSpeedVal" class="pill">7000ms</span></div>
               <div class="field"><label for="coinTheme">Coin style</label><select id="coinTheme"><option value="gold">Gold</option><option value="silver">Silver</option><option value="copper">Copper</option></select></div>
@@ -194,13 +216,29 @@
     </section>
   </div>
 
-  <div class="center"><h1 id="bigAmount">0,0</h1></div>
-  <div class="coins-layer" id="coinsLayer" aria-hidden="true"></div>
+  <div class="center">
+    <div class="stack" style="align-items: center;">
+      <h1 id="bigAmount">0,0</h1>
+      <div id="sessionAmount" class="pill" style="font-size: 18px; padding: 8px 16px; background: rgba(255,255,255,0.4);">Session: 0,0</div>
+    </div>
+  </div>
+  <div class="coins-layer" id="coinsLayer" aria-hidden="true">
+    <canvas id="coinsCanvas"></canvas>
+  </div>
+
+  <div id="milestoneToast" class="milestone-toast">
+    <div class="milestone-icon" id="milestoneIcon">☕</div>
+    <div class="milestone-text">
+      <div class="milestone-title" id="milestoneTitle">Coffee Earned!</div>
+      <div class="milestone-desc" id="milestoneDesc">You just earned enough for a coffee.</div>
+    </div>
+  </div>
 
   <script>
     (function(){
       const HOURS_PER_MONTH = 157.5; // 37.5 hrs/week × 4.2 weeks/month
       const bigAmount = document.getElementById('bigAmount');
+      const sessionAmount = document.getElementById('sessionAmount');
       const salaryLabel = document.getElementById('salaryLabel');
       const calcNote = document.getElementById('calcNote');
       const salaryInput = document.getElementById('salary');
@@ -211,6 +249,11 @@
       const pauseBtn = document.getElementById('pause');
       const resetBtn = document.getElementById('reset');
       const fullscreenBtn = document.getElementById('fullscreen');
+      const themeToggle = document.getElementById('themeToggle');
+      const muteToggle = document.getElementById('muteToggle');
+      const hideHudBtn = document.getElementById('hideHud');
+      const showHudBtn = document.getElementById('showHud');
+      const mainHud = document.getElementById('mainHud');
 
       const rateRange = document.getElementById('rate');
       const rateVal = document.getElementById('rateVal');
@@ -231,8 +274,14 @@
       const historyChart = document.getElementById('historyChart');
       const historySummary = document.getElementById('historySummary');
 
-      const coinsLayer = document.getElementById('coinsLayer');
+      const coinsCanvas = document.getElementById('coinsCanvas');
+      const ctx = coinsCanvas.getContext('2d');
       const sky = document.getElementById('sky');
+
+      const milestoneToast = document.getElementById('milestoneToast');
+      const milestoneIcon = document.getElementById('milestoneIcon');
+      const milestoneTitle = document.getElementById('milestoneTitle');
+      const milestoneDesc = document.getElementById('milestoneDesc');
 
       // LocalStorage keys
       const K = {
@@ -253,8 +302,42 @@
         running: 'fc_running',
         hiddenAt: 'fc_hidden_at',
         earnedTotal: 'fc_earned_total',
-        daily: 'fc_daily'
+        daily: 'fc_daily',
+        sessionStart: 'fc_session_start',
+        theme: 'fc_theme',
+        hudVisible: 'fc_hud_visible',
+        muted: 'fc_muted'
       };
+
+      // Milestones
+      const MILESTONES = [
+        { val: 5, title: "Coffee Time!", desc: "You've earned a coffee.", icon: "☕" },
+        { val: 15, title: "Lunch is on you!", desc: "You've earned a nice lunch.", icon: "🍱" },
+        { val: 50, title: "Video Game!", desc: "You've earned a new game.", icon: "🎮" },
+        { val: 100, title: "Fancy Dinner!", desc: "Time for a celebration.", icon: "🥂" },
+        { val: 500, title: "Weekend Trip!", desc: "You're crushing it.", icon: "✈️" },
+        { val: 1000, title: "New Tech!", desc: "Treat yourself to something shiny.", icon: "💻" }
+      ];
+
+      // Audio Context for "Clink"
+      let audioCtx = null;
+      function playClink() {
+        try {
+          if (muted) return;
+          if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(800 + Math.random() * 400, audioCtx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(2000, audioCtx.currentTime + 0.05);
+          gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.1);
+        } catch(e) {}
+      }
 
       // ------- State -------
       let mode = localStorage.getItem(K.mode) || 'monthly';
@@ -270,16 +353,21 @@
       let cloudsOpacityPct = Number(localStorage.getItem(K.cloudOpacity)) || 60;
       let fontKey = localStorage.getItem(K.font) || 'sans';
       let fontVw = Number(localStorage.getItem(K.fontVw)) || 14;
+      let theme = localStorage.getItem(K.theme) || 'light';
+      let hudVisible = localStorage.getItem(K.hudVisible) !== '0';
+      let muted = localStorage.getItem(K.muted) === '1';
 
-      let running = localStorage.getItem(K.running) === '1' ? true : false;
-      let startTimeEpoch = parseInt(localStorage.getItem(K.startedAt)||'0') || 0; // epoch ms
+      let running = localStorage.getItem(K.running) === '1';
+      let startTimeEpoch = parseInt(localStorage.getItem(K.startedAt)||'0') || 0;
+      let sessionStartEpoch = parseInt(localStorage.getItem(K.sessionStart)||'0') || Date.now();
       let spawnerTimer = null;
-      let earnedTotal = Number(localStorage.getItem(K.earnedTotal)) || 0; // base total persisted
+      let earnedTotal = Number(localStorage.getItem(K.earnedTotal)) || 0;
+      let sessionEarned = 0;
+      let reachedMilestones = new Set();
 
-      // Continuous ticker
-      let rafId = null;
-      let tickStartPerf = 0; // perf baseline
-      let tickStartEpoch = 0; // epoch baseline
+      // Canvas State
+      let coins = [];
+      let lastFrameTime = performance.now();
 
       // History helpers
       function dateKeyLocal(ms){ const d=new Date(ms); const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const da=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${da}`; }
@@ -313,7 +401,20 @@
         if(fontKey === 'mono') ff = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
         root.setProperty('--counter-font', ff);
         root.setProperty('--counter-vw', fontVw + 'vw');
+        
+        document.documentElement.setAttribute('data-theme', theme);
+        mainHud.style.display = hudVisible ? 'grid' : 'none';
+        showHudBtn.style.display = hudVisible ? 'none' : 'block';
+        muteToggle.textContent = muted ? '🔇' : '🔊';
+
         rebuildClouds();
+        resizeCanvas();
+      }
+
+      function resizeCanvas(){
+        coinsCanvas.width = window.innerWidth * window.devicePixelRatio;
+        coinsCanvas.height = window.innerHeight * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
       }
 
       function rebuildClouds(){
@@ -321,10 +422,10 @@
         for(let i=0;i<cloudsNum;i++){
           const c = document.createElement('div');
           c.className = 'cloud';
-          const scale = 0.6 + Math.random()*0.9; // 0.6–1.5
-          const top = Math.round(Math.random()*60 + 5); // 5%–65%
+          const scale = 0.6 + Math.random()*0.9;
+          const top = Math.round(Math.random()*60 + 5);
           const startX = - (200 + Math.random()*1200);
-          const dur = ( (90 + Math.random()*120) * (100/Math.max(10,cloudsSpeedPct)) ); // seconds
+          const dur = ( (90 + Math.random()*120) * (100/Math.max(10,cloudsSpeedPct)) );
           c.style.setProperty('--scale', scale); c.style.top = top + '%'; c.style.left = startX + 'px';
           c.style.opacity = (cloudsOpacityPct/100).toString(); c.style.animationDuration = dur + 's';
           sky.appendChild(c);
@@ -338,8 +439,33 @@
       function computeHourly(){ return mode === 'monthly' ? (monthly / 157.5) : hourly; }
       function perSecond(){ return computeHourly() / 3600; }
 
-      function renderTotal(v){ bigAmount.textContent = fmt1(v != null ? v : earnedTotal); }
-      function persistTotals(){ localStorage.setItem(K.earnedTotal, String(earnedTotal)); }
+      function renderTotal(v, s){
+        bigAmount.textContent = fmt1(v != null ? v : earnedTotal);
+        sessionAmount.textContent = `Session: ${fmt1(s != null ? s : sessionEarned)}`;
+        checkMilestones(s != null ? s : sessionEarned);
+      }
+
+      function checkMilestones(val){
+        for(const m of MILESTONES){
+          if(val >= m.val && !reachedMilestones.has(m.val)){
+            reachedMilestones.add(m.val);
+            showMilestone(m);
+          }
+        }
+      }
+
+      function showMilestone(m){
+        milestoneIcon.textContent = m.icon;
+        milestoneTitle.textContent = m.title;
+        milestoneDesc.textContent = m.desc;
+        milestoneToast.classList.add('show');
+        setTimeout(() => milestoneToast.classList.remove('show'), 5000);
+      }
+
+      function persistTotals(){
+        localStorage.setItem(K.earnedTotal, String(earnedTotal));
+        localStorage.setItem(K.sessionStart, String(sessionStartEpoch));
+      }
 
       function addEarningsOverInterval(startMs, endMs, ratePerSec){
         if(!(endMs>startMs)) return;
@@ -355,44 +481,345 @@
       }
 
       // ------- Ticker -------
-      function accruedSinceStart(){ if(!running || !tickStartPerf) return 0; return ((performance.now() - tickStartPerf)/1000) * perSecond(); }
-      function tick(){ renderTotal(earnedTotal + accruedSinceStart()); rafId = requestAnimationFrame(tick); }
-      function startTicker(){ if(!rafId){ tickStartPerf = performance.now(); tickStartEpoch = Date.now(); rafId = requestAnimationFrame(tick); } }
-      function stopTicker(){ if(rafId){ cancelAnimationFrame(rafId); rafId = null; } }
-      function settleAccrual(){ if(running && tickStartPerf){ const nowEpoch = Date.now(); const delta = accruedSinceStart(); if(delta>0){ earnedTotal += delta; addEarningsOverInterval(tickStartEpoch, nowEpoch, perSecond()); persistTotals(); } tickStartPerf = performance.now(); tickStartEpoch = nowEpoch; renderTotal(); } }
+      let rafId = null;
+      let tickStartPerf = 0;
+      let tickStartEpoch = 0;
 
-      // ------- Coins -------
-      function startSpawner(){ stopSpawner(); (fallMode === 'natural') ? startSpawnerNatural() : startSpawnerConstant(); }
-      function startSpawnerConstant(){ const interval = Math.max(120, Math.floor(60000 / Math.max(1, coinsPerMin))); spawnerTimer = setInterval(() => { createCoin(false); }, interval); createCoin(false); }
-      function startSpawnerNatural(){ const lambda = coinsPerMin/60000; const spawn = () => { const u = Math.random(); const wait = Math.max(120, Math.floor(-Math.log(1-u)/lambda)); spawnerTimer = setTimeout(() => { createCoin(true); spawn(); }, wait); }; spawn(); }
-      function stopSpawner(){ if(spawnerTimer){ (fallMode==='natural'?clearTimeout:clearInterval)(spawnerTimer); spawnerTimer = null; } }
-      function createCoin(natural){ const coin = document.createElement('div'); const face = document.createElement('div'); const symbol = document.createElement('div'); const size = Math.floor(28 + Math.random()*32); const dur = (natural ? (4000 + Math.random()*9000) : fallMs) + 'ms'; const x = Math.floor(Math.random() * (window.innerWidth - size)); const ry = (natural ? (180 + Math.random()*720) : 360) + 'deg'; coin.className = 'coin' + (coinTheme !== 'gold' ? ' ' + coinTheme : ''); face.className = 'face'; symbol.className = 'symbol'; symbol.textContent = currencySymbol(); coin.style.setProperty('--sz', size + 'px'); coin.style.setProperty('--dur', dur); coin.style.setProperty('--x', x + 'px'); coin.style.setProperty('--ry', ry); face.appendChild(symbol); coin.appendChild(face); coinsLayer.appendChild(coin); coin.addEventListener('animationend', () => { coin.remove(); }, { once:true }); }
+      function accruedSinceStart(){
+        if(!running || !tickStartPerf) return 0;
+        return ((performance.now() - tickStartPerf)/1000) * perSecond();
+      }
+
+      function tick(now){
+        const dt = now - lastFrameTime;
+        lastFrameTime = now;
+
+        const currentAccrued = accruedSinceStart();
+        renderTotal(earnedTotal + currentAccrued, sessionEarned + currentAccrued);
+
+        updateCoins(dt);
+        drawCoins();
+
+        rafId = requestAnimationFrame(tick);
+      }
+
+      function startTicker(){
+        if(!rafId){
+          tickStartPerf = performance.now();
+          tickStartEpoch = Date.now();
+          lastFrameTime = performance.now();
+          rafId = requestAnimationFrame(tick);
+        }
+      }
+
+      function stopTicker(){
+        if(rafId){
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+      }
+
+      function settleAccrual(){
+        if(running && tickStartPerf){
+          const nowEpoch = Date.now();
+          const delta = accruedSinceStart();
+          if(delta>0){
+            earnedTotal += delta;
+            sessionEarned += delta;
+            addEarningsOverInterval(tickStartEpoch, nowEpoch, perSecond());
+            persistTotals();
+          }
+          tickStartPerf = performance.now();
+          tickStartEpoch = nowEpoch;
+          renderTotal();
+        }
+      }
+
+      // ------- Canvas Coin Engine -------
+      function createCoin(natural){
+        const size = 28 + Math.random()*32;
+        const dur = (natural ? (4000 + Math.random()*9000) : fallMs);
+        const x = Math.random() * (window.innerWidth - size);
+        const ry = (natural ? (Math.random() * 720) : 0);
+
+        if (coinsPerMin < 100) playClink(); // Only play sound if rate is reasonable
+
+        coins.push({
+          x, y: -size - 50,
+          size,
+          dur,
+          elapsed: 0,
+          ry,
+          rySpeed: 0.1 + Math.random() * 0.2,
+          theme: coinTheme,
+          symbol: currencySymbol()
+        });
+      }
+
+      function updateCoins(dt){
+        for(let i = coins.length - 1; i >= 0; i--){
+          const c = coins[i];
+          c.elapsed += dt;
+          const progress = c.elapsed / c.dur;
+          
+          // Use a simple quadratic ease-in for natural acceleration without reversal
+          // This ensures coins always move downwards.
+          const ease = progress * progress; 
+          c.y = -100 + (window.innerHeight + 200) * ease;
+          c.ry += c.rySpeed * dt;
+
+          if(c.y > window.innerHeight + 100 || progress > 1.5){
+            coins.splice(i, 1);
+          }
+        }
+      }
+
+      function drawCoins(){
+        ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+        coins.forEach(c => {
+          ctx.save();
+          ctx.translate(c.x + c.size/2, c.y + c.size/2);
+          ctx.rotate(c.ry * Math.PI / 180);
+          const scaleX = Math.cos(c.ry * 0.05);
+          ctx.scale(scaleX, 1);
+
+          // Draw Coin Face
+          let color1, color2, color3, border;
+          if(c.theme === 'silver'){
+            color1 = '#ffffff'; color2 = '#d5deea'; color3 = '#9aa6b8'; border = '#cbd5df';
+          } else if(c.theme === 'copper'){
+            color1 = '#ffe1c6'; color2 = '#f08f3a'; color3 = '#a4550f'; border = '#e38a3f';
+          } else {
+            color1 = '#fff8c6'; color2 = '#ffc72b'; color3 = '#c98d0a'; border = '#f3c12b';
+          }
+
+          const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, c.size/2);
+          grad.addColorStop(0, color2);
+          grad.addColorStop(0.7, color2);
+          grad.addColorStop(1, color3);
+
+          ctx.beginPath();
+          ctx.arc(0, 0, c.size/2, 0, Math.PI * 2);
+          ctx.fillStyle = grad;
+          ctx.fill();
+          ctx.strokeStyle = border;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Shine
+          ctx.beginPath();
+          ctx.arc(-c.size/6, -c.size/6, c.size/10, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.fill();
+
+          // Symbol
+          ctx.fillStyle = c.theme === 'silver' ? '#5b6777' : (c.theme === 'copper' ? '#6a3a00' : '#7a5a00');
+          ctx.font = `bold ${c.size * 0.4}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(c.symbol, 0, 0);
+
+          ctx.restore();
+        });
+      }
+
+      function startSpawner(){
+        stopSpawner();
+        (fallMode === 'natural') ? startSpawnerNatural() : startSpawnerConstant();
+      }
+      function startSpawnerConstant(){
+        const interval = Math.max(120, Math.floor(60000 / Math.max(1, coinsPerMin)));
+        spawnerTimer = setInterval(() => { createCoin(false); }, interval);
+        createCoin(false);
+      }
+      function startSpawnerNatural(){
+        const lambda = coinsPerMin/60000;
+        const spawn = () => {
+          const u = Math.random();
+          const wait = Math.max(120, Math.floor(-Math.log(1-u)/lambda));
+          spawnerTimer = setTimeout(() => { createCoin(true); spawn(); }, wait);
+        };
+        spawn();
+      }
+      function stopSpawner(){
+        if(spawnerTimer){
+          (fallMode==='natural'?clearTimeout:clearInterval)(spawnerTimer);
+          spawnerTimer = null;
+        }
+      }
 
       // Visibility / gap handling
-      function handleHidden(){ if(!running) return; if(!localStorage.getItem(K.hiddenAt)){ localStorage.setItem(K.hiddenAt, String(Date.now())); } stopSpawner(); settleAccrual(); stopTicker(); }
-      function handleVisible(){ if(!running) return; const hiddenAt = parseInt(localStorage.getItem(K.hiddenAt)||'0'); if(hiddenAt > 0){ const nowEpoch = Date.now(); const deltaEarned = ((nowEpoch - hiddenAt)/1000) * perSecond(); if(deltaEarned>0){ earnedTotal += deltaEarned; addEarningsOverInterval(hiddenAt, nowEpoch, perSecond()); persistTotals(); } localStorage.removeItem(K.hiddenAt); } renderTotal(); tickStartPerf = performance.now(); tickStartEpoch = Date.now(); startTicker(); startSpawner(); }
-      document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') handleHidden(); else if(document.visibilityState === 'visible') handleVisible(); });
-      window.addEventListener('blur', handleHidden); window.addEventListener('focus', handleVisible);
-      window.addEventListener('beforeunload', () => { if(running){ localStorage.setItem(K.hiddenAt, String(Date.now())); const nowEpoch = Date.now(); addEarningsOverInterval(tickStartEpoch||nowEpoch, nowEpoch, perSecond()); persistTotals(); } });
+      function handleHidden(){
+        if(!running) return;
+        if(!localStorage.getItem(K.hiddenAt)){
+          localStorage.setItem(K.hiddenAt, String(Date.now()));
+        }
+        stopSpawner();
+        settleAccrual();
+        stopTicker();
+      }
+      function handleVisible(){
+        if(!running) return;
+        const hiddenAt = parseInt(localStorage.getItem(K.hiddenAt)||'0');
+        if(hiddenAt > 0){
+          const nowEpoch = Date.now();
+          const deltaEarned = ((nowEpoch - hiddenAt)/1000) * perSecond();
+          if(deltaEarned>0){
+            earnedTotal += deltaEarned;
+            sessionEarned += deltaEarned;
+            addEarningsOverInterval(hiddenAt, nowEpoch, perSecond());
+            persistTotals();
+          }
+          localStorage.removeItem(K.hiddenAt);
+        }
+        renderTotal();
+        tickStartPerf = performance.now();
+        tickStartEpoch = Date.now();
+        startTicker();
+        startSpawner();
+      }
+
+      document.addEventListener('visibilitychange', () => {
+        if(document.visibilityState === 'hidden') handleHidden();
+        else if(document.visibilityState === 'visible') handleVisible();
+      });
+      window.addEventListener('blur', handleHidden);
+      window.addEventListener('focus', handleVisible);
+      window.addEventListener('beforeunload', () => {
+        if(running){
+          localStorage.setItem(K.hiddenAt, String(Date.now()));
+          const nowEpoch = Date.now();
+          addEarningsOverInterval(tickStartEpoch||nowEpoch, nowEpoch, perSecond());
+          persistTotals();
+        }
+      });
       setInterval(() => { if(running) settleAccrual(); }, 60000);
 
       // Controls behavior
-      function applySettings(){ const val = Number(salaryInput.value); if(!Number.isFinite(val) || val < 0){ alert('Please enter a valid number.'); return; } settleAccrual(); currency = currencySelect.value; localStorage.setItem(K.currency, currency); if(mode === 'monthly'){ monthly = val; localStorage.setItem(K.monthly, String(monthly)); } else { hourly = val; localStorage.setItem(K.hourly, String(hourly)); } syncControls(); renderTotal(earnedTotal); }
-
-      function setMode(newMode){ if(newMode !== 'monthly' && newMode !== 'hourly') return; if(newMode === mode) return; settleAccrual(); mode = newMode; localStorage.setItem(K.mode, mode); // Update UI fields without overwriting values
-        if(mode === 'monthly'){ salaryLabel.textContent = 'Monthly salary'; salaryInput.placeholder = '80000'; salaryInput.value = monthly; calcNote.style.display = 'block'; }
-        else { salaryLabel.textContent = 'Hourly rate'; salaryInput.placeholder = '500'; salaryInput.value = hourly; calcNote.style.display = 'none'; }
+      function applySettings(){
+        const val = Number(salaryInput.value);
+        if(!Number.isFinite(val) || val < 0){ alert('Please enter a valid number.'); return; }
+        settleAccrual();
+        currency = currencySelect.value;
+        localStorage.setItem(K.currency, currency);
+        if(mode === 'monthly'){
+          monthly = val;
+          localStorage.setItem(K.monthly, String(monthly));
+        } else {
+          hourly = val;
+          localStorage.setItem(K.hourly, String(hourly));
+        }
+        syncControls();
+        renderTotal(earnedTotal, sessionEarned);
       }
 
-      function start(){ if(running) return; running = true; localStorage.setItem(K.running, '1'); if(!startTimeEpoch){ startTimeEpoch = Date.now(); localStorage.setItem(K.startedAt, String(startTimeEpoch)); } const hiddenAt = parseInt(localStorage.getItem(K.hiddenAt)||'0'); if(hiddenAt>0){ const nowEpoch = Date.now(); const deltaEarned = ((nowEpoch-hiddenAt)/1000) * perSecond(); if(deltaEarned>0){ earnedTotal += deltaEarned; addEarningsOverInterval(hiddenAt, nowEpoch, perSecond()); persistTotals(); } localStorage.removeItem(K.hiddenAt); } startTicker(); startSpawner(); }
-      function pause(){ if(!running) return; settleAccrual(); running = false; localStorage.setItem(K.running, '0'); stopTicker(); stopSpawner(); localStorage.removeItem(K.hiddenAt); }
-      function reset(){ running = false; stopTicker(); stopSpawner(); tickStartPerf = 0; tickStartEpoch = 0; startTimeEpoch = 0; earnedTotal = 0; renderTotal(); persistTotals(); coinsLayer.querySelectorAll('.coin').forEach(n => n.remove()); localStorage.removeItem(K.startedAt); localStorage.removeItem(K.hiddenAt); localStorage.setItem(K.running, '0'); }
+      function setMode(newMode){
+        if(newMode !== 'monthly' && newMode !== 'hourly') return;
+        if(newMode === mode) return;
+        settleAccrual();
+        mode = newMode;
+        localStorage.setItem(K.mode, mode);
+        if(mode === 'monthly'){
+          salaryLabel.textContent = 'Monthly salary'; salaryInput.placeholder = '80000'; salaryInput.value = monthly; calcNote.style.display = 'block';
+        } else {
+          salaryLabel.textContent = 'Hourly rate'; salaryInput.placeholder = '500'; salaryInput.value = hourly; calcNote.style.display = 'none';
+        }
+      }
+
+      function start(){
+        if(running) return;
+        running = true;
+        localStorage.setItem(K.running, '1');
+        if(!startTimeEpoch){
+          startTimeEpoch = Date.now();
+          localStorage.setItem(K.startedAt, String(startTimeEpoch));
+        }
+        sessionStartEpoch = Date.now();
+        localStorage.setItem(K.sessionStart, String(sessionStartEpoch));
+        sessionEarned = 0;
+        reachedMilestones.clear();
+
+        const hiddenAt = parseInt(localStorage.getItem(K.hiddenAt)||'0');
+        if(hiddenAt>0){
+          const nowEpoch = Date.now();
+          const deltaEarned = ((nowEpoch-hiddenAt)/1000) * perSecond();
+          if(deltaEarned>0){
+            earnedTotal += deltaEarned;
+            sessionEarned += deltaEarned;
+            addEarningsOverInterval(hiddenAt, nowEpoch, perSecond());
+            persistTotals();
+          }
+          localStorage.removeItem(K.hiddenAt);
+        }
+        startTicker();
+        startSpawner();
+      }
+
+      function pause(){
+        if(!running) return;
+        settleAccrual();
+        running = false;
+        localStorage.setItem(K.running, '0');
+        stopTicker();
+        stopSpawner();
+        localStorage.removeItem(K.hiddenAt);
+      }
+
+      function reset(){
+        running = false;
+        stopTicker();
+        stopSpawner();
+        tickStartPerf = 0;
+        tickStartEpoch = 0;
+        startTimeEpoch = 0;
+        sessionStartEpoch = 0;
+        earnedTotal = 0;
+        sessionEarned = 0;
+        reachedMilestones.clear();
+        coins = [];
+        renderTotal();
+        persistTotals();
+        localStorage.removeItem(K.startedAt);
+        localStorage.removeItem(K.sessionStart);
+        localStorage.removeItem(K.hiddenAt);
+        localStorage.setItem(K.running, '0');
+      }
 
       // Fullscreen
-      async function toggleFullscreen(){ try{ if(!document.fullscreenElement){ if(document.documentElement.requestFullscreen){ await document.documentElement.requestFullscreen(); } } else { if(document.exitFullscreen){ await document.exitFullscreen(); } } }catch(e){} }
+      async function toggleFullscreen(){
+        try{
+          if(!document.fullscreenElement){
+            if(document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+          } else {
+            if(document.exitFullscreen) await document.exitFullscreen();
+          }
+        }catch(e){}
+      }
 
       // History chart render
-      function renderHistory(){ const daily = getDaily(); const keys = Object.keys(daily).sort(); const last = keys.slice(-14); const values = last.map(k => daily[k]); const max = Math.max(1, ...values); const W = 600, H = 180, pad = 24; const bw = (W - pad*2) / Math.max(1,last.length); let svg = `<rect x="0" y="0" width="${W}" height="${H}" fill="transparent"/>`; last.forEach((k, i) => { const v = values[i]; const h = Math.round((v/max) * (H - pad*2)); const x = Math.round(pad + i*bw + bw*0.1); const y = Math.round(H - pad - h); const barw = Math.round(bw*0.8); svg += `<rect x="${x}" y="${y}" width="${barw}" height="${h}" rx="6" ry="6" fill="#ffcc33" opacity="0.85"/>`; svg += `<text x="${x + barw/2}" y="${H - 8}" text-anchor="middle">${k.slice(5)}</text>`; }); historyChart.innerHTML = svg; const total = values.reduce((a,b)=>a+b,0); historySummary.textContent = last.length ? `Last ${last.length} days total: ${fmt1(total)}` : 'No history yet.'; }
+      function renderHistory(){
+        const daily = getDaily();
+        const keys = Object.keys(daily).sort();
+        const last = keys.slice(-14);
+        const values = last.map(k => daily[k]);
+        const max = Math.max(1, ...values);
+        const W = 600, H = 180, pad = 24;
+        const bw = (W - pad*2) / Math.max(1,last.length);
+        let svg = `<rect x="0" y="0" width="${W}" height="${H}" fill="transparent"/>`;
+        last.forEach((k, i) => {
+          const v = values[i];
+          const h = Math.round((v/max) * (H - pad*2));
+          const x = Math.round(pad + i*bw + bw*0.1);
+          const y = Math.round(H - pad - h);
+          const barw = Math.round(bw*0.8);
+          svg += `<rect x="${x}" y="${y}" width="${barw}" height="${h}" rx="6" ry="6" fill="#ffcc33" opacity="0.85"/>`;
+          svg += `<text x="${x + barw/2}" y="${H - 8}" text-anchor="middle">${k.slice(5)}</text>`;
+        });
+        historyChart.innerHTML = svg;
+        const total = values.reduce((a,b)=>a+b,0);
+        historySummary.textContent = last.length ? `Last ${last.length} days total: ${fmt1(total)}` : 'No history yet.';
+      }
 
       // Wire up
       applyBtn.addEventListener('click', applySettings);
@@ -401,29 +828,115 @@
       resetBtn.addEventListener('click', reset);
       fullscreenBtn.addEventListener('click', toggleFullscreen);
 
-      rateRange.addEventListener('input', e => { coinsPerMin = Number(e.target.value); rateVal.textContent = coinsPerMin; localStorage.setItem(K.cpm, String(coinsPerMin)); if(running){ startSpawner(); } });
-      fallModeSel.addEventListener('change', e => { fallMode = e.target.value; localStorage.setItem(K.fallMode, fallMode); if(running) startSpawner(); });
-      fallSpeed.addEventListener('input', e => { fallMs = Number(e.target.value); fallSpeedVal.textContent = fallMs+"ms"; localStorage.setItem(K.fallMs, String(fallMs)); });
-      coinThemeSel.addEventListener('change', e => { coinTheme = e.target.value; localStorage.setItem(K.coinTheme, coinTheme); });
+      themeToggle.addEventListener('click', () => {
+        theme = theme === 'light' ? 'dark' : 'light';
+        localStorage.setItem(K.theme, theme);
+        applyVisuals();
+      });
 
-      cloudCount.addEventListener('input', e => { cloudsNum = Number(e.target.value); cloudCountVal.textContent = String(cloudsNum); localStorage.setItem(K.clouds, String(cloudsNum)); rebuildClouds(); });
-      cloudSpeed.addEventListener('input', e => { cloudsSpeedPct = Number(e.target.value); cloudSpeedVal.textContent = cloudsSpeedPct+"%"; localStorage.setItem(K.cloudSpeed, String(cloudsSpeedPct)); rebuildClouds(); });
-      cloudOpacity.addEventListener('input', e => { cloudsOpacityPct = Number(e.target.value); cloudOpacityVal.textContent = (cloudsOpacityPct/100).toFixed(2); localStorage.setItem(K.cloudOpacity, String(cloudsOpacityPct)); rebuildClouds(); });
+      muteToggle.addEventListener('click', () => {
+        muted = !muted;
+        localStorage.setItem(K.muted, muted ? '1' : '0');
+        applyVisuals();
+      });
 
-      fontFamilySel.addEventListener('change', e => { fontKey = e.target.value; localStorage.setItem(K.font, fontKey); applyVisuals(); });
-      counterSize.addEventListener('input', e => { fontVw = Number(e.target.value); counterSizeVal.textContent = fontVw+"vw"; localStorage.setItem(K.fontVw, String(fontVw)); applyVisuals(); });
+      hideHudBtn.addEventListener('click', () => {
+        hudVisible = false;
+        localStorage.setItem(K.hudVisible, '0');
+        applyVisuals();
+      });
+
+      showHudBtn.addEventListener('click', () => {
+        hudVisible = true;
+        localStorage.setItem(K.hudVisible, '1');
+        applyVisuals();
+      });
+
+      rateRange.addEventListener('input', e => {
+        coinsPerMin = Number(e.target.value);
+        rateVal.textContent = coinsPerMin;
+        localStorage.setItem(K.cpm, String(coinsPerMin));
+        if(running) startSpawner();
+      });
+      fallModeSel.addEventListener('change', e => {
+        fallMode = e.target.value;
+        localStorage.setItem(K.fallMode, fallMode);
+        if(running) startSpawner();
+      });
+      fallSpeed.addEventListener('input', e => {
+        fallMs = Number(e.target.value);
+        fallSpeedVal.textContent = fallMs+"ms";
+        localStorage.setItem(K.fallMs, String(fallMs));
+      });
+      coinThemeSel.addEventListener('change', e => {
+        coinTheme = e.target.value;
+        localStorage.setItem(K.coinTheme, coinTheme);
+      });
+
+      cloudCount.addEventListener('input', e => {
+        cloudsNum = Number(e.target.value);
+        cloudCountVal.textContent = String(cloudsNum);
+        localStorage.setItem(K.clouds, String(cloudsNum));
+        rebuildClouds();
+      });
+      cloudSpeed.addEventListener('input', e => {
+        cloudsSpeedPct = Number(e.target.value);
+        cloudSpeedVal.textContent = cloudsSpeedPct+"%";
+        localStorage.setItem(K.cloudSpeed, String(cloudsSpeedPct));
+        rebuildClouds();
+      });
+      cloudOpacity.addEventListener('input', e => {
+        cloudsOpacityPct = Number(e.target.value);
+        cloudOpacityVal.textContent = (cloudsOpacityPct/100).toFixed(2);
+        localStorage.setItem(K.cloudOpacity, String(cloudsOpacityPct));
+        rebuildClouds();
+      });
+
+      fontFamilySel.addEventListener('change', e => {
+        fontKey = e.target.value;
+        localStorage.setItem(K.font, fontKey);
+        applyVisuals();
+      });
+      counterSize.addEventListener('input', e => {
+        fontVw = Number(e.target.value);
+        counterSizeVal.textContent = fontVw+"vw";
+        localStorage.setItem(K.fontVw, String(fontVw));
+        applyVisuals();
+      });
 
       modeSelect.addEventListener('change', e => { setMode(e.target.value); });
 
-      document.addEventListener('keydown', (e) => { if(e.code === 'Space'){ e.preventDefault(); running ? pause() : start(); } if(e.key.toLowerCase() === 'f'){ toggleFullscreen(); } });
+      document.addEventListener('keydown', (e) => {
+        if(e.code === 'Space'){ e.preventDefault(); running ? pause() : start(); }
+        if(e.key.toLowerCase() === 'f'){ toggleFullscreen(); }
+      });
 
-      // Resize safety
-      window.addEventListener('resize', () => { coinsLayer.querySelectorAll('.coin').forEach(c => { const size = parseInt(c.style.getPropertyValue('--sz'))||40; const x = Math.min(parseInt(c.style.getPropertyValue('--x'))||0, window.innerWidth - size); c.style.setProperty('--x', x + 'px'); }); });
+      window.addEventListener('resize', () => {
+        resizeCanvas();
+      });
 
       // Initial render
-      syncControls(); applyVisuals(); renderTotal(); renderHistory();
+      syncControls();
+      applyVisuals();
+      renderTotal();
+      renderHistory();
 
-      if(running){ const hiddenAt = parseInt(localStorage.getItem(K.hiddenAt)||'0'); if(hiddenAt>0){ const nowEpoch = Date.now(); const deltaEarned = ((nowEpoch-hiddenAt)/1000) * perSecond(); if(deltaEarned>0){ earnedTotal += deltaEarned; addEarningsOverInterval(hiddenAt, nowEpoch, perSecond()); persistTotals(); } localStorage.removeItem(K.hiddenAt); } startTicker(); startSpawner(); }
+      if(running){
+        const hiddenAt = parseInt(localStorage.getItem(K.hiddenAt)||'0');
+        if(hiddenAt>0){
+          const nowEpoch = Date.now();
+          const deltaEarned = ((nowEpoch-hiddenAt)/1000) * perSecond();
+          if(deltaEarned>0){
+            earnedTotal += deltaEarned;
+            sessionEarned += deltaEarned;
+            addEarningsOverInterval(hiddenAt, nowEpoch, perSecond());
+            persistTotals();
+          }
+          localStorage.removeItem(K.hiddenAt);
+        }
+        startTicker();
+        startSpawner();
+      }
     })();
   </script>
 </body>
