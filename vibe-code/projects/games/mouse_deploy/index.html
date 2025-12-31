@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mouse Deploy</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- Difficulty Selection Screen -->
+    <div class="difficulty-screen active" id="difficultyScreen">
+      <div class="difficulty-screen__inner">
+        <h1 class="difficulty-screen__title">Mouse Deploy</h1>
+        <p class="difficulty-screen__subtitle">Deploy autonomous mice. Race to the center of the maze!</p>
+        
+        <!-- Loading Section -->
+        <div class="loading-section" id="loadingSection">
+          <p class="loading-text">Loading assets...</p>
+          <div class="loading-bar">
+            <div class="loading-bar__fill" id="loadingBarFill"></div>
+          </div>
+          <p class="loading-percent" id="loadingPercent">0%</p>
+        </div>
+        
+        <!-- Game Setup Section (hidden until loaded) -->
+        <div class="setup-section" id="setupSection" style="display: none;">
+          <p class="difficulty-screen__hint">💡 Click mice to select them • Use abilities to help them navigate • Heatmap shows explored areas</p>
+          <p class="difficulty-screen__prompt">Select AI Difficulty</p>
+          <div class="difficulty-cards">
+            <button class="difficulty-card" data-difficulty="easy">
+              <div class="difficulty-card__icon">🐭</div>
+              <div class="difficulty-card__title">Easy</div>
+              <div class="difficulty-card__desc">AI deploys randomly and slowly. Perfect for learning.</div>
+            </button>
+            <button class="difficulty-card" data-difficulty="medium">
+              <div class="difficulty-card__icon">🐁</div>
+              <div class="difficulty-card__title">Medium</div>
+              <div class="difficulty-card__desc">AI reacts to your moves and uses smart algorithms.</div>
+            </button>
+            <button class="difficulty-card" data-difficulty="hard">
+              <div class="difficulty-card__icon">🦔</div>
+              <div class="difficulty-card__title">Hard</div>
+              <div class="difficulty-card__desc">AI optimizes everything. Destroys stuck mice. Good luck!</div>
+            </button>
+          </div>
+          
+          <!-- Rounds Selector + Start Button -->
+          <div class="rounds-selector">
+            <div class="rounds-selector__row">
+              <div class="rounds-selector__left">
+                <p class="rounds-selector__title">Number of Rounds</p>
+                <div class="rounds-options">
+                  <label class="rounds-option">
+                    <input type="radio" name="rounds" value="3" checked />
+                    <span class="rounds-option__label">3</span>
+                  </label>
+                  <label class="rounds-option">
+                    <input type="radio" name="rounds" value="5" />
+                    <span class="rounds-option__label">5</span>
+                  </label>
+                  <label class="rounds-option">
+                    <input type="radio" name="rounds" value="10" />
+                    <span class="rounds-option__label">10</span>
+                  </label>
+                </div>
+              </div>
+              <button class="start-btn" id="startBtn" disabled>START</button>
+            </div>
+          </div>
+          
+          <!-- Personal Record -->
+          <div class="personal-record" id="personalRecord">
+            <span class="personal-record__label">🏆 Personal Best:</span>
+            <span class="personal-record__value" id="personalRecordValue">--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Game Screen -->
+    <main class="game-screen" id="gameScreen">
+      <div class="game-layout">
+        <!-- Left Stats Panel (User) -->
+        <aside class="stats-panel stats-panel--user">
+          <div class="stats-panel__header">
+            <div class="stats-panel__team">You</div>
+            <div class="stats-panel__score" id="hudUserScore">1000</div>
+            <div class="stats-panel__total" id="hudUserTotal">Total: 0</div>
+          </div>
+
+          <div class="mouse-list" id="mouseList"></div>
+        </aside>
+
+        <!-- Center: Canvas -->
+        <div class="game-center">
+          <div class="stage">
+            <canvas id="gameCanvas" width="900" height="900"></canvas>
+            <div class="countdown" id="countdown">3</div>
+            <div class="stage-timer">
+              <div class="stage-timer__progress" id="timerProgress"></div>
+              <div class="stage-timer__shine"></div>
+              <span class="stage-timer__round" id="hudRound">Round 1 / 3</span>
+              <span class="stage-timer__time" id="hudTime">3:00</span>
+            </div>
+            <div class="deploy-reminder" id="deployReminder">
+              <span class="deploy-reminder__text">🐭 Hurry! Deploy a Mouse!</span>
+            </div>
+            <div class="decoy-guide" id="decoyGuide">
+              <span class="decoy-guide__text">🧀 Click to place decoy cheese!</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Stats Panel (Computer) -->
+        <aside class="stats-panel stats-panel--ai">
+          <div class="stats-panel__header">
+            <div class="stats-panel__team">Computer</div>
+            <div class="stats-panel__score" id="hudAiScore">1000</div>
+            <div class="stats-panel__total" id="hudAiTotal">Total: 0</div>
+          </div>
+
+          <div class="mouse-list mouse-list--ai" id="aiMouseList"></div>
+        </aside>
+      </div>
+
+      <!-- Bottom Controls -->
+      <div class="controls-bar">
+        <div class="controls-section">
+          <div class="controls-section__title">Deploy (5s cooldown)</div>
+          <select id="algoSelect" class="field__control">
+            <option value="wanderer">🎲 The Wanderer - 40 pts</option>
+            <option value="wallhugger">🧱 The Wall Hugger - 40 pts</option>
+            <option value="sniffer">🐕 The Sniffer - 40 pts</option>
+            <option value="explorer">🔍 The Explorer - 40 pts</option>
+            <option value="tremaux" selected>📜 The Cartographer - 40 pts</option>
+            <option value="wiseFragile">🦉 Wise but Fragile - 150 pts</option>
+          </select>
+          <button id="deployBtn" class="btn btn--primary" type="button">Deploy Mouse</button>
+        </div>
+
+        <div class="controls-section abilities-card" id="abilitiesCard" style="opacity:0.5; pointer-events:none">
+          <div class="controls-section__title">Abilities</div>
+          <button id="speedBoostBtn" class="btn" type="button" disabled title="Boost selected mouse speed by 10%">⚡ Speed (-35)</button>
+          <button id="doubleDownBtn" class="btn btn--bet" type="button" disabled title="Bet on selected mouse: if it wins, get +150 pts">🎰 Double Down (-50)</button>
+          <button id="manualMouseBtn" class="btn" type="button" disabled title="Take manual control of next deployed mouse (unlocks at 1:30)">🎮 Manual Mouse</button>
+          <button id="destroyBtn" class="btn btn--danger" type="button" disabled title="Destroy mouse for partial refund">💀 Destroy (+50%)</button>
+        </div>
+
+        <div class="controls-section" id="sabotageCard">
+          <div class="controls-section__title">Sabotage</div>
+          <button id="wallBlastBtn" class="btn btn--sabotage" type="button" title="Click maze to blast open walls">💣 Wall Blast (-40)</button>
+          <button id="decoyCheeseBtn" class="btn btn--sabotage" type="button" title="Click maze to place decoy cheese">🧀 Decoy (-30)</button>
+          <button id="catDeployBtn" class="btn btn--sabotage" type="button" disabled title="After 35s, deploy a cat from enemy start">🐈 Cat (-120)</button>
+          <button id="laserFenceBtn" class="btn btn--sabotage" type="button" title="Deploy a 5x5 laser fence that blocks all movement for 10s">⚡ Laser Fence (-100)</button>
+        </div>
+
+        <div class="controls-section">
+          <div class="controls-section__title">View</div>
+          <button id="toggleHeatmapBtn" class="btn" type="button">Heatmap</button>
+          <button id="toggleZoomBtn" class="btn" type="button" title="Auto-zoom on close finishes">🔍 Auto-Zoom: ON</button>
+        </div>
+
+        <div class="controls-section controls-section--info">
+          <div class="message" id="message"></div>
+          <div class="micro" id="deployMeta"></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Victory/Loss Overlay -->
+    <div class="overlay" id="overlay">
+      <div class="overlay__card">
+        <div class="overlay__title" id="overlayTitle">Victory!</div>
+        <div class="overlay__text" id="overlayText">You won with 5000 points!</div>
+        <button class="btn btn--primary overlay__btn" id="overlayBtn">Play Again</button>
+      </div>
+    </div>
+
+    <!-- Subround Results Overlay -->
+    <div class="overlay overlay--round" id="roundOverlay">
+      <div class="overlay__card overlay__card--round">
+        <div class="overlay__title" id="roundOverlayTitle">Round Results</div>
+        <div class="overlay__text" id="roundOverlayText"></div>
+        <button class="btn btn--primary overlay__btn" id="roundOverlayBtn">Next Round</button>
+      </div>
+    </div>
+    
+    <!-- New Record Name Entry Overlay -->
+    <div class="overlay" id="recordOverlay" style="display: none;">
+      <div class="overlay__card">
+        <div class="overlay__title">🏆 NEW RECORD!</div>
+        <div class="overlay__text" id="recordText">You set a new personal best!</div>
+        <input type="text" class="record-input" id="recordNameInput" placeholder="Enter your name" maxlength="20" />
+        <button class="btn btn--primary overlay__btn" id="recordSaveBtn">Save Record</button>
+      </div>
+    </div>
+    
+    <!-- Bet Modal -->
+    <div class="overlay bet-overlay" id="betOverlay">
+      <div class="overlay__card bet-modal">
+        <div class="overlay__title">🎰 Place Your Bet</div>
+        <div class="overlay__text">Choose your risk level:</div>
+        <div class="bet-options">
+          <button class="bet-option bet-option--low" data-bet="low">
+            <div class="bet-option__risk">🟢 Safe Bet</div>
+            <div class="bet-option__cost">Cost: 25 pts</div>
+            <div class="bet-option__reward">Win: +60 pts</div>
+          </button>
+          <button class="bet-option bet-option--med" data-bet="medium">
+            <div class="bet-option__risk">🟡 Risky Bet</div>
+            <div class="bet-option__cost">Cost: 50 pts</div>
+            <div class="bet-option__reward">Win: +150 pts</div>
+          </button>
+          <button class="bet-option bet-option--high" data-bet="high">
+            <div class="bet-option__risk">🔴 All-In!</div>
+            <div class="bet-option__cost">Cost: 100 pts</div>
+            <div class="bet-option__reward">Win: +350 pts</div>
+          </button>
+        </div>
+        <button class="btn overlay__btn" id="betCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script defer src="game.js"></script>
+</body>
+</html>

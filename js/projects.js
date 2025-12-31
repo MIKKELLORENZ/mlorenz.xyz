@@ -96,6 +96,8 @@ document.addEventListener('DOMContentLoaded', function() {
             date: "2025-12-27",
             path: "projects/utilities/laser_cut_puzzle_maker/index.html",
             type: "iframe"
+
+                
         },
 
 
