@@ -73,6 +73,7 @@
         // General SFX
         deploy: 0.35,
         alert: 0.35,
+        ping: 0.40,
         
         // Win/Lose
         win: 0.40,
@@ -104,11 +105,16 @@
         // Laser fence
         laser_fence_deploy: 0.45,
         electric_zap: 0.50,
+        
+        // New sounds
+        new_round_btn: 0.45,
+        glue_deploy: 0.40,
       };
       // ========================================
       
       this._map = {
         deploy: 'sounds/deploy.mp3',
+        ping: 'sounds/ping.mp3',
         win: 'sounds/win.mp3',
         alert: 'sounds/alert.mp3',
         bomb: 'sounds/bomb.mp3',
@@ -129,6 +135,8 @@
         bad_stomach: 'sounds/bad_stomach.mp3',
         laser_fence_deploy: 'sounds/laser_fence_deploy.mp3',
         electric_zap: 'sounds/electric_zap.mp3',
+        new_round_btn: 'sounds/new_round_btn.mp3',
+        glue_deploy: 'sounds/glue_deploy.mp3',
       };
       
       // Sounds that should NOT trigger ducking (walk sounds + bg music itself)
@@ -137,6 +145,9 @@
       // Track which dramatic music is playing
       this._endStringsPlaying = false;
       this._endStringsAudio = null;
+      
+      // Track active one-shot SFX to stop them on round end
+      this._activeSFX = new Set();
     }
     
     // Preload all sounds with progress tracking
@@ -376,6 +387,9 @@
       
       this.resumeContext(); // Try to resume on every sound play
       
+      // Don't play if audio context is not running
+      if (this._audioContext && this._audioContext.state !== 'running') return;
+      
       // Duck background music for SFX (except walk sounds)
       if (!this._noDuckSounds.has(effectName)) {
         this._duckBgMusic();
@@ -391,11 +405,28 @@
         }
         const a = audio.cloneNode(true);
         a.volume = this._volumes[effectName] ?? 0.35;
+        
+        // Track this instance with error cleanup
+        this._activeSFX.add(a);
+        const cleanup = () => this._activeSFX.delete(a);
+        a.addEventListener('ended', cleanup, { once: true });
+        a.addEventListener('error', cleanup, { once: true });
+        
         const p = a.play();
-        if (p && typeof p.catch === 'function') p.catch(() => {});
+        if (p && typeof p.catch === 'function') p.catch(cleanup);
       } catch {
         // Must not crash if files are missing.
       }
+    }
+
+    stopAllSFX() {
+      for (const audio of this._activeSFX) {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch {}
+      }
+      this._activeSFX.clear();
     }
 
     startLoop(effectName) {
@@ -884,6 +915,13 @@
       this.sickSwayPhase = 0;
       this.poopTrail = []; // { x, y, t, sourceId } for poop traces
       this.sickSourceId = null; // ID of the original cheese that caused sickness (to prevent re-infection from same chain)
+      this._originalAlgorithm = null; // Store original algorithm when sick (wanderer effect)
+
+      // Command ping targeting
+      this.pingTarget = null;
+      this.pingUntilMs = 0;
+      this.pingStrength = 0;
+      this.lastPingAtMs = 0;
     }
 
     _cellKey(x, y) {
@@ -953,6 +991,19 @@
           this._zappedMemory = null;
         }
       }
+
+      // Active command ping bias
+      const pingActive = this.pingTarget && tNow < this.pingUntilMs;
+      const pingTarget = pingActive ? this.pingTarget : null;
+      if (!pingActive) {
+        this.pingTarget = null;
+        this.pingUntilMs = 0;
+      }
+      const pingWeight = this.pingStrength || 0;
+      const distToPing = (node) => {
+        if (!pingTarget) return Infinity;
+        return Math.abs(node.x - pingTarget.x) + Math.abs(node.y - pingTarget.y);
+      };
       
       // Manual control: use pending direction from keyboard
       if (this.algorithm === 'manual' && engine?._pendingDirection) {
@@ -1022,6 +1073,14 @@
       if (this.algorithm === 'wanderer') {
         const unvisited = open.filter((n) => !this.visited.has(this._cellKey(n.x, n.y)));
         let pool = unvisited.length ? unvisited : open;
+
+        // Command ping bias: head toward the ping target if active
+        if (pingTarget) {
+          const sorted = pool.slice().sort((a, b) => {
+            return distToPing(a) - distToPing(b) + (engine.rng() - 0.5) * 0.2;
+          });
+          return sorted[0];
+        }
         
         // If we have zapped memory attraction, bias towards that direction
         if (zappedAttraction && engine.rng() < 0.6) {
@@ -1066,8 +1125,10 @@
             const distToZapped = Math.abs(n.x - zappedAttraction.x) + Math.abs(n.y - zappedAttraction.y);
             zappedBonus = -distToZapped * 3; // Strong pull towards remembered location
           }
+
+          const pingTerm = pingTarget ? distToPing(n) * pingWeight : 0;
           
-          return { node: n, score: h + visitedPenalty + recentPenalty + noise + zappedBonus };
+          return { node: n, score: h + visitedPenalty + recentPenalty + noise + zappedBonus + pingTerm };
         });
 
         candidates.sort((a, b) => a.score - b.score);
@@ -1082,7 +1143,8 @@
         // Sort by distance to goal (best first)
         const sorted = open.map(n => {
           const d = dist[this.maze.index(n.x, n.y)];
-          return { node: n, dist: d };
+          const dp = pingTarget ? distToPing(n) * pingWeight : 0;
+          return { node: n, dist: d + dp };
         }).sort((a, b) => a.dist - b.dist);
 
         // If there are 2+ options, only 5% chance to pick a wrong one (reduced from 15%)
@@ -1115,9 +1177,10 @@
             const distToZapped = Math.abs(n.x - zappedAttraction.x) + Math.abs(n.y - zappedAttraction.y);
             zappedBonus = -distToZapped * 5; // Strong pull towards remembered location
           }
+          const pingTerm = pingTarget ? distToPing(n) * pingWeight : 0;
           
           // Prefer unmarked passages, use distance as tiebreaker
-          return { node: n, key, score: marks * 100 * hiveMult + h + deadEndPenalty + zappedBonus + engine.rng() * 0.5 };
+          return { node: n, key, score: marks * 100 * hiveMult + h + deadEndPenalty + zappedBonus + pingTerm + engine.rng() * 0.5 };
         });
 
         candidates.sort((a, b) => a.score - b.score);
@@ -1153,6 +1216,12 @@
               da = Math.abs(a.x - zappedAttraction.x) + Math.abs(a.y - zappedAttraction.y);
               db = Math.abs(b.x - zappedAttraction.x) + Math.abs(b.y - zappedAttraction.y);
             }
+
+            // Command ping bias
+            if (pingTarget) {
+              da += distToPing(a) * pingWeight;
+              db += distToPing(b) * pingWeight;
+            }
             
             return da - db + (engine.rng() - 0.5);
           });
@@ -1172,8 +1241,10 @@
             const distToZapped = Math.abs(n.x - zappedAttraction.x) + Math.abs(n.y - zappedAttraction.y);
             zappedBonus = -distToZapped * 4;
           }
+
+          const pingTerm = pingTarget ? distToPing(n) * pingWeight : 0;
           
-          return { node: n, score: h + recentCount * 5 * hiveMult + deadEndPenalty + zappedBonus + engine.rng() };
+          return { node: n, score: h + recentCount * 5 * hiveMult + deadEndPenalty + zappedBonus + pingTerm + engine.rng() };
         });
         candidates.sort((a, b) => a.score - b.score);
         return candidates[0].node;
@@ -1182,6 +1253,16 @@
       // Wallhugger: classic wall-following (with zapped memory influence)
       const order = this.hand === 'right' ? [1, 0, -1, 2] : [-1, 0, 1, 2];
       const curDir = DIR_INDEX[this.heading] ?? 0;
+
+      // Command ping: temporarily override wall following to head toward ping
+      if (pingTarget) {
+        const sorted = open.slice().sort((a, b) => distToPing(a) - distToPing(b));
+        if (sorted.length) {
+          const headings = ['N', 'E', 'S', 'W'];
+          this.heading = headings[sorted[0].dirIndex];
+          return sorted[0];
+        }
+      }
 
       // If zapped memory is active, occasionally override wall-following to head back
       if (zappedAttraction && engine.rng() < 0.5) {
@@ -1250,17 +1331,30 @@
           mult *= this.sickSpeedReduction;
           this.sickSwayPhase += dt * 8; // For visual wobble
           
-          // Add poop trail periodically
+          // Add poop trail periodically (cleanup old entries)
           if (!this._lastPoopTime || currentTime - this._lastPoopTime > 800) {
             this._lastPoopTime = currentTime;
-            if (this.poopTrail && this.poopTrail.length < 15) {
-              this.poopTrail.push({ x: this.px, y: this.py, t: currentTime });
+            if (this.poopTrail) {
+              // Remove old poop entries (older than 15 seconds)
+              this.poopTrail = this.poopTrail.filter(p => currentTime - p.t < 15000);
+              if (this.poopTrail.length < 15) {
+                this.poopTrail.push({ x: this.px, y: this.py, t: currentTime });
+              }
             }
           }
         } else if (this.isSick && currentTime >= this.sickUntilMs) {
-          // Sickness wore off
+          // Sickness wore off - restore original algorithm
           this.isSick = false;
           this.sickSpeedReduction = 1;
+          if (this._originalAlgorithm) {
+            this.algorithm = this._originalAlgorithm;
+            this._originalAlgorithm = null;
+          }
+        }
+        
+        // Apply glue slowdown (check both current and next cell)
+        if (engine._isInGlue && (engine._isInGlue(this.cell.x, this.cell.y) || engine._isInGlue(this.nextCell.x, this.nextCell.y))) {
+          mult *= engine._glueSlowFactor; // 40% speed in glue
         }
         
         this.progress += dt * this.speed * mult;
@@ -1292,6 +1386,12 @@
           this.nextCell = null;
           this.progress = 0;
           this.distanceTravelled++;
+
+          // Clear ping target if reached
+          if (this.pingTarget && this.cell.x === this.pingTarget.x && this.cell.y === this.pingTarget.y) {
+            this.pingTarget = null;
+            this.pingUntilMs = 0;
+          }
 
           const key = this._cellKey(this.cell.x, this.cell.y);
           this.path.push({ x: this.cell.x, y: this.cell.y });
@@ -1605,7 +1705,9 @@
       this._nextDeployAt = 0;
       this._nextCatTryAt = 0;
       this._nextDecoyTryAt = 0;
-      this._nextWallBlastTryAt = 0;
+      this._nextBombTryAt = 0;
+      this._nextLaserFenceTryAt = 0;
+      this._nextPingTryAt = 0;
       this._lastUpdateTime = 0;
     }
 
@@ -1614,7 +1716,9 @@
       this._nextDeployAt = 0;
       this._nextCatTryAt = 0;
       this._nextDecoyTryAt = 0;
-      this._nextWallBlastTryAt = 0;
+      this._nextBombTryAt = 0;
+      this._nextLaserFenceTryAt = 0;
+      this._nextPingTryAt = 0;
       this._lastUpdateTime = 0;
     }
 
@@ -1683,6 +1787,26 @@
           this._nextDecoyTryAt = elapsed + 20 + e.rng() * 15;
         }
         
+        // Medium: occasional bomb for stuck mice
+        if (elapsed >= this._nextBombTryAt && e._aiBombCooldown <= 0 && e.aiScore >= e.bombCost) {
+          const stuckMice = e.mice.filter(m => m.team === TEAM_AI && m.isActive() && m.isLikelyLooping?.());
+          if (stuckMice.length > 0 && e.rng() < 0.35) {
+            const targetMouse = stuckMice[Math.floor(e.rng() * stuckMice.length)];
+            e.tryAIBomb(targetMouse.cell.x, targetMouse.cell.y);
+          }
+          this._nextBombTryAt = elapsed + 25 + e.rng() * 15;
+        }
+        
+        // Medium: occasional command ping
+        if (elapsed >= this._nextPingTryAt && e._aiPingCooldown <= 0 && e.aiScore >= e.pingCost) {
+          const aiMice = e.mice.filter(m => m.team === TEAM_AI && m.isActive());
+          if (aiMice.length > 0 && e.rng() < 0.25) {
+            const targetMouse = aiMice[Math.floor(e.rng() * aiMice.length)];
+            e.tryAICommandPing(targetMouse, e.maze.goal.x, e.maze.goal.y);
+          }
+          this._nextPingTryAt = elapsed + 15 + e.rng() * 10;
+        }
+        
         // Medium: moderate speed boost usage
         for (const m of e.mice) {
           if (m.team !== TEAM_AI || !m.isActive()) continue;
@@ -1714,28 +1838,82 @@
         this._nextDecoyTryAt = elapsed + 12 + e.rng() * 10;
       }
       
-      // Hard: Uses wall blast strategically to help its mice OR destroy enemy decoys
-      if (elapsed >= this._nextWallBlastTryAt && e._aiWallBlastCooldown <= 0 && e.aiScore >= e.wallBlastCost) {
-        let blasted = false;
+      // Hard: Uses bomb strategically to help its mice OR destroy enemy decoys
+      if (elapsed >= this._nextBombTryAt && e._aiBombCooldown <= 0 && e.aiScore >= e.bombCost) {
+        let bombed = false;
         
         // First check if there's an enemy decoy (user's decoy) to destroy
         const enemyDecoys = e._decoys?.filter(d => d.active && d.team === TEAM_USER) || [];
         if (enemyDecoys.length > 0 && e.rng() < 0.65) {
           // Target a random enemy decoy
           const targetDecoy = enemyDecoys[Math.floor(e.rng() * enemyDecoys.length)];
-          e.tryAIWallBlast(targetDecoy.x, targetDecoy.y);
-          blasted = true;
+          e.tryAIBomb(targetDecoy.x, targetDecoy.y);
+          bombed = true;
         }
         
         // Otherwise, help stuck mice
-        if (!blasted) {
+        if (!bombed) {
           const stuckMice = e.mice.filter(m => m.team === TEAM_AI && m.isActive() && m.isLikelyLooping?.());
           if (stuckMice.length > 0 && e.rng() < 0.50) {
             const targetMouse = stuckMice[Math.floor(e.rng() * stuckMice.length)];
-            e.tryAIWallBlast(targetMouse.cell.x, targetMouse.cell.y);
+            e.tryAIBomb(targetMouse.cell.x, targetMouse.cell.y);
           }
         }
-        this._nextWallBlastTryAt = elapsed + 18 + e.rng() * 12;
+        this._nextBombTryAt = elapsed + 18 + e.rng() * 12;
+      }
+
+      // Hard: Uses laser fence to block user mice near goal
+      if (elapsed >= this._nextLaserFenceTryAt && e._aiLaserFenceCooldown <= 0 && e.aiScore >= e._laserFenceCost) {
+        // Find user mice close to the goal
+        const userMiceNearGoal = e.mice.filter(m => {
+          if (m.team !== TEAM_USER || !m.isActive()) return false;
+          const d = dist[e.maze.index(m.cell.x, m.cell.y)];
+          return Number.isFinite(d) && d <= 10;
+        });
+        
+        if (userMiceNearGoal.length > 0 && e.rng() < 0.55) {
+          // Place fence between closest user mouse and goal
+          const closestMouse = userMiceNearGoal.reduce((closest, m) => {
+            const d = dist[e.maze.index(m.cell.x, m.cell.y)];
+            const closestD = dist[e.maze.index(closest.cell.x, closest.cell.y)];
+            return d < closestD ? m : closest;
+          });
+          
+          // Place fence slightly toward the goal from the mouse
+          const dx = e.maze.goal.x - closestMouse.cell.x;
+          const dy = e.maze.goal.y - closestMouse.cell.y;
+          const fenceX = Math.floor(closestMouse.cell.x + Math.sign(dx) * 2);
+          const fenceY = Math.floor(closestMouse.cell.y + Math.sign(dy) * 2);
+          
+          if (e.maze.inBounds(fenceX, fenceY)) {
+            e.tryAILaserFence(fenceX, fenceY);
+          }
+        }
+        this._nextLaserFenceTryAt = elapsed + 25 + e.rng() * 15;
+      }
+
+      // Hard: Uses command ping to guide mice toward goal
+      if (elapsed >= this._nextPingTryAt && e._aiPingCooldown <= 0 && e.aiScore >= e.pingCost) {
+        const aiMice = e.mice.filter(m => m.team === TEAM_AI && m.isActive());
+        if (aiMice.length > 0 && e.rng() < 0.45) {
+          // Ping the mouse furthest from goal toward the goal
+          const targetMouse = aiMice.reduce((furthest, m) => {
+            const d = dist[e.maze.index(m.cell.x, m.cell.y)];
+            const furthestD = dist[e.maze.index(furthest.cell.x, furthest.cell.y)];
+            return d > furthestD ? m : furthest;
+          });
+          e.tryAICommandPing(targetMouse, e.maze.goal.x, e.maze.goal.y);
+        }
+        this._nextPingTryAt = elapsed + 8 + e.rng() * 6;
+      }
+
+      // Hard: Bets on mice close to winning
+      for (const m of e.mice) {
+        if (m.team !== TEAM_AI || !m.isActive() || m.hasBet) continue;
+        const d = dist[e.maze.index(m.cell.x, m.cell.y)];
+        if (Number.isFinite(d) && d <= 5 && e.aiScore >= e.doubleDownCost && e.rng() < 0.7) {
+          e.tryAIDoubleDown(m);
+        }
       }
 
       // Boost mice close to center aggressively
@@ -1791,13 +1969,15 @@
       this.speedBoostBtn = document.getElementById('speedBoostBtn');
       // Hive Mind removed
       this.doubleDownBtn = document.getElementById('doubleDownBtn');
+      this.commandPingBtn = document.getElementById('commandPingBtn');
       this.catDeployBtn = document.getElementById('catDeployBtn');
       this.destroyBtn = document.getElementById('destroyBtn');
       this.toggleHeatmapBtn = document.getElementById('toggleHeatmapBtn');
       this.toggleZoomBtn = document.getElementById('toggleZoomBtn');
-      this.wallBlastBtn = document.getElementById('wallBlastBtn');
+      this.bombBtn = document.getElementById('bombBtn');
       this.decoyCheeseBtn = document.getElementById('decoyCheeseBtn');
       this.laserFenceBtn = document.getElementById('laserFenceBtn');
+      this.gluePatchBtn = document.getElementById('gluePatchBtn');
       this.manualMouseBtn = document.getElementById('manualMouseBtn');
 
       this.mouseListEl = document.getElementById('mouseList');
@@ -1831,19 +2011,21 @@
       this.maxMicePerRound = 6;
       this.roundStartScore = 1000;
       this.timeDecayPerSecond = 1;
-      this.victoryReward = 300;
-      this.userDeployCooldown = 5; // user: 5s between deployments
-      this.aiDeployCooldownByDifficulty = { easy: 6.5, medium: 6, hard: 5 };
-      // Speed Boost: more expensive, max 2 per mouse (applies to user + AI)
-      this.speedBoostCost = 35;
+      this.victoryReward = 350; // Slightly increased for more impactful wins
+      this.exploreReward = 0.65; // Slightly higher exploration reward
+      this.pickupPointReward = 18; // Slightly higher pickup reward
+      this.userDeployCooldown = 4.5; // Slightly faster deploy for more action
+      this.aiDeployCooldownByDifficulty = { easy: 7, medium: 5.5, hard: 4.5 };
+      // Speed Boost: adjusted costs
+      this.speedBoostCost = 30; // Slightly cheaper for more frequent use
       this.maxSpeedBoosts = 2;
       // Hive Mind removed
-      this.roundDuration = 180; // 3:00 countdown
+      this.roundDuration = 150; // 2:30 rounds - slightly longer for strategic depth
 
       // Cat deploy
-      this.catCost = 120;
-      this.catUnlockAt = 35;
-      this.catMaxLifetime = 70; // 70 seconds max lifetime
+      this.catCost = 100; // Slightly cheaper cats for more cat action
+      this.catUnlockAt = 30; // Unlock cats 5 seconds earlier
+      this.catMaxLifetime = 65; // Cat lifetime reduced to 65 seconds
       this.userCat = null;
       this.aiCat = null;
 
@@ -1858,18 +2040,36 @@
       this.doubleDownCost = 50;
 
       // Active Sabotage Abilities
-      this.wallBlastCost = 50;
-      this.decoyCheeseCost = 30;
+      this.bombCost = 60; // Bomb (formerly wall blast) - higher cost, kills mice
+      this.decoyCheeseCost = 25; // Cheaper decoys for more traps
       this._decoys = []; // { id, x, y, team, spawnedAt, duration, active }
       this._nextDecoyId = 1; // Unique ID for tracking infection chains
-      this._wallBlastMode = false;
+      this._bombMode = false;
       this._decoyPlaceMode = false; // User placing decoy cheese
       this._hoveredDecoyCell = null; // For decoy placement preview
-      this._wallBlastCooldown = 0; // seconds remaining (user)
-      this._wallBlastCooldownDuration = 15; // 15 second cooldown
+      this._bombCooldown = 0; // seconds remaining (user)
+      this._bombCooldownDuration = 12; // Reduced from 15s
+      this._bombCountdownActive = []; // Active bomb countdowns { x, y, team, startTime }
       this._decoyCooldown = 0; // seconds remaining (user)
-      this._decoyCooldownDuration = 30; // 30 second cooldown
-      this._hoveredWallCell = null; // For wall blast preview
+      this._decoyCooldownDuration = 25; // Reduced from 30s
+      this._hoveredBombCell = null; // For bomb placement preview
+      
+      // Glue Sabotage
+      this._gluePatches = []; // { x, y, team, spawnedAt, active }
+      this.glueCost = 35;
+      this._glueCooldown = 0;
+      this._glueCooldownDuration = 20;
+      this._gluePlaceMode = false;
+      this._hoveredGlueCell = null;
+      this._glueSlowFactor = 0.4; // 40% speed when walking through glue
+      // Command Ping (direction nudge for a selected mouse)
+      this.pingCost = 8; // Slightly cheaper pings
+      this._pingCooldown = 0;
+      this._pingCooldownDuration = 5; // Reduced from 6s
+      this._pingDurationMs = 6000; // Extended from 5s
+      this._pingStrength = 2.8; // Slightly stronger ping influence
+      this._pingMode = false;
+      this._hoveredPingCell = null;
       
       // Decoy cheese sickness
       this._decoySicknessSpeed = 0.65; // 35% slower (was 0.8, now 15% more reduction)
@@ -1877,10 +2077,10 @@
       
       // Laser Fence
       this._laserFences = []; // { x, y, team, spawnedAt, duration, active }
-      this._laserFenceCost = 100;
+      this._laserFenceCost = 85; // Reduced from 100 for more usage
       this._laserFenceCooldown = 0;
-      this._laserFenceCooldownDuration = 60; // 60 second cooldown
-      this._laserFenceDuration = 10000; // 10 seconds active
+      this._laserFenceCooldownDuration = 50; // Reduced from 60s
+      this._laserFenceDuration = 12000; // Extended from 10s to 12s
       this._laserFenceSize = 5; // 5x5 grid
       this._laserFencePlaceMode = false;
       this._hoveredLaserFenceCell = null;
@@ -1904,8 +2104,9 @@
       };
       
       // AI Sabotage Cooldowns (separate from user)
-      this._aiWallBlastCooldown = 0;
+      this._aiBombCooldown = 0;
       this._aiDecoyCooldown = 0;
+      this._aiGlueCooldown = 0;
 
       // Desperation Mode (comeback mechanic)
       this._desperationMode = false;
@@ -1956,14 +2157,14 @@
       // Identity / list
       this._usedNames = new Set();
 
-      // Algorithm costs (all mice cost the same now)
+      // Algorithm costs (balanced for gameplay)
       this.algoCosts = {
         wanderer: 40,
         wallhugger: 40,
         sniffer: 40,
         explorer: 40,
         tremaux: 40,
-        wiseFragile: 150,
+        wiseFragile: 100, // Premium but not prohibitive
       };
       
       // Track round scores for better end display
@@ -1981,7 +2182,12 @@
       this.userHeat = null;
       this.userExplored = null;
       this.aiExplored = null;
+      this._globalExplored = null;
       this.trails = [];
+
+      // Exploration tracking for payouts and pacing
+      this._exploredCellsTotal = 0;
+      this._exploreCelebrationEvery = 24;
 
       // Collision + explosion visuals
       this.blasts = [];
@@ -2054,15 +2260,19 @@
     _ensureFxCanvases() {
       const w = this.canvas.width;
       const h = this.canvas.height;
+      // Use lower resolution for fog to improve performance (0.5x)
+      const fogW = Math.floor(w * 0.5);
+      const fogH = Math.floor(h * 0.5);
+      
       const fog = this._fx?.fogCanvas;
       if (!fog) return;
-      if (fog.width !== w) fog.width = w;
-      if (fog.height !== h) fog.height = h;
+      if (fog.width !== fogW) fog.width = fogW;
+      if (fog.height !== fogH) fog.height = fogH;
 
       const mask = this._fx?.fogMaskCanvas;
       if (mask) {
-        if (mask.width !== w) mask.width = w;
-        if (mask.height !== h) mask.height = h;
+        if (mask.width !== fogW) mask.width = fogW;
+        if (mask.height !== fogH) mask.height = fogH;
       }
     }
 
@@ -2172,6 +2382,20 @@
         });
       }
 
+      // How to Play
+      const howToPlayBtn = document.getElementById('howToPlayBtn');
+      const howToPlayOverlay = document.getElementById('howToPlayOverlay');
+      const howToPlayCloseBtn = document.getElementById('howToPlayCloseBtn');
+      
+      if (howToPlayBtn && howToPlayOverlay && howToPlayCloseBtn) {
+        howToPlayBtn.addEventListener('click', () => {
+          howToPlayOverlay.style.display = 'flex';
+        });
+        howToPlayCloseBtn.addEventListener('click', () => {
+          howToPlayOverlay.style.display = 'none';
+        });
+      }
+
       this.deployBtn.addEventListener('click', () => {
         this.deployUser(this.algoSelect.value);
       });
@@ -2181,6 +2405,39 @@
         if (!m) return;
         this.trySpeedBoost(m);
       });
+
+      // Command Ping (nudge selected mouse toward a clicked cell)
+      if (this.commandPingBtn) {
+        this.commandPingBtn.addEventListener('click', () => {
+          const m = this.getSelectedMouse();
+          if (!m || m.team !== TEAM_USER || !m.isActive()) {
+            this.setMessage('Select an active mouse to ping.');
+            this.audio.playSound('alert');
+            return;
+          }
+          if (this._pingCooldown > 0) {
+            this.setMessage(`Ping cooldown: ${Math.ceil(this._pingCooldown)}s`);
+            this.audio.playSound('alert');
+            return;
+          }
+          if (this.userScore < this.pingCost) {
+            this.setMessage('Not enough points for Command Ping.');
+            this.audio.playSound('alert');
+            return;
+          }
+          this._pingMode = !this._pingMode;
+          this._bombMode = false;
+          this._decoyPlaceMode = false;
+          this._laserFencePlaceMode = false;
+          this._gluePlaceMode = false;
+          this.commandPingBtn.classList.toggle('btn--active', this._pingMode);
+          if (this.bombBtn) this.bombBtn.classList.remove('btn--active');
+          if (this.decoyCheeseBtn) this.decoyCheeseBtn.classList.remove('btn--active');
+          if (this.laserFenceBtn) this.laserFenceBtn.classList.remove('btn--active');
+          if (this.gluePatchBtn) this.gluePatchBtn.classList.remove('btn--active');
+          this.setMessage(this._pingMode ? '📍 Click a cell to nudge your selected mouse.' : 'Command Ping cancelled.');
+        });
+      }
 
       // Hive Mind removed
 
@@ -2231,17 +2488,46 @@
         });
       }
 
-      // Wall Blast mode
-      if (this.wallBlastBtn) {
-        this.wallBlastBtn.addEventListener('click', () => {
-          this._wallBlastMode = !this._wallBlastMode;
+      // Bomb mode (formerly Wall Blast)
+      if (this.bombBtn) {
+        this.bombBtn.addEventListener('click', () => {
+          this._bombMode = !this._bombMode;
           this._decoyPlaceMode = false;
           this._laserFencePlaceMode = false;
-          this.wallBlastBtn.classList.toggle('btn--active', this._wallBlastMode);
+          this._gluePlaceMode = false;
+          this.bombBtn.classList.toggle('btn--active', this._bombMode);
+          if (this.decoyCheeseBtn) this.decoyCheeseBtn.classList.remove('btn--active');
+          if (this.laserFenceBtn) this.laserFenceBtn.classList.remove('btn--active');
+          if (this.gluePatchBtn) this.gluePatchBtn.classList.remove('btn--active');
+          if (this._decoyGuideEl) this._decoyGuideEl.classList.remove('active');
+          this.setMessage(this._bombMode ? '💣 Click maze to place a bomb! (1s fuse)' : 'Bomb cancelled.');
+        });
+      }
+      
+      // Glue Patch mode - click-to-place
+      if (this.gluePatchBtn) {
+        this.gluePatchBtn.addEventListener('click', () => {
+          if (this._glueCooldown > 0) {
+            this.setMessage(`Glue on cooldown: ${Math.ceil(this._glueCooldown)}s`);
+            this.audio.playSound('alert');
+            return;
+          }
+          const effCost = this._desperationMode ? Math.floor(this.glueCost * 0.5) : this.glueCost;
+          if (this.userScore < effCost) {
+            this.setMessage('Not enough points for Glue!');
+            this.audio.playSound('alert');
+            return;
+          }
+          this._gluePlaceMode = !this._gluePlaceMode;
+          this._bombMode = false;
+          this._decoyPlaceMode = false;
+          this._laserFencePlaceMode = false;
+          this.gluePatchBtn.classList.toggle('btn--active', this._gluePlaceMode);
+          if (this.bombBtn) this.bombBtn.classList.remove('btn--active');
           if (this.decoyCheeseBtn) this.decoyCheeseBtn.classList.remove('btn--active');
           if (this.laserFenceBtn) this.laserFenceBtn.classList.remove('btn--active');
           if (this._decoyGuideEl) this._decoyGuideEl.classList.remove('active');
-          this.setMessage(this._wallBlastMode ? '💣 Click maze to blast walls!' : 'Wall Blast cancelled.');
+          this.setMessage(this._gluePlaceMode ? '🫠 Click maze to place glue patch!' : 'Glue placement cancelled.');
         });
       }
 
@@ -2261,11 +2547,13 @@
             return;
           }
           this._decoyPlaceMode = !this._decoyPlaceMode;
-          this._wallBlastMode = false;
+          this._bombMode = false;
           this._laserFencePlaceMode = false;
+          this._gluePlaceMode = false;
           this.decoyCheeseBtn.classList.toggle('btn--active', this._decoyPlaceMode);
-          if (this.wallBlastBtn) this.wallBlastBtn.classList.remove('btn--active');
+          if (this.bombBtn) this.bombBtn.classList.remove('btn--active');
           if (this.laserFenceBtn) this.laserFenceBtn.classList.remove('btn--active');
+          if (this.gluePatchBtn) this.gluePatchBtn.classList.remove('btn--active');
           if (this._decoyGuideEl) this._decoyGuideEl.classList.toggle('active', this._decoyPlaceMode);
           this.setMessage(this._decoyPlaceMode ? '🧀 Click maze to place decoy cheese!' : 'Decoy placement cancelled.');
         });
@@ -2286,11 +2574,13 @@
             return;
           }
           this._laserFencePlaceMode = !this._laserFencePlaceMode;
-          this._wallBlastMode = false;
+          this._bombMode = false;
           this._decoyPlaceMode = false;
+          this._gluePlaceMode = false;
           this.laserFenceBtn.classList.toggle('btn--active', this._laserFencePlaceMode);
-          if (this.wallBlastBtn) this.wallBlastBtn.classList.remove('btn--active');
+          if (this.bombBtn) this.bombBtn.classList.remove('btn--active');
           if (this.decoyCheeseBtn) this.decoyCheeseBtn.classList.remove('btn--active');
+          if (this.gluePatchBtn) this.gluePatchBtn.classList.remove('btn--active');
           if (this._decoyGuideEl) this._decoyGuideEl.classList.remove('active');
           this.setMessage(this._laserFencePlaceMode ? '⚡ Click maze to deploy 5x5 laser fence!' : 'Laser Fence cancelled.');
         });
@@ -2388,6 +2678,7 @@
         if (!this._awaitingRoundAdvance) return;
         this._awaitingRoundAdvance = false;
         this.round++;
+        this.audio.playSound('new_round_btn'); // Play new round sound
         this._startRound(false);
       });
       
@@ -2441,16 +2732,28 @@
         const cellY = Math.floor((py - offsetY) / cellSize);
         const validCell = this.maze && cellX >= 0 && cellX < this.maze.w && cellY >= 0 && cellY < this.maze.h;
         
-        if (this._wallBlastMode && validCell) {
-          this._hoveredWallCell = { x: cellX, y: cellY };
+        if (this._bombMode && validCell) {
+          this._hoveredBombCell = { x: cellX, y: cellY };
         } else {
-          this._hoveredWallCell = null;
+          this._hoveredBombCell = null;
+        }
+        
+        if (this._gluePlaceMode && validCell) {
+          this._hoveredGlueCell = { x: cellX, y: cellY };
+        } else {
+          this._hoveredGlueCell = null;
         }
         
         if (this._decoyPlaceMode && validCell) {
           this._hoveredDecoyCell = { x: cellX, y: cellY };
         } else {
           this._hoveredDecoyCell = null;
+        }
+        
+        if (this._pingMode && validCell) {
+          this._hoveredPingCell = { x: cellX, y: cellY };
+        } else if (!this._pingMode) {
+          this._hoveredPingCell = null;
         }
         
         if (this._laserFencePlaceMode && validCell) {
@@ -2461,8 +2764,10 @@
       });
 
       this.canvas.addEventListener('pointerleave', () => {
-        this._hoveredWallCell = null;
+        this._hoveredBombCell = null;
+        this._hoveredGlueCell = null;
         this._hoveredDecoyCell = null;
+        this._hoveredPingCell = null;
         this._hoveredLaserFenceCell = null;
       });
     }
@@ -2501,10 +2806,16 @@
       const cellY = Math.floor((py - offsetY) / cellSize);
       const validCell = this.maze && cellX >= 0 && cellX < this.maze.w && cellY >= 0 && cellY < this.maze.h;
 
-      // Handle Wall Blast mode
-      if (this._wallBlastMode && validCell) {
-        this.tryWallBlast(cellX, cellY);
-        this.wallBlastBtn?.classList.remove('btn--active');
+      // Handle Bomb mode (formerly Wall Blast)
+      if (this._bombMode && validCell) {
+        this.tryBomb(cellX, cellY);
+        this.bombBtn?.classList.remove('btn--active');
+        return;
+      }
+      
+      // Handle Glue placement mode
+      if (this._gluePlaceMode && validCell) {
+        this._placeGlueAtCell(cellX, cellY);
         return;
       }
       
@@ -2517,6 +2828,12 @@
       // Handle Laser Fence placement mode
       if (this._laserFencePlaceMode && validCell) {
         this._placeLaserFenceAtCell(cellX, cellY);
+        return;
+      }
+
+      // Handle Command Ping placement
+      if (this._pingMode && validCell) {
+        this._placeCommandPingAtCell(cellX, cellY);
         return;
       }
 
@@ -2566,6 +2883,8 @@
       this.userHeat = new Uint16Array(this.maze.w * this.maze.h);
       this.userExplored = new Uint8Array(this.maze.w * this.maze.h);
       this.aiExplored = new Uint8Array(this.maze.w * this.maze.h);
+      this._globalExplored = new Uint8Array(this.maze.w * this.maze.h);
+      this._exploredCellsTotal = 0;
 
       // Starting tiles are always explored for their respective teams.
       this._markExplored(TEAM_USER, this.maze.userStart.x, this.maze.userStart.y);
@@ -2589,8 +2908,16 @@
 
       this.userScore = this.roundStartScore;
       this.aiScore = this.roundStartScore;
+      this.userBaseScore = this.roundStartScore;
+      this.aiBaseScore = this.roundStartScore;
+      this.userExploreScore = 0;
+      this.aiExploreScore = 0;
+      this.userSpent = 0;
+      this.aiSpent = 0;
       this.userDeployed = 0;
       this.aiDeployed = 0;
+      this.userHasDeployed = false;
+      this.aiHasDeployed = false;
       this.userLastDeployTime = -999;
       this.aiLastDeployTime = -999;
 
@@ -2616,20 +2943,44 @@
       // Reset decoy placement mode
       this._decoyPlaceMode = false;
       this._hoveredDecoyCell = null;
-      if (this.decoyCheeseBtn) this.decoyCheeseBtn.classList.remove('btn--active');
+      if (this.decoyCheeseBtn) {
+        this.decoyCheeseBtn.classList.remove('btn--active');
+        this.decoyCheeseBtn.classList.remove('pulse-ring');
+      }
       if (this._decoyGuideEl) this._decoyGuideEl.classList.remove('active');
       
       // Reset laser fence placement mode
       this._laserFencePlaceMode = false;
       this._hoveredLaserFenceCell = null;
-      if (this.laserFenceBtn) this.laserFenceBtn.classList.remove('btn--active');
+      if (this.laserFenceBtn) {
+        this.laserFenceBtn.classList.remove('btn--active');
+        this.laserFenceBtn.classList.remove('pulse-ring');
+      }
       this._laserFences = [];
       this._laserFenceCooldown = 0;
       this._aiLaserFenceCooldown = 0;
+
+      // Reset command ping state
+      this._pingMode = false;
+      this._pingCooldown = 0;
+      this._aiPingCooldown = 0;
+      this._hoveredPingCell = null;
+      if (this.commandPingBtn) {
+        this.commandPingBtn.classList.remove('btn--active');
+        this.commandPingBtn.classList.remove('pulse-ring');
+      }
       
       // Reset all cooldowns for new round
-      this._wallBlastCooldown = 0;
-      this._aiWallBlastCooldown = 0;
+      this._bombCooldown = 0;
+      this._aiBombCooldown = 0;
+      this._bombCountdownActive = [];
+      if (this.bombBtn) this.bombBtn.classList.remove('pulse-ring');
+      
+      this._glueCooldown = 0;
+      this._aiGlueCooldown = 0;
+      this._gluePatches = [];
+      if (this.gluePatchBtn) this.gluePatchBtn.classList.remove('pulse-ring');
+      
       this._decoyCooldown = 0;
       this._aiDecoyCooldown = 0;
       this._decoys = [];
@@ -2643,6 +2994,17 @@
       this._aiManualMouse = null;
       this._manualMouseQueued = false;
       if (this.manualMouseBtn) this.manualMouseBtn.classList.remove('btn--active');
+
+      // Reset exploration counters
+      this._exploredCellsTotal = 0;
+      
+      // Initialize previous cooldowns for pulse animation tracking
+      this._prevBombCooldown = 0;
+      this._prevGlueCooldown = 0;
+      this._prevDecoyCooldown = 0;
+      this._prevLaserFenceCooldown = 0;
+      this._prevPingCooldown = 0;
+      this._prevDeployCooldown = 0;
 
       this.ai.setDifficulty(this.difficulty);
 
@@ -2860,6 +3222,16 @@
           this.audio.playSound('truth');
         }
 
+        // Reward pickup collection with points (lucky mice get more)
+        const pickupMult = mouse.personality === 'lucky' ? mouse._luckyPickupBonus : 1;
+        const reward = Math.round(this.pickupPointReward * pickupMult);
+        if (mouse.team === TEAM_USER) {
+          this.userScore += reward;
+          this._spawnFloatingText(mouse.cell.x, mouse.cell.y, `+${reward}`, '#0066ff');
+        } else {
+          this.aiScore += reward;
+        }
+
         // Keep symmetry fair: collecting one removes both and respawns together.
         this._deactivatePickupPair(p.pairId);
         return;
@@ -2869,6 +3241,23 @@
     _markExplored(team, x, y) {
       if (!this.maze) return;
       const i = this.maze.index(x, y);
+      const alreadyGloballyExplored = this._globalExplored ? this._globalExplored[i] : 1;
+      if (!alreadyGloballyExplored && this._globalExplored) {
+        this._globalExplored[i] = 1;
+        this._exploredCellsTotal++;
+        // Only award exploration points after first mouse deployment
+        if (team === TEAM_USER && this.userHasDeployed) {
+          this.userScore += this.exploreReward;
+          this.userExploreScore = (this.userExploreScore || 0) + this.exploreReward;
+          if (this._exploredCellsTotal % this._exploreCelebrationEvery === 0) {
+            this._spawnFloatingText(x, y, '+Explore', '#0066ff');
+          }
+        } else if (team === TEAM_AI && this.aiHasDeployed) {
+          this.aiScore += this.exploreReward;
+          this.aiExploreScore = (this.aiExploreScore || 0) + this.exploreReward;
+        }
+      }
+
       if (team === TEAM_USER) {
         if (this.userExplored) this.userExplored[i] = 1;
       } else {
@@ -2887,10 +3276,6 @@
       const targetW = clamp(Math.floor(h * 1.55), h + 11, 75);
       const w = targetW % 2 === 0 ? targetW + 1 : targetW;
       return { w, h };
-    }
-
-    getAlgoCost(algo) {
-      return this.algoCosts[algo] ?? 50;
     }
 
     getActiveMiceCount(team) {
@@ -2931,6 +3316,7 @@
       }
 
       this.userScore -= cost;
+      this.userSpent += cost;
       const elapsed = this.roundDuration - this.timeRemaining;
       this.userLastDeployTime = elapsed;
 
@@ -2941,7 +3327,7 @@
         hand: 'left',
         start: this.maze.userStart,
         maze: this.maze,
-        baseSpeed: algo === 'wiseFragile' ? 1.26 : 2.52, // 10% slower
+        baseSpeed: algo === 'wiseFragile' ? 1.5 : 3.0, // faster overall pace
         deploymentCost: cost,
       });
 
@@ -2949,6 +3335,7 @@
       this._assignPersonality(m);
       this.mice.push(m);
       this.userDeployed++;
+      this.userHasDeployed = true;
       this.userHeat[this.maze.index(m.cell.x, m.cell.y)]++;
       this._markExplored(TEAM_USER, m.cell.x, m.cell.y);
 
@@ -2976,6 +3363,7 @@
       if (this.aiScore < cost) return false;
 
       this.aiScore -= cost;
+      this.aiSpent += cost;
       const elapsed = this.roundDuration - this.timeRemaining;
       this.aiLastDeployTime = elapsed;
 
@@ -2986,12 +3374,13 @@
         hand: 'right',
         start: this.maze.aiStart,
         maze: this.maze,
-        baseSpeed: algo === 'wiseFragile' ? 1.26 : 2.52, // 10% slower
+        baseSpeed: algo === 'wiseFragile' ? 1.5 : 3.0, // faster overall pace
         deploymentCost: cost,
       });
       this._assignMouseIdentity(m, this.aiDeployed + 1); // Give AI mice names too
       this.mice.push(m);
       this.aiDeployed++;
+      this.aiHasDeployed = true;
       this._markExplored(TEAM_AI, m.cell.x, m.cell.y);
 
       this.audio.playSound('deploy');
@@ -3017,7 +3406,7 @@
         hand: isUser ? 'left' : 'right',
         start: start,
         maze: this.maze,
-        baseSpeed: 1.89, // Between wiseFragile (1.26) and regular (2.52)
+        baseSpeed: 2.25, // Faster manual control
         deploymentCost: 0,
       });
       
@@ -3057,14 +3446,28 @@
       if (mouse.team === TEAM_USER) this.userScore += refund;
       else this.aiScore += refund;
 
+      // Reset deploy cooldown for the team that lost a mouse
+      if (mouse.team === TEAM_USER) {
+        this.userLastDeployTime = -999;
+      } else {
+        this.aiLastDeployTime = -999;
+      }
+
       if (this.selectedMouseId === mouse.id) this.selectedMouseId = null;
       this.audio.playSound('destroy');
       this._spawnFloatingText(mouse.cell.x, mouse.cell.y, '💀 DESTROYED', '#ff3b30');
-      this.setMessage(`Mouse destroyed. Refund: +${refund}`);
+      this.setMessage(`Mouse destroyed. Refund: +${refund}. Deploy cooldown reset!`);
     }
 
     trySpeedBoost(mouse) {
       if (!mouse || !mouse.isActive()) return false;
+      
+      // Wise but Fragile mice cannot be upgraded
+      if (mouse.algorithm === 'wiseFragile') {
+        this.setMessage('Wise but Fragile mice cannot be upgraded!');
+        this.audio.playSound('alert');
+        return false;
+      }
       
       // Check if mouse has reached boost limit
       if (!mouse.canBoostSpeed()) {
@@ -3081,9 +3484,11 @@
           return false;
         }
         this.userScore -= cost;
+        this.userSpent += cost;
       } else {
         if (this.aiScore < cost) return false;
         this.aiScore -= cost;
+        this.aiSpent += cost;
       }
       mouse.boostSpeed(1.2);
       this.audio.playSound('speed_boost');
@@ -3123,10 +3528,18 @@
         
         // Check if mouse is sick - cat dies from eating poisoned mouse!
         const mouseWasSick = m.isSick && nowMs() < m.sickUntilMs;
+        const mouseTeam = m.team; // Store before destruction
         
         m.destroyed = true;
         if (this.selectedMouseId === m.id) this.selectedMouseId = null;
         this._spawnBloodStain(cat.cell.x, cat.cell.y);
+        
+        // Reset deploy cooldown for the team that lost a mouse
+        if (mouseTeam === TEAM_USER) {
+          this.userLastDeployTime = -999;
+        } else {
+          this.aiLastDeployTime = -999;
+        }
         
         // If mouse was sick, cat dies too!
         if (mouseWasSick) {
@@ -3621,9 +4034,11 @@
           return false;
         }
         this.userScore -= cost;
+        this.userSpent += cost;
       } else {
         if (this.aiScore < cost) return false;
         this.aiScore -= cost;
+        this.aiSpent += cost;
       }
 
       const algos = ['explorer', 'tremaux'];
@@ -3631,7 +4046,7 @@
       const start = team === TEAM_USER ? this.maze.aiStart : this.maze.userStart;
 
       // Slightly faster than a mouse (mouse base speed is ~2.8 right now).
-      const newCat = new CatAgent({ team, start, maze: this.maze, baseSpeed: 2.34, algorithm: algo }); // 93% of mouse speed (2.52)
+      const newCat = new CatAgent({ team, start, maze: this.maze, baseSpeed: 2.8, algorithm: algo }); // Slightly faster to match new pace
       newCat.spawnedAtSec = elapsed; // Track spawn time for lifetime limit
       if (team === TEAM_USER) this.userCat = newCat;
       else this.aiCat = newCat;
@@ -3685,7 +4100,7 @@
         y1: toCell.y,
         t0: this.timeRemaining,
       });
-      if (this.trails.length > 2400) this.trails.splice(0, this.trails.length - 2400);
+      if (this.trails.length > 1200) this.trails.splice(0, this.trails.length - 1200);
     }
 
     _algoLabel(algo) {
@@ -3700,7 +4115,7 @@
 
     // === LIVE COMMENTARY SYSTEM ===
     _queueCommentary(text, priority = 1) {
-      this._commentaryQueue.push({ text, priority, t: nowMs() });
+      this._commentaryQueue.push({ text, priority, addedAt: performance.now() });
       // Sort by priority (higher = more important)
       this._commentaryQueue.sort((a, b) => b.priority - a.priority);
       if (this._commentaryQueue.length > 5) this._commentaryQueue.pop();
@@ -3708,15 +4123,20 @@
 
     _updateCommentary(dt) {
       const t = nowMs() / 1000;
-      if (t - this._lastCommentaryAt < this._commentaryCooldown) return;
       
-      // Process queue
+      // Process queue - Sync DOM with visual queue
       if (this._commentaryQueue.length > 0) {
-        const c = this._commentaryQueue.shift();
-        this.setMessage(c.text);
-        this._lastCommentaryAt = t;
+        const c = this._commentaryQueue[0];
+        // Only update if changed to avoid DOM thrashing
+        if (this.message.textContent !== c.text) {
+          this.setMessage(c.text);
+          this._lastCommentaryAt = t;
+        }
+        // Do NOT shift here. _drawCommentary handles lifetime based on duration.
         return;
       }
+      
+      if (t - this._lastCommentaryAt < this._commentaryCooldown) return;
       
       // Generate dynamic commentary
       const activeMice = this.mice.filter(m => m.isActive() && !m.isCrazy);
@@ -3959,10 +4379,12 @@
       const t = nowMs();
       
       // Update cooldowns (user and AI)
-      if (this._wallBlastCooldown > 0) this._wallBlastCooldown -= dt;
+      if (this._bombCooldown > 0) this._bombCooldown -= dt;
       if (this._decoyCooldown > 0) this._decoyCooldown -= dt;
-      if (this._aiWallBlastCooldown > 0) this._aiWallBlastCooldown -= dt;
+      if (this._glueCooldown > 0) this._glueCooldown -= dt;
+      if (this._aiBombCooldown > 0) this._aiBombCooldown -= dt;
       if (this._aiDecoyCooldown > 0) this._aiDecoyCooldown -= dt;
+      if (this._aiGlueCooldown > 0) this._aiGlueCooldown -= dt;
       
       for (let i = this._decoys.length - 1; i >= 0; i--) {
         const d = this._decoys[i];
@@ -3987,9 +4409,16 @@
               m.sickSpeedReduction = this._decoySicknessSpeed;
               m.sickSourceId = d.id; // Track infection source
               m.poopTrail = [];
+              
+              // Sick mice become Wanderers (confused/disoriented) - store original algorithm
+              if (!m._originalAlgorithm && m.algorithm !== 'wanderer') {
+                m._originalAlgorithm = m.algorithm;
+                m.algorithm = 'wanderer';
+              }
+              
               this.audio.playSound('bad_stomach');
-              this._spawnFloatingText(m.px, m.py, '🤢', 'rgba(100,180,50,0.95)');
-              this._queueCommentary(`🧀💀 ${m.team === TEAM_USER ? 'Your' : 'Enemy'} mouse ate the poisoned decoy!`, 2);
+              this._spawnFloatingText(m.px, m.py, '🤢🎲', 'rgba(100,180,50,0.95)');
+              this._queueCommentary(`🧀💀 ${m.team === TEAM_USER ? 'Your' : 'Enemy'} mouse ate the poisoned decoy! Now wandering confused!`, 2);
             } else {
               // Friendly mouse - small boost instead
               this._queueCommentary(`🧀 ${m.team === TEAM_USER ? 'Your' : 'Enemy'} mouse ate the cheese!`, 1);
@@ -4114,26 +4543,195 @@
       }
     }
 
-    // === WALL BLAST ===
-    tryWallBlast(cellX, cellY) {
-      if (!this.roundActive) return false;
-      if (this._wallBlastCooldown > 0) {
-        this.setMessage(`Wall Blast on cooldown: ${Math.ceil(this._wallBlastCooldown)}s`);
+    // === COMMAND PING ===
+    _placeCommandPingAtCell(cellX, cellY) {
+      if (!this.roundActive || !this.maze) return false;
+      const mouse = this.getSelectedMouse();
+      if (!mouse || mouse.team !== TEAM_USER || !mouse.isActive()) {
+        this.setMessage('Select an active mouse to ping.');
         this.audio.playSound('alert');
         return false;
       }
-      const effCost = this._desperationMode ? Math.floor(this.wallBlastCost * 0.5) : this.wallBlastCost;
+
+      if (this._pingCooldown > 0) {
+        this.setMessage(`Ping cooldown: ${Math.ceil(this._pingCooldown)}s`);
+        this.audio.playSound('alert');
+        return false;
+      }
+
+      const cost = this.pingCost;
+      if (this.userScore < cost) {
+        this.setMessage('Not enough points for Command Ping.');
+        this.audio.playSound('alert');
+        return false;
+      }
+
+      // Deduct and apply bias
+      this.userScore -= cost;
+      this.userSpent += cost;
+      const now = nowMs();
+      mouse.pingTarget = { x: cellX, y: cellY };
+      mouse.pingUntilMs = now + this._pingDurationMs;
+      mouse.pingStrength = this._pingStrength;
+      mouse.lastPingAtMs = now;
+      this._pingCooldown = this._pingCooldownDuration;
+
+      this._spawnFloatingText(cellX, cellY, '📍', '#0066ff');
+      const label = mouse.displayName || 'Mouse';
+      this.setMessage(`📍 ${label} biased toward (${cellX + 1}, ${cellY + 1})`);
+      this.audio.playSound('ping');
+      this.commandPingBtn?.classList.remove('btn--active');
+      this._pingMode = false;
+      return true;
+    }
+
+    // === BOMB (formerly Wall Blast) ===
+    tryBomb(cellX, cellY) {
+      if (!this.roundActive) return false;
+      if (this._bombCooldown > 0) {
+        this.setMessage(`Bomb on cooldown: ${Math.ceil(this._bombCooldown)}s`);
+        this.audio.playSound('alert');
+        return false;
+      }
+      const effCost = this._desperationMode ? Math.floor(this.bombCost * 0.5) : this.bombCost;
       if (this.userScore < effCost) {
-        this.setMessage('Not enough points for Wall Blast!');
+        this.setMessage('Not enough points for Bomb!');
         this.audio.playSound('alert');
         return false;
       }
       
       this.userScore -= effCost;
+      this.userSpent += effCost;
+      
+      // Start 1 second countdown before explosion
+      this._bombCountdownActive.push({
+        x: cellX,
+        y: cellY,
+        team: TEAM_USER,
+        startTime: nowMs()
+      });
+      
+      // Start cooldown immediately
+      this._bombCooldown = this._bombCooldownDuration;
+      
+      // Visual feedback - countdown indicator
+      this._spawnFloatingText(cellX, cellY, '💣 1s', '#ff4444');
+      this.audio.playSound('deploy');
+      this._queueCommentary('💣 Bomb placed! 1 second fuse...', 1);
+      
+      this._bombMode = false;
+      this.bombBtn?.classList.remove('btn--active');
+      this._hoveredBombCell = null;
+      return true;
+    }
+    
+    // Called from update loop to handle bomb explosions
+    _updateBombs() {
+      const currentTime = nowMs();
+      
+      for (let i = this._bombCountdownActive.length - 1; i >= 0; i--) {
+        const bomb = this._bombCountdownActive[i];
+        const elapsed = currentTime - bomb.startTime;
+        
+        if (elapsed >= 1000) { // 1 second fuse
+          // BOOM! Execute explosion
+          this._executeBombExplosion(bomb.x, bomb.y, bomb.team);
+          this._bombCountdownActive.splice(i, 1);
+        }
+      }
+    }
+    
+    // Execute the actual bomb explosion
+    _executeBombExplosion(cellX, cellY, team) {
+      // Break walls around the bomb
       this.maze.breakWallsAround(cellX, cellY, 1);
       this.distanceToGoal = this.maze.computeDistanceMap(this.maze.goal.x, this.maze.goal.y);
       
       // Uncover the bombed area from fog
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const tx = cellX + dx;
+          const ty = cellY + dy;
+          if (this.maze.inBounds(tx, ty)) {
+            this._markExplored(team, tx, ty);
+          }
+        }
+      }
+      
+      // Destroy any decoy cheeses in the blast radius
+      this._destroyDecoysInRadius(cellX, cellY, 1);
+      
+      // Kill any mice in the blast radius!
+      const miceKilled = [];
+      for (const m of this.mice) {
+        if (!m.isActive()) continue;
+        const dx = Math.abs(m.cell.x - cellX);
+        const dy = Math.abs(m.cell.y - cellY);
+        if (dx <= 1 && dy <= 1) {
+          miceKilled.push(m);
+        }
+      }
+      
+      for (const m of miceKilled) {
+        m.destroyed = true;
+        if (this.selectedMouseId === m.id) this.selectedMouseId = null;
+        
+        // Leave a mouse splat at the death location
+        this._spawnBloodStain(m.cell.x, m.cell.y);
+        this._spawnFloatingText(m.cell.x, m.cell.y, '💀', '#ff3333');
+        
+        // Reset deploy cooldown for the team that lost a mouse
+        if (m.team === TEAM_USER) {
+          this.userLastDeployTime = -999;
+        } else {
+          this.aiLastDeployTime = -999;
+        }
+      }
+      
+      if (miceKilled.length > 0) {
+        this.audio.playSound('destroy');
+        const teamKilled = miceKilled.map(m => m.team === TEAM_USER ? 'your' : 'enemy').join(', ');
+        this._queueCommentary(`💥💀 Bomb killed ${miceKilled.length} ${miceKilled.length === 1 ? 'mouse' : 'mice'}!`, 3);
+      }
+      
+      // Visual feedback - explosion
+      this.blasts.push({ x: cellX, y: cellY, t0: nowMs(), isWallBlast: true });
+      this.audio.playSound('bomb');
+      if (miceKilled.length === 0) {
+        this._queueCommentary('💥 BOOM! New paths opened!', 2);
+      }
+    }
+    
+    // === GLUE PATCHES ===
+    _placeGlueAtCell(cellX, cellY) {
+      if (!this.roundActive) return false;
+      if (this._glueCooldown > 0) {
+        this.setMessage(`Glue on cooldown: ${Math.ceil(this._glueCooldown)}s`);
+        this.audio.playSound('alert');
+        return false;
+      }
+      
+      const effCost = this._desperationMode ? Math.floor(this.glueCost * 0.5) : this.glueCost;
+      if (this.userScore < effCost) {
+        this.setMessage('Not enough points for Glue!');
+        this.audio.playSound('alert');
+        return false;
+      }
+      
+      this.userScore -= effCost;
+      this.userSpent += effCost;
+      this._glueCooldown = this._glueCooldownDuration;
+      
+      // Create glue patch - permanent, circular area (3x3 grid)
+      this._gluePatches.push({
+        x: cellX,
+        y: cellY,
+        team: TEAM_USER,
+        spawnedAt: nowMs(),
+        active: true
+      });
+      
+      // Uncover the glue area from fog
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
           const tx = cellX + dx;
@@ -4144,21 +4742,30 @@
         }
       }
       
-      // Destroy any decoy cheeses in the blast radius
-      this._destroyDecoysInRadius(cellX, cellY, 1);
+      this.audio.playSound('glue_deploy');
+      this._spawnFloatingText(cellX, cellY, '🫠 GLUE!', '#8B4513');
+      this._queueCommentary('🫠 Glue patch placed! Animals will be slowed to 40%!', 2);
       
-      // Start cooldown
-      this._wallBlastCooldown = this._wallBlastCooldownDuration;
+      // Exit placement mode
+      this._gluePlaceMode = false;
+      this._hoveredGlueCell = null;
+      this.gluePatchBtn?.classList.remove('btn--active');
       
-      // Visual feedback - larger explosion
-      this.blasts.push({ x: cellX, y: cellY, t0: nowMs(), isWallBlast: true });
-      this.audio.playSound('bomb');
-      this._queueCommentary('💥 WALL BLAST! New paths opened!', 2);
-      
-      this._wallBlastMode = false;
-      this.wallBlastBtn?.classList.remove('btn--active');
-      this._hoveredWallCell = null;
       return true;
+    }
+    
+    // Check if a position is affected by glue (returns true if in glue)
+    _isInGlue(cellX, cellY) {
+      for (const glue of this._gluePatches) {
+        if (!glue.active) continue;
+        // Circular pattern - check if within 1.5 cell radius
+        const dx = cellX - glue.x;
+        const dy = cellY - glue.y;
+        if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
+          return true;
+        }
+      }
+      return false;
     }
 
     // === DECOY CHEESE ===
@@ -4200,6 +4807,7 @@
       const chosen = candidates[Math.floor(this.rng() * candidates.length)];
       
       this.userScore -= effCost;
+      this.userSpent += effCost;
       
       // Start cooldown
       this._decoyCooldown = this._decoyCooldownDuration;
@@ -4255,6 +4863,7 @@
       }
       
       this.userScore -= effCost;
+      this.userSpent += effCost;
       this._decoyCooldown = this._decoyCooldownDuration;
       
       // Uncover the decoy area from fog (3x3 around it)
@@ -4307,6 +4916,7 @@
       }
       
       this.userScore -= effCost;
+      this.userSpent += effCost;
       this._laserFenceCooldown = this._laserFenceCooldownDuration;
       
       const halfSize = Math.floor(this._laserFenceSize / 2);
@@ -4506,6 +5116,7 @@
       
       // Deduct cost
       this.userScore -= info.cost;
+      this.userSpent += info.cost;
       
       // Set the bet reward on the mouse
       mouse.betReward = info.reward;
@@ -4546,6 +5157,7 @@
       const chosen = candidates[Math.floor(this.rng() * candidates.length)];
       
       this.aiScore -= this.decoyCheeseCost;
+      this.aiSpent += this.decoyCheeseCost;
       this._aiDecoyCooldown = this._decoyCooldownDuration;
       
       this._decoys.push({
@@ -4575,19 +5187,60 @@
       return true;
     }
     
-    // AI uses wall blast to help its mice
-    tryAIWallBlast(cellX, cellY) {
+    // AI uses bomb to help its mice (with 1s countdown like player)
+    tryAIBomb(cellX, cellY) {
       if (!this.roundActive) return false;
-      if (this._aiWallBlastCooldown > 0) return false;
-      if (this.aiScore < this.wallBlastCost) return false;
+      if (this._aiBombCooldown > 0) return false;
+      if (this.aiScore < this.bombCost) return false;
       
-      this.aiScore -= this.wallBlastCost;
-      this.maze.breakWallsAround(cellX, cellY, 1);
-      this.distanceToGoal = this.maze.computeDistanceMap(this.maze.goal.x, this.maze.goal.y);
+      this.aiScore -= this.bombCost;
+      this.aiSpent += this.bombCost;
       
-      // Uncover the bombed area from fog (for AI team)
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
+      // Start 1 second countdown before explosion (same as player)
+      this._bombCountdownActive.push({
+        x: cellX,
+        y: cellY,
+        team: TEAM_AI,
+        startTime: nowMs()
+      });
+      
+      this._aiBombCooldown = this._bombCooldownDuration;
+      
+      // Visual feedback
+      this._spawnFloatingText(cellX, cellY, '💣 AI BOMB!', '#ff6666');
+      this.audio.playSound('deploy');
+      this._queueCommentary('💣 AI placed a bomb! 1 second fuse...', 2);
+      
+      return true;
+    }
+
+    // AI places laser fence to block user mice
+    tryAILaserFence(cellX, cellY) {
+      if (!this.roundActive) return false;
+      if (this._aiLaserFenceCooldown > 0) return false;
+      if (this.aiScore < this._laserFenceCost) return false;
+      
+      this.aiScore -= this._laserFenceCost;
+      this.aiSpent += this._laserFenceCost;
+      this._aiLaserFenceCooldown = this._laserFenceCooldownDuration;
+      
+      const halfSize = Math.floor(this._laserFenceSize / 2);
+      
+      // Create the laser fence
+      const newFence = {
+        x: cellX,
+        y: cellY,
+        team: TEAM_AI,
+        spawnedAt: nowMs(),
+        duration: this._laserFenceDuration,
+        active: true,
+        size: this._laserFenceSize
+      };
+      this._laserFences.push(newFence);
+      
+      // Uncover the area within the laser fence perimeter for AI
+      for (let dy = -halfSize; dy <= halfSize; dy++) {
+        for (let dx = -halfSize; dx <= halfSize; dx++) {
           const tx = cellX + dx;
           const ty = cellY + dy;
           if (this.maze.inBounds(tx, ty)) {
@@ -4596,16 +5249,54 @@
         }
       }
       
-      // Destroy any decoy cheeses in the blast radius (AI can use this too)
-      this._destroyDecoysInRadius(cellX, cellY, 1);
+      // Push any entities that are exactly on the boundary
+      this._pushEntitiesOffFenceBoundary(newFence);
       
-      this._aiWallBlastCooldown = this._wallBlastCooldownDuration;
+      this.audio.playSound('laser_fence_deploy');
+      this._spawnFloatingText(cellX, cellY, '⚡ AI FENCE!', '#ff3333');
+      this._queueCommentary('⚡ AI deployed a laser fence!', 2);
       
-      // Visual feedback
-      this.blasts.push({ x: cellX, y: cellY, t0: nowMs(), isWallBlast: true });
-      this.audio.playSound('bomb');
-      this._queueCommentary('💥 AI blasted open new paths!', 2);
+      return true;
+    }
+
+    // AI uses command ping to guide its mice toward goal
+    tryAICommandPing(mouse, targetX, targetY) {
+      if (!this.roundActive || !mouse || !mouse.isActive()) return false;
+      if (mouse.team !== TEAM_AI) return false;
+      if (this._aiPingCooldown > 0) return false;
+      if (this.aiScore < this.pingCost) return false;
       
+      this.aiScore -= this.pingCost;
+      this.aiSpent += this.pingCost;
+      
+      const now = nowMs();
+      mouse.pingTarget = { x: targetX, y: targetY };
+      mouse.pingUntilMs = now + this._pingDurationMs;
+      mouse.pingStrength = this._pingStrength;
+      mouse.lastPingAtMs = now;
+      this._aiPingCooldown = this._pingCooldownDuration;
+      
+      this._spawnFloatingText(targetX, targetY, '📍', '#ff3333');
+      this.audio.playSound('ping');
+      
+      return true;
+    }
+
+    // AI bets on its own mice
+    tryAIDoubleDown(mouse) {
+      if (!mouse || !mouse.isActive()) return false;
+      if (mouse.team !== TEAM_AI) return false;
+      if (mouse.hasBet) return false;
+      if (this.aiScore < this.doubleDownCost) return false;
+      
+      this.aiScore -= this.doubleDownCost;
+      this.aiSpent += this.doubleDownCost;
+      mouse.hasBet = true;
+      mouse.betAmount = this.doubleDownCost;
+      this._bets.push({ mouseId: mouse.id, amount: this.doubleDownCost, team: TEAM_AI });
+      
+      this.audio.playSound('deploy');
+      this._queueCommentary(`🎰 AI bet on ${mouse.displayName || 'their mouse'}!`, 2);
       return true;
     }
 
@@ -4624,6 +5315,7 @@
       }
       
       this.userScore -= this.doubleDownCost;
+      this.userSpent += this.doubleDownCost;
       mouse.hasBet = true;
       mouse.betAmount = this.doubleDownCost;
       this._bets.push({ mouseId: mouse.id, amount: this.doubleDownCost, team: TEAM_USER });
@@ -4685,16 +5377,32 @@
       // Stop end strings music immediately if playing
       this.audio.stopEndStrings(false);
       
+      // Stop all active SFX (like laser fence deploy sound)
+      this.audio.stopAllSFX();
+      
+      // Stop walk sounds
+      this.audio.stopAllLoops();
+      
       // Pause background music immediately (win/lose music will play instead)
       this.audio.pauseBgMusic();
+      
+      // Clear active placement modes
+      this._bombMode = false;
+      this._gluePlaceMode = false;
+      this._decoyPlaceMode = false;
+      this._laserFencePlaceMode = false;
+      this._pingMode = false;
 
-      // Freeze active mice.
+      // Freeze active mice and clean up poop trails
       for (const m of this.mice) {
+        if (m.poopTrail) m.poopTrail = [];
         if (m.isActive()) m.destroy();
       }
 
-      // Clear blood stains at end of round
+      // Clear visual effects to free memory
       this.bloodStains = [];
+      this.frostParticles = [];
+      this.floatingTexts = [];
 
       // Clear decoys at end of round
       this._decoys = [];
@@ -5096,7 +5804,10 @@
       this._updateDramaMode(dt);
       this._updateDesperation();
       this._updateDecoys(dt);
+      this._updateBombs(); // Handle bomb countdowns and explosions
       this._updateLaserFences(dt);
+      if (this._pingCooldown > 0) this._pingCooldown = Math.max(0, this._pingCooldown - dt);
+      if (this._aiPingCooldown > 0) this._aiPingCooldown = Math.max(0, this._aiPingCooldown - dt);
       this._checkMiniObjectives();
       this._updateZoom(dt);
 
@@ -5112,12 +5823,55 @@
 
       this.hudRound.textContent = `Round ${this.round} / ${this.maxRounds}`;
       this.hudTime.textContent = formatTime(this.timeRemaining);
-      this.hudUserScore.textContent = `${Math.floor(this.userScore)}`;
-      this.hudAiScore.textContent = `${Math.floor(this.aiScore)}`;
       
-      // Update totals below scores
-      this.hudUserTotal.textContent = `Total: ${Math.floor(this.userTotal)}`;
-      this.hudAiTotal.textContent = `Total: ${Math.floor(this.aiTotal)}`;
+      // Helper to format numbers with max 1 decimal
+      const fmt = (n) => {
+        const val = Math.round(n * 10) / 10;
+        return Number.isInteger(val) ? val.toString() : val.toFixed(1);
+      };
+      
+      // Helper to format with sign (only show minus if actually negative)
+      const fmtSigned = (n, forceSign = false) => {
+        const val = Math.round(n * 10) / 10;
+        const str = Number.isInteger(val) ? Math.abs(val).toString() : Math.abs(val).toFixed(1);
+        if (val < 0) return `-${str}`;
+        if (forceSign && val > 0) return `+${str}`;
+        return str;
+      };
+      
+      // Update scores breakdown
+      const userExplore = this.userExploreScore || 0;
+      const aiExplore = this.aiExploreScore || 0;
+      const userSpent = this.userSpent || 0;
+      const aiSpent = this.aiSpent || 0;
+      
+      // Base is static (starting score for the round)
+      const userBase = this.userBaseScore || this.roundStartScore;
+      const aiBase = this.aiBaseScore || this.roundStartScore;
+      
+      // User stats
+      const hudUserBase = document.getElementById('hudUserBase');
+      const hudUserExplore = document.getElementById('hudUserExplore');
+      const hudUserSpent = document.getElementById('hudUserSpent');
+      
+      if (hudUserBase) hudUserBase.textContent = fmt(userBase);
+      if (hudUserExplore) hudUserExplore.textContent = `+${fmt(userExplore)}`;
+      if (hudUserSpent) hudUserSpent.textContent = `-${fmt(userSpent)}`;
+      this.hudUserScore.textContent = fmtSigned(this.userScore);
+      
+      // AI stats
+      const hudAiBase = document.getElementById('hudAiBase');
+      const hudAiExplore = document.getElementById('hudAiExplore');
+      const hudAiSpent = document.getElementById('hudAiSpent');
+      
+      if (hudAiBase) hudAiBase.textContent = fmt(aiBase);
+      if (hudAiExplore) hudAiExplore.textContent = `+${fmt(aiExplore)}`;
+      if (hudAiSpent) hudAiSpent.textContent = `-${fmt(aiSpent)}`;
+      this.hudAiScore.textContent = fmtSigned(this.aiScore);
+      
+      // Update totals below scores (with proper sign handling)
+      this.hudUserTotal.textContent = `Total: ${fmtSigned(this.userTotal)}`;
+      this.hudAiTotal.textContent = `Total: ${fmtSigned(this.aiTotal)}`;
       
       // Update timer progress bar
       if (this._timerProgress) {
@@ -5253,11 +6007,13 @@
         this.abilitiesCard.style.opacity = '1';
         this.abilitiesCard.style.pointerEvents = 'auto';
         // Speed boost: check cost AND if mouse can still be boosted
-        this.speedBoostBtn.disabled = this.userScore < this.speedBoostCost || !selected.canBoostSpeed();
+        this.speedBoostBtn.disabled = this.userScore < this.speedBoostCost || !selected.canBoostSpeed() || selected.algorithm === 'wiseFragile';
         this.destroyBtn.disabled = false;
         
         // Update speed boost button text
-        if (!selected.canBoostSpeed()) {
+        if (selected.algorithm === 'wiseFragile') {
+          this.speedBoostBtn.textContent = '⚡ No Upgrades';
+        } else if (!selected.canBoostSpeed()) {
           this.speedBoostBtn.textContent = '⚡ Max Boosted';
         } else {
           this.speedBoostBtn.textContent = `⚡ Speed Boost (-${this.speedBoostCost})`;
@@ -5269,8 +6025,25 @@
         this.destroyBtn.disabled = true;
         this.speedBoostBtn.textContent = `⚡ Speed Boost (-${this.speedBoostCost})`;
       }
-      // Hive Mind doesn't require selection
-      // Hive Mind removed
+
+      // Command Ping: requires selected active mouse
+      if (this.commandPingBtn) {
+        const effCost = this.pingCost;
+        const pingReady = this._pingCooldown <= 0;
+        const canPing = selected && selected.team === TEAM_USER && selected.isActive() && this.userScore >= effCost && pingReady;
+        this.commandPingBtn.disabled = !canPing;
+        this.commandPingBtn.textContent = pingReady
+          ? `📍 Command Ping (-${effCost})`
+          : `📍 Ping (${Math.ceil(this._pingCooldown)}s)`;
+        this.commandPingBtn.classList.toggle('btn--active', this._pingMode);
+        
+        // Pulse animation
+        if (!pingReady) {
+          this.commandPingBtn.classList.remove('pulse-ring');
+        } else if (this._prevPingCooldown > 0) {
+          this.commandPingBtn.classList.add('pulse-ring');
+        }
+      }
 
       // --- New Engagement Abilities ---
       // Double Down: requires selected mouse
@@ -5282,17 +6055,32 @@
         this.doubleDownBtn.textContent = `🎲 Bet (-${effDoubleDownCost})`;
       }
 
-      // Wall Blast: doesn't require selection, has cooldown
-      if (this.wallBlastBtn) {
-        const effWallBlastCost = this._desperationMode ? Math.floor(this.wallBlastCost * 0.5) : this.wallBlastCost;
-        const wallBlastReady = this._wallBlastCooldown <= 0;
-        this.wallBlastBtn.disabled = this.userScore < effWallBlastCost || !wallBlastReady;
-        if (!wallBlastReady) {
-          this.wallBlastBtn.textContent = `💥 Blast (${Math.ceil(this._wallBlastCooldown)}s)`;
+      // Bomb: doesn't require selection, has cooldown
+      if (this.bombBtn) {
+        const effBombCost = this._desperationMode ? Math.floor(this.bombCost * 0.5) : this.bombCost;
+        const bombReady = this._bombCooldown <= 0;
+        this.bombBtn.disabled = this.userScore < effBombCost || !bombReady;
+        if (!bombReady) {
+          this.bombBtn.textContent = `💣 Bomb (${Math.ceil(this._bombCooldown)}s)`;
+          this.bombBtn.classList.remove('pulse-ring');
         } else {
-          this.wallBlastBtn.textContent = `💥 Wall Blast (-${effWallBlastCost})`;
+          this.bombBtn.textContent = `💣 Bomb (-${effBombCost})`;
+          if (this._prevBombCooldown > 0) this.bombBtn.classList.add('pulse-ring');
         }
-        // Don't toggle class here - only in click handler
+      }
+      
+      // Glue: doesn't require selection, has cooldown
+      if (this.gluePatchBtn) {
+        const effGlueCost = this._desperationMode ? Math.floor(this.glueCost * 0.5) : this.glueCost;
+        const glueReady = this._glueCooldown <= 0;
+        this.gluePatchBtn.disabled = this.userScore < effGlueCost || !glueReady;
+        if (!glueReady) {
+          this.gluePatchBtn.textContent = `🫠 Glue (${Math.ceil(this._glueCooldown)}s)`;
+          this.gluePatchBtn.classList.remove('pulse-ring');
+        } else {
+          this.gluePatchBtn.textContent = `🫠 Glue (-${effGlueCost})`;
+          if (this._prevGlueCooldown > 0) this.gluePatchBtn.classList.add('pulse-ring');
+        }
       }
 
       // Decoy Cheese: doesn't require selection, has cooldown
@@ -5302,8 +6090,10 @@
         this.decoyCheeseBtn.disabled = this.userScore < effDecoyCost || !decoyReady;
         if (!decoyReady) {
           this.decoyCheeseBtn.textContent = `🧀 Decoy (${Math.ceil(this._decoyCooldown)}s)`;
+          this.decoyCheeseBtn.classList.remove('pulse-ring');
         } else {
           this.decoyCheeseBtn.textContent = `🧀 Decoy (-${effDecoyCost})`;
+          if (this._prevDecoyCooldown > 0) this.decoyCheeseBtn.classList.add('pulse-ring');
         }
         // Don't toggle class here - only in click handler
       }
@@ -5315,8 +6105,10 @@
         this.laserFenceBtn.disabled = this.userScore < effLaserCost || !laserReady;
         if (!laserReady) {
           this.laserFenceBtn.textContent = `⚡ Fence (${Math.ceil(this._laserFenceCooldown)}s)`;
+          this.laserFenceBtn.classList.remove('pulse-ring');
         } else {
           this.laserFenceBtn.textContent = `⚡ Laser Fence (-${effLaserCost})`;
+          if (this._prevLaserFenceCooldown > 0) this.laserFenceBtn.classList.add('pulse-ring');
         }
       }
       
@@ -5366,8 +6158,10 @@
       // Update deploy button text with cooldown
       if (cooldown > 0) {
         this.deployBtn.textContent = `Deploy (${cooldown.toFixed(1)}s)`;
+        this.deployBtn.classList.remove('pulse-ring');
       } else {
         this.deployBtn.textContent = 'Deploy Mouse';
+        if (this._prevDeployCooldown > 0) this.deployBtn.classList.add('pulse-ring');
       }
 
       // Get current algorithm cost
@@ -5399,6 +6193,14 @@
       }
       
       this.deployMeta.textContent = (selected ? selText : costText) + catHint;
+      
+      // Update previous cooldowns for next frame
+      this._prevBombCooldown = this._bombCooldown;
+      this._prevGlueCooldown = this._glueCooldown;
+      this._prevDecoyCooldown = this._decoyCooldown;
+      this._prevLaserFenceCooldown = this._laserFenceCooldown;
+      this._prevPingCooldown = this._pingCooldown;
+      this._prevDeployCooldown = cooldown;
     }
 
     _drawBlasts() {
@@ -5471,12 +6273,12 @@
       }
     }
 
-    _drawWallBlastPreview() {
-      if (!this._wallBlastMode || !this._hoveredWallCell) return;
+    _drawBombPreview() {
+      if (!this._bombMode || !this._hoveredBombCell) return;
       const ctx = this.ctx;
       const { cellSize, offsetX, offsetY } = this._layout();
-      const hx = this._hoveredWallCell.x;
-      const hy = this._hoveredWallCell.y;
+      const hx = this._hoveredBombCell.x;
+      const hy = this._hoveredBombCell.y;
       
       ctx.save();
       
@@ -5773,6 +6575,163 @@
       
       ctx.restore();
     }
+
+    _drawGluePatches() {
+      if (!this._gluePatches || !this._gluePatches.length) return;
+      const ctx = this.ctx;
+      const { cellSize, offsetX, offsetY } = this._layout();
+      const time = performance.now() / 1000;
+
+      for (const glue of this._gluePatches) {
+        if (!glue.active) continue;
+        const cx = offsetX + (glue.x + 0.5) * cellSize;
+        const cy = offsetY + (glue.y + 0.5) * cellSize;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+
+        // Draw sticky glue pool - 3x3 cells
+        const glueRadius = cellSize * 1.3;
+        
+        // Outer gooey ring
+        const pulse = 0.6 + Math.sin(time * 2) * 0.15;
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = glue.team === TEAM_USER ? 'rgba(139,69,19,0.5)' : 'rgba(100,50,50,0.5)';
+        ctx.shadowColor = 'rgba(139,69,19,0.6)';
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(0, 0, glueRadius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Inner darker center
+        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = glue.team === TEAM_USER ? 'rgba(101,67,33,0.7)' : 'rgba(80,40,40,0.7)';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(0, 0, glueRadius * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Sticky drips animation
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 0.8;
+        ctx.font = `${Math.round(Math.max(20, cellSize * 0.6))}px ui-sans-serif, system-ui`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🫠', 0, Math.sin(time * 3) * 3);
+        
+        ctx.restore();
+      }
+    }
+    
+    _drawGluePreview() {
+      if (!this._gluePlaceMode || !this._hoveredGlueCell) return;
+      
+      const ctx = this.ctx;
+      const { cellSize, offsetX, offsetY } = this._layout();
+      const { x, y } = this._hoveredGlueCell;
+      const cx = offsetX + (x + 0.5) * cellSize;
+      const cy = offsetY + (y + 0.5) * cellSize;
+      const time = performance.now() / 1000;
+      
+      ctx.save();
+      ctx.translate(cx, cy);
+      
+      // Pulsing highlight ring showing 3x3 area
+      const pulse = 0.4 + Math.sin(time * 4) * 0.3;
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = 'rgba(139,69,19,0.9)';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = 'rgba(139,69,19,0.7)';
+      ctx.shadowBlur = 15;
+      ctx.beginPath();
+      ctx.arc(0, 0, cellSize * 1.3, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Ghost glue emoji
+      ctx.globalAlpha = 0.6 + Math.sin(time * 3) * 0.2;
+      ctx.shadowBlur = 10;
+      ctx.font = `${Math.round(Math.max(24, cellSize * 0.7))}px ui-sans-serif, system-ui`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🫠', 0, 2);
+      
+      ctx.restore();
+    }
+    
+    _drawBombCountdowns() {
+      if (!this._bombCountdownActive || !this._bombCountdownActive.length) return;
+      const ctx = this.ctx;
+      const { cellSize, offsetX, offsetY } = this._layout();
+      const currentTime = nowMs();
+      const time = performance.now() / 1000;
+
+      for (const bomb of this._bombCountdownActive) {
+        const elapsed = currentTime - bomb.startTime;
+        const remaining = Math.max(0, 1 - elapsed / 1000);
+        const cx = offsetX + (bomb.x + 0.5) * cellSize;
+        const cy = offsetY + (bomb.y + 0.5) * cellSize;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+
+        // Urgent pulsing red glow
+        const urgentPulse = 0.5 + Math.sin(time * 12) * 0.5;
+        ctx.shadowColor = `rgba(255,0,0,${urgentPulse})`;
+        ctx.shadowBlur = 25;
+        
+        // Bomb emoji with shake
+        const shake = Math.sin(time * 30) * 3;
+        ctx.font = `${Math.round(Math.max(28, cellSize * 0.85))}px ui-sans-serif, system-ui`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('💣', shake, 2);
+        
+        // Countdown ring
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(255,50,50,0.9)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(0, 0, cellSize * 0.5, -Math.PI / 2, -Math.PI / 2 + (1 - remaining) * Math.PI * 2);
+        ctx.stroke();
+        
+        ctx.restore();
+      }
+    }
+
+    _drawPingPreview() {
+      if (!this._pingMode || !this._hoveredPingCell) return;
+      const ctx = this.ctx;
+      const { cellSize, offsetX, offsetY } = this._layout();
+      const { x, y } = this._hoveredPingCell;
+      const cx = offsetX + (x + 0.5) * cellSize;
+      const cy = offsetY + (y + 0.5) * cellSize;
+      const time = performance.now() / 1000;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      // Sleek pin halo
+      const pulse = 0.55 + Math.sin(time * 5) * 0.25;
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = `rgba(0,140,255,${pulse})`;
+      ctx.lineWidth = Math.max(2, cellSize * 0.08);
+      ctx.shadowColor = 'rgba(0,140,255,0.6)';
+      ctx.shadowBlur = Math.max(12, cellSize * 0.7);
+      ctx.beginPath();
+      ctx.arc(0, 0, cellSize * 0.4, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Ghost pin glyph
+      ctx.shadowBlur = Math.max(8, cellSize * 0.4);
+      ctx.globalAlpha = 0.75;
+      ctx.font = `${Math.round(Math.max(22, cellSize * 0.65))}px ui-sans-serif, system-ui`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#e5f3ff';
+      ctx.fillText('📍', 0, 1);
+
+      ctx.restore();
+    }
     
     _drawLaserFences() {
       if (!this._laserFences || !this._laserFences.length) return;
@@ -5987,6 +6946,9 @@
       if (!fogCtx || !fogCanvas || !maskCtx || !maskCanvas) return;
 
       const { cellSize, offsetX, offsetY } = this._layout();
+      
+      // Scale factor for the low-res fog
+      const scale = fogCanvas.width / this.canvas.width;
 
       // Build a solid explored mask (no additive overlap), then blur it once.
       // This avoids seams where two reveal circles overlap.
@@ -5995,14 +6957,16 @@
       maskCtx.fillStyle = '#fff';
       // Slightly broaden reveal for a small "peek" beyond explored cells.
       const bleed = Math.max(1, Math.floor(cellSize * 0.08));
+      
+      // Draw rectangles scaled down
       for (let y = 0; y < this.maze.h; y++) {
         for (let x = 0; x < this.maze.w; x++) {
           if (!this.userExplored[this.maze.index(x, y)]) continue;
           maskCtx.fillRect(
-            offsetX + x * cellSize - bleed,
-            offsetY + y * cellSize - bleed,
-            cellSize + bleed * 2,
-            cellSize + bleed * 2
+            (offsetX + x * cellSize - bleed) * scale,
+            (offsetY + y * cellSize - bleed) * scale,
+            (cellSize + bleed * 2) * scale,
+            (cellSize + bleed * 2) * scale
           );
         }
       }
@@ -6015,16 +6979,21 @@
       fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
 
       // Reveal using a single blurred mask draw.
-      const blurPx = Math.max(6, cellSize * 0.46);
+      // Reduced blur radius because of downscaling
+      const blurPx = Math.max(3, (cellSize * 0.46) * scale);
       fogCtx.globalCompositeOperation = 'destination-out';
       fogCtx.filter = `blur(${blurPx}px)`;
       fogCtx.drawImage(maskCanvas, 0, 0);
       fogCtx.filter = 'none';
       fogCtx.globalCompositeOperation = 'source-over';
 
-      // Composite fog on top of the scene.
+      // Composite fog on top of the scene (scaled up automatically by drawImage)
       const ctx = this.ctx;
-      ctx.drawImage(fogCanvas, 0, 0);
+      // Use linear interpolation for smoother upscaling
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'low'; // 'low' is linear, good enough for fog
+      ctx.drawImage(fogCanvas, 0, 0, this.canvas.width, this.canvas.height);
+      ctx.imageSmoothingEnabled = false; // Restore for pixel art if needed (though this game uses vector-like drawing)
 
       // Ensure the goal is always visible as a beacon through the darkness.
       // Draw on top of fog with additive blending.
@@ -6067,7 +7036,7 @@
       const ctx = this.ctx;
       const { cellSize, offsetX, offsetY } = this._layout();
 
-      const maxAge = 9.0;
+      const maxAge = 5.0;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.lineWidth = Math.max(1.5, cellSize * 0.14);
@@ -6712,7 +7681,9 @@
       this._drawTrails();
       this._drawBloodStains();
       this._drawMaze();
+      this._drawGluePatches(); // Draw glue patches on ground
       this._drawDecoys();
+      this._drawBombCountdowns(); // Draw active bomb countdowns
       this._drawCat();
       this._drawMice();
       this._drawBlasts();
@@ -6720,9 +7691,11 @@
       this._drawLaserFences(); // Draw laser fences ABOVE fog for visibility
       this._drawPickups(); // Draw pickups ABOVE fog with glow for visibility
       this._drawDecoyPreview(); // Draw decoy placement preview
+      this._drawGluePreview(); // Draw glue placement preview
+      this._drawPingPreview(); // Draw command ping placement preview
       this._drawLaserFencePreview(); // Draw laser fence placement preview
       this._drawFrozenGlows(); // Draw frozen mice glow ABOVE fog for visibility
-      this._drawWallBlastPreview(); // Draw after fog so it's visible in dark areas
+      this._drawBombPreview(); // Draw bomb preview
       this._drawStatusEffectsHUD();
       this._drawFloatingTexts(); // Floating text popups
       this._drawConfetti();
@@ -6740,22 +7713,27 @@
       const dt = clamp((t - this._lastT) / 1000, 0, 0.05);
       this._lastT = t;
 
-      if (this._gameStarted) {
-        if (this._isCountingDown) {
-          this._updateRoundState(dt);
-        } else if (this.roundActive) {
-          this._updateRoundState(dt);
+      try {
+        if (this._gameStarted) {
+          if (this._isCountingDown) {
+            this._updateRoundState(dt);
+          } else if (this.roundActive) {
+            this._updateRoundState(dt);
+          } else {
+            this._maybeAdvanceRound(dt);
+          }
+          this._updateUI();
+          this._updateConfetti(dt);
+          this._updateFloatingTexts();
+          this._render();
+          this._updateWalkSounds();
         } else {
-          this._maybeAdvanceRound(dt);
+          // Stop walk sounds when game not running
+          this.audio.stopAllLoops();
         }
-        this._updateUI();
-        this._updateConfetti(dt);
-        this._updateFloatingTexts();
-        this._render();
-        this._updateWalkSounds();
-      } else {
-        // Stop walk sounds when game not running
-        this.audio.stopAllLoops();
+      } catch (err) {
+        // Log error but don't crash the game loop
+        console.error('Game frame error:', err);
       }
 
       requestAnimationFrame(() => this._frame());

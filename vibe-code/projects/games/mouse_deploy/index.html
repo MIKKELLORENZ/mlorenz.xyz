@@ -2,8 +2,37 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mouse Deploy</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="Mouse Deploy - Deploy autonomous mice in a strategic race to the center of the maze. Compete against AI with abilities, sabotage, and betting." />
+  <meta name="keywords" content="maze game, strategy game, autonomous agents, AI game, browser game, puzzle game, mouse game" />
+  <meta name="author" content="mlorenz.xyz" />
+  <meta name="theme-color" content="#667eea" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Mouse Deploy" />
+  
+  <!-- Open Graph / Social Media -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Mouse Deploy - Strategic Maze Racing Game" />
+  <meta property="og:description" content="Deploy autonomous mice in a strategic race to the center of the maze. Use abilities, sabotage, and betting to outsmart the AI!" />
+  <meta property="og:image" content="https://mlorenz.xyz/vibe-code/projects/games/mouse_deploy/preview.png" />
+  <meta property="og:url" content="https://mlorenz.xyz/vibe-code/projects/games/mouse_deploy/" />
+  <meta property="og:site_name" content="Mouse Deploy" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Mouse Deploy" />
+  <meta name="twitter:description" content="Strategic maze racing with autonomous mice. Beat the AI!" />
+  <meta name="twitter:image" content="https://mlorenz.xyz/vibe-code/projects/games/mouse_deploy/preview.png" />
+  
+  <!-- Performance hints -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+  
+  <!-- Canonical URL -->
+  <link rel="canonical" href="https://mlorenz.xyz/vibe-code/projects/games/mouse_deploy/" />
+  
+  <title>Mouse Deploy - Strategic Maze Racing Game</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐭</text></svg>" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐭</text></svg>" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -14,6 +43,8 @@
         <h1 class="difficulty-screen__title">Mouse Deploy</h1>
         <p class="difficulty-screen__subtitle">Deploy autonomous mice. Race to the center of the maze!</p>
         
+        <button class="btn btn--secondary" id="howToPlayBtn" style="margin-bottom: 20px;">How to Play</button>
+
         <!-- Loading Section -->
         <div class="loading-section" id="loadingSection">
           <p class="loading-text">Loading assets...</p>
@@ -79,14 +110,21 @@
     </div>
 
     <!-- Main Game Screen -->
-    <main class="game-screen" id="gameScreen">
+    <main class="game-screen" id="gameScreen" role="application" aria-label="Mouse Deploy Game">
       <div class="game-layout">
         <!-- Left Stats Panel (User) -->
-        <aside class="stats-panel stats-panel--user">
+        <aside class="stats-panel stats-panel--user" aria-label="Your Statistics">
           <div class="stats-panel__header">
             <div class="stats-panel__team">You</div>
-            <div class="stats-panel__score" id="hudUserScore">1000</div>
-            <div class="stats-panel__total" id="hudUserTotal">Total: 0</div>
+            <div class="stats-panel__breakdown">
+              <div class="breakdown-row breakdown-row--single">
+                <span class="breakdown-item">Base: <span id="hudUserBase">1000</span></span>
+                <span class="breakdown-item spent-value">Spent: <span id="hudUserSpent">-0</span></span>
+                <span class="breakdown-item explore-value">Explore: <span id="hudUserExplore">+0</span></span>
+                <span class="breakdown-item breakdown-total-inline">Now: <span id="hudUserScore">1000</span></span>
+              </div>
+            </div>
+            <div class="stats-panel__total" id="hudUserTotal">Total: 1000</div>
           </div>
 
           <div class="mouse-list" id="mouseList"></div>
@@ -95,7 +133,7 @@
         <!-- Center: Canvas -->
         <div class="game-center">
           <div class="stage">
-            <canvas id="gameCanvas" width="900" height="900"></canvas>
+            <canvas id="gameCanvas" width="900" height="900" role="img" aria-label="Game maze where mice race to the center"></canvas>
             <div class="countdown" id="countdown">3</div>
             <div class="stage-timer">
               <div class="stage-timer__progress" id="timerProgress"></div>
@@ -113,11 +151,18 @@
         </div>
 
         <!-- Right Stats Panel (Computer) -->
-        <aside class="stats-panel stats-panel--ai">
+        <aside class="stats-panel stats-panel--ai" aria-label="Computer Statistics">
           <div class="stats-panel__header">
             <div class="stats-panel__team">Computer</div>
-            <div class="stats-panel__score" id="hudAiScore">1000</div>
-            <div class="stats-panel__total" id="hudAiTotal">Total: 0</div>
+            <div class="stats-panel__breakdown">
+              <div class="breakdown-row breakdown-row--single">
+                <span class="breakdown-item">Base: <span id="hudAiBase">1000</span></span>
+                <span class="breakdown-item spent-value">Spent: <span id="hudAiSpent">-0</span></span>
+                <span class="breakdown-item explore-value">Explore: <span id="hudAiExplore">+0</span></span>
+                <span class="breakdown-item breakdown-total-inline">Now: <span id="hudAiScore">1000</span></span>
+              </div>
+            </div>
+            <div class="stats-panel__total" id="hudAiTotal">Total: 1000</div>
           </div>
 
           <div class="mouse-list mouse-list--ai" id="aiMouseList"></div>
@@ -129,36 +174,38 @@
         <div class="controls-section">
           <div class="controls-section__title">Deploy (5s cooldown)</div>
           <select id="algoSelect" class="field__control">
-            <option value="wanderer">🎲 The Wanderer - 40 pts</option>
-            <option value="wallhugger">🧱 The Wall Hugger - 40 pts</option>
-            <option value="sniffer">🐕 The Sniffer - 40 pts</option>
-            <option value="explorer">🔍 The Explorer - 40 pts</option>
-            <option value="tremaux" selected>📜 The Cartographer - 40 pts</option>
-            <option value="wiseFragile">🦉 Wise but Fragile - 150 pts</option>
+            <option value="wanderer">🎲 Wanderer - 40 pts</option>
+            <option value="wallhugger">🧱 Wall Hugger - 40 pts</option>
+            <option value="sniffer">🐕 Sniffer - 40 pts</option>
+            <option value="explorer">🔍 Explorer - 40 pts</option>
+            <option value="tremaux" selected>📜 Cartographer - 40 pts</option>
+            <option value="wiseFragile">🦉 Wise - 100 pts</option>
           </select>
-          <button id="deployBtn" class="btn btn--primary" type="button">Deploy Mouse</button>
+          <button id="deployBtn" class="btn btn--primary" type="button">🐭 Deploy</button>
+          <button id="manualMouseBtn" class="btn btn--blue" type="button" disabled title="Take manual control of next deployed mouse (unlocks at 1:30)">🎮 Manual</button>
         </div>
 
         <div class="controls-section abilities-card" id="abilitiesCard" style="opacity:0.5; pointer-events:none">
-          <div class="controls-section__title">Abilities</div>
-          <button id="speedBoostBtn" class="btn" type="button" disabled title="Boost selected mouse speed by 10%">⚡ Speed (-35)</button>
-          <button id="doubleDownBtn" class="btn btn--bet" type="button" disabled title="Bet on selected mouse: if it wins, get +150 pts">🎰 Double Down (-50)</button>
-          <button id="manualMouseBtn" class="btn" type="button" disabled title="Take manual control of next deployed mouse (unlocks at 1:30)">🎮 Manual Mouse</button>
-          <button id="destroyBtn" class="btn btn--danger" type="button" disabled title="Destroy mouse for partial refund">💀 Destroy (+50%)</button>
+          <div class="controls-section__title">Actions</div>
+          <button id="commandPingBtn" class="btn" type="button" disabled title="Click maze to nudge selected mouse toward a cell">📍 Ping -10</button>
+          <button id="speedBoostBtn" class="btn" type="button" disabled title="Boost selected mouse speed by 10%">⚡ Speed -35</button>
+          <button id="doubleDownBtn" class="btn btn--bet" type="button" disabled title="Bet on selected mouse: if it wins, get +150 pts">🎰 Bet -50</button>
+          <button id="destroyBtn" class="btn btn--danger" type="button" disabled title="Destroy mouse for partial refund">💀 Destroy</button>
         </div>
 
         <div class="controls-section" id="sabotageCard">
           <div class="controls-section__title">Sabotage</div>
-          <button id="wallBlastBtn" class="btn btn--sabotage" type="button" title="Click maze to blast open walls">💣 Wall Blast (-40)</button>
-          <button id="decoyCheeseBtn" class="btn btn--sabotage" type="button" title="Click maze to place decoy cheese">🧀 Decoy (-30)</button>
-          <button id="catDeployBtn" class="btn btn--sabotage" type="button" disabled title="After 35s, deploy a cat from enemy start">🐈 Cat (-120)</button>
-          <button id="laserFenceBtn" class="btn btn--sabotage" type="button" title="Deploy a 5x5 laser fence that blocks all movement for 10s">⚡ Laser Fence (-100)</button>
+          <button id="bombBtn" class="btn btn--sabotage" type="button" title="Click maze to place a bomb (1s fuse, kills mice in blast)">💣 Bomb -60</button>
+          <button id="gluePatchBtn" class="btn btn--sabotage" type="button" title="Click maze to place glue patch (slows to 40%)">🫠 Glue -35</button>
+          <button id="decoyCheeseBtn" class="btn btn--sabotage" type="button" title="Click maze to place decoy cheese">🧀 Decoy -30</button>
+          <button id="catDeployBtn" class="btn btn--sabotage" type="button" disabled title="After 35s, deploy a cat from enemy start">🐈 Cat -120</button>
+          <button id="laserFenceBtn" class="btn btn--sabotage" type="button" title="Deploy a 5x5 laser fence that blocks all movement for 10s">⚡ Fence -100</button>
         </div>
 
         <div class="controls-section">
           <div class="controls-section__title">View</div>
-          <button id="toggleHeatmapBtn" class="btn" type="button">Heatmap</button>
-          <button id="toggleZoomBtn" class="btn" type="button" title="Auto-zoom on close finishes">🔍 Auto-Zoom: ON</button>
+          <button id="toggleHeatmapBtn" class="btn btn--toggle" type="button">🗺️ Heatmap</button>
+          <button id="toggleZoomBtn" class="btn btn--toggle" type="button" title="Auto-zoom on close finishes">🔍 Zoom: ON</button>
         </div>
 
         <div class="controls-section controls-section--info">
@@ -219,6 +266,33 @@
           </button>
         </div>
         <button class="btn overlay__btn" id="betCancelBtn">Cancel</button>
+      </div>
+    </div>
+
+    <!-- How to Play Modal -->
+    <div class="overlay" id="howToPlayOverlay" style="display: none;">
+      <div class="overlay__card overlay__card--wide">
+        <div class="overlay__title">How to Play</div>
+        <div class="overlay__content" style="text-align: left; max-height: 60vh; overflow-y: auto; margin-bottom: 20px;">
+          <h3>🐭 Objective</h3>
+          <p>Deploy mice to race to the center of the maze. The first mouse to reach the goal wins the round for its team.</p>
+          
+          <h3>🎮 Controls</h3>
+          <ul>
+            <li><strong>Deploy:</strong> Choose an algorithm and click "Deploy" to spawn a mouse.</li>
+            <li><strong>Abilities:</strong> Click on your mouse to select it, then use abilities like Speed Boost or Ping.</li>
+            <li><strong>Sabotage:</strong> Use "Blast" to break walls or "Decoy" to distract enemy mice.</li>
+            <li><strong>Manual Control:</strong> Unlocks at 1:30 remaining. Take direct control of a mouse!</li>
+          </ul>
+
+          <h3>🧠 Strategy</h3>
+          <ul>
+            <li><strong>Fog of War:</strong> You can only see what your mice see. Explore to find the path.</li>
+            <li><strong>Betting:</strong> Confident in a mouse? Bet on it to earn extra points.</li>
+            <li><strong>Desperation:</strong> If you're losing badly, you might get a free "Desperation Mouse" with boosted stats.</li>
+          </ul>
+        </div>
+        <button class="btn btn--primary overlay__btn" id="howToPlayCloseBtn">Got it!</button>
       </div>
     </div>
   </div>
