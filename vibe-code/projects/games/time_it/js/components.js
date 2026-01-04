@@ -312,23 +312,7 @@ const COMPONENTS = {
             size: { width: 38, height: 48 },
             mustBeTop: true
         },
-        {
-            id: 'crew-capsule',
-            name: 'Crew Capsule',
-            description: 'Houses your brave astronauts. Also reduces drag.',
-            category: 'special',
-            price: 100,
-            unlockLevel: 1,
-            stats: {
-                crew: 3,
-                dragReduction: 0.2,
-                mass: 10
-            },
-            shape: 'crew-capsule',
-            size: { width: 44, height: 52 },
-            mustBeTop: true,
-            isCrewCapsule: true
-        },
+        // Crew capsule is removed - it's always present on the rocket automatically
         {
             id: 'fuel-tank',
             name: 'Fuel Tank',

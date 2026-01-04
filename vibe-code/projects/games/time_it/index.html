@@ -78,6 +78,7 @@
                         <span id="result-credits">0</span>
                     </div>
                 </div>
+                <div id="results-hint" class="results-hint hidden"></div>
                 <button id="next-mission-btn" class="btn primary">NEXT MISSION</button>
                 <button id="retry-mission-btn" class="btn secondary">RETRY</button>
             </div>
@@ -85,41 +86,47 @@
         
         <!-- Main Game Area -->
         <div id="game-area">
-            <!-- Assembly Panel -->
-            <div id="assembly-panel">
-                <h2>🚀 ROCKET ASSEMBLY</h2>
-                
-                <div id="rocket-preview">
-                    <div id="rocket-build-area">
-                        <div id="rocket-slots"></div>
+            <!-- Sidebar Panel (compact, on right side) -->
+            <div id="sidebar-panel">
+                <!-- Catalog Section -->
+                <div id="catalog-section">
+                    <h3>📦 COMPONENTS</h3>
+                    <div id="catalog-tabs">
+                        <button class="tab-btn active" data-category="engines">Eng</button>
+                        <button class="tab-btn" data-category="rotation">Rot</button>
+                        <button class="tab-btn" data-category="brakes">Brk</button>
+                        <button class="tab-btn" data-category="landing">Lnd</button>
+                        <button class="tab-btn" data-category="special">Spc</button>
                     </div>
-                    <div id="launch-pad"></div>
+                    <div id="catalog-items"></div>
                 </div>
                 
-                <div id="timing-controls">
-                    <h3>⏱️ TIMING SEQUENCE</h3>
+                <!-- Timing Section -->
+                <div id="timing-section">
+                    <h3>⏱️ TIMING</h3>
                     <div id="timing-list"></div>
                 </div>
                 
+                <!-- Action Buttons -->
                 <div id="action-buttons">
                     <button id="clear-btn" class="btn danger">CLEAR</button>
                     <button id="launch-btn" class="btn launch">🚀 LAUNCH</button>
                 </div>
             </div>
             
-            <!-- Catalog Panel -->
-            <div id="catalog-panel">
-                <h2>📦 COMPONENTS CATALOG</h2>
-                
-                <div id="catalog-tabs">
-                    <button class="tab-btn active" data-category="engines">Engines</button>
-                    <button class="tab-btn" data-category="rotation">Rotation</button>
-                    <button class="tab-btn" data-category="brakes">Brakes</button>
-                    <button class="tab-btn" data-category="landing">Landing</button>
-                    <button class="tab-btn" data-category="special">Special</button>
+            <!-- Launch Tower View (center/main view) -->
+            <div id="launch-tower-view">
+                <div id="rocket-preview">
+                    <div id="rocket-build-area">
+                        <div id="rocket-slots"></div>
+                    </div>
+                    <div id="launch-tower">
+                        <div class="tower-arm left"></div>
+                        <div class="tower-arm right"></div>
+                        <div class="tower-base"></div>
+                    </div>
+                    <div id="launch-pad"></div>
                 </div>
-                
-                <div id="catalog-items"></div>
             </div>
         </div>
         

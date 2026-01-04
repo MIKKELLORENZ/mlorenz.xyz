@@ -168,6 +168,56 @@ body {
     max-width: 500px;
     box-shadow: var(--glow-primary), inset 0 0 50px rgba(0, 212, 255, 0.1);
     animation: modalIn 0.5s ease-out;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.modal-content.success {
+    border: 3px solid #00ff88;
+    box-shadow: 0 0 30px rgba(0, 255, 136, 0.5), 
+                0 0 60px rgba(0, 255, 136, 0.3),
+                inset 0 0 50px rgba(0, 255, 136, 0.1);
+    animation: modalIn 0.4s ease-out, successPulse 1s ease-in-out;
+}
+
+.modal-content.success h2 {
+    color: #00ff88 !important;
+    text-shadow: 0 0 20px rgba(0, 255, 136, 0.8);
+}
+
+.modal-content.failure {
+    border: 3px solid #ff4444;
+    box-shadow: 0 0 30px rgba(255, 68, 68, 0.4),
+                inset 0 0 50px rgba(255, 68, 68, 0.1);
+}
+
+.modal-content.failure h2 {
+    color: #ff6666 !important;
+}
+
+@keyframes successPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+}
+
+/* Confetti */
+.confetti {
+    position: fixed;
+    width: 10px;
+    height: 10px;
+    pointer-events: none;
+    z-index: 10000;
+    animation: confettiFall linear forwards;
+}
+
+@keyframes confettiFall {
+    0% {
+        opacity: 1;
+        transform: translateY(0) translateX(0) rotate(0deg);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(100vh) translateX(var(--drift, 0px)) rotate(720deg);
+    }
 }
 
 @keyframes modalIn {
@@ -179,6 +229,40 @@ body {
         opacity: 1;
         transform: scale(1) translateY(0);
     }
+}
+
+/* Results Hint */
+.results-hint {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.15), rgba(255, 152, 0, 0.1));
+    border: 1px solid rgba(255, 193, 7, 0.4);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin: 15px 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    text-align: left;
+}
+
+.results-hint.hidden {
+    display: none;
+}
+
+.results-hint .hint-icon {
+    font-size: 16px;
+    margin-right: 5px;
+}
+
+.results-hint strong {
+    color: #ffc107;
+}
+
+.results-hint .hint-highlight {
+    color: var(--primary);
+    font-weight: 600;
+    background: rgba(0, 212, 255, 0.15);
+    padding: 1px 6px;
+    border-radius: 4px;
 }
 
 .modal-content h2 {
@@ -305,16 +389,15 @@ body {
     transform: none !important;
 }
 
-/* Game Area */
+/* Game Area - New Layout */
 #game-area {
     position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 75%;
+    top: 100px;
+    right: 20px;
+    width: 320px;
+    height: calc(100vh - 140px);
     display: flex;
-    gap: 20px;
-    padding: 20px;
+    flex-direction: column;
     z-index: 10;
 }
 
@@ -322,70 +405,205 @@ body {
     display: none;
 }
 
-/* Assembly Panel */
-#assembly-panel {
-    flex: 1.2;
+/* Sidebar Panel (right side, compact) */
+#sidebar-panel {
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
-    border-radius: 20px;
-    padding: 20px;
+    border-radius: 15px;
+    padding: 15px;
     backdrop-filter: blur(10px);
     display: flex;
     flex-direction: column;
-    max-width: 480px;
-    min-width: 380px;
+    gap: 12px;
     max-height: 100%;
     overflow: hidden;
 }
 
-#assembly-panel h2 {
+#sidebar-panel h3 {
     font-family: 'Orbitron', monospace;
-    font-size: 18px;
+    font-size: 13px;
     color: var(--primary);
-    text-align: center;
-    margin-bottom: 15px;
-    padding-bottom: 10px;
+    margin: 0;
+    padding-bottom: 8px;
     border-bottom: 1px solid var(--glass-border);
 }
 
-#rocket-preview {
-    flex: 1 1 auto;
+/* Catalog Section */
+#catalog-section {
+    flex: 1;
+    min-height: 200px;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: flex-end;
-    background: radial-gradient(ellipse at bottom, rgba(0, 212, 255, 0.1), transparent);
-    border-radius: 15px;
-    padding: 20px;
-    margin-bottom: 15px;
-    min-height: 150px;
-    max-height: 300px;
+    overflow: hidden;
+}
+
+#catalog-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+#catalog-tabs .tab-btn {
+    flex: 1;
+    min-width: 45px;
+    padding: 6px 4px;
+    font-size: 10px;
+    font-family: 'Orbitron', monospace;
+    background: var(--bg-light);
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+#catalog-tabs .tab-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+#catalog-items {
+    flex: 1;
     overflow-y: auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding-right: 5px;
+}
+
+/* Catalog Items - Compact */
+.catalog-item {
+    background: var(--bg-light);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+}
+
+.catalog-item:hover:not(.locked) {
+    border-color: var(--primary);
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+    transform: translateY(-2px);
+}
+
+.catalog-item.locked {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.catalog-item .preview {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 5px;
+}
+
+.catalog-item .preview .component-shape {
+    transform: scale(0.7);
+}
+
+.catalog-item .name {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.catalog-item .stats {
+    display: none; /* Hide stats in compact view */
+}
+
+.catalog-item .price {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    color: var(--accent);
+}
+
+/* Timing Section - Compact */
+#timing-section {
+    max-height: 180px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+#timing-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-right: 5px;
+}
+
+/* Action Buttons - Compact */
+#action-buttons {
+    display: flex;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--glass-border);
+}
+
+#action-buttons .btn {
+    flex: 1;
+    padding: 10px;
+    font-size: 12px;
+}
+
+#action-buttons .btn.launch {
+    padding: 10px;
+    font-size: 14px;
+}
+
+/* Launch Tower View (main canvas area) */
+#launch-tower-view {
+    display: none; /* Hidden - rocket shows on main canvas */
+}
+
+/* Rocket Preview - Hidden (canvas shows rocket now) */
+#rocket-preview {
+    display: none;
 }
 
 #rocket-build-area {
-    display: flex;
-    flex-direction: column-reverse;
-    align-items: center;
-    gap: 2px;
-    overflow: visible;
+    display: none;
 }
 
 #rocket-slots {
-    display: flex;
-    flex-direction: column-reverse;
-    align-items: center;
-    gap: 2px;
-    overflow: visible;
+    display: none;
+}
+
+/* Launch Tower - Hidden (canvas draws it) */
+#launch-tower {
+    display: none;
+}
+
+.tower-arm {
+    display: none;
+}
+
+.tower-arm.left {
+    display: none;
+}
+
+.tower-arm.right {
+    display: none;
+}
+
+.tower-base {
+    display: none;
 }
 
 #launch-pad {
-    width: 120px;
-    height: 15px;
-    background: linear-gradient(180deg, #444, #222);
-    border-radius: 5px;
-    margin-top: 10px;
-    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
+    display: none;
 }
 
 /* Rocket Component Visual */
@@ -461,6 +679,54 @@ body {
     opacity: 1;
 }
 
+/* Crew Capsule - Fixed at top, non-interactive */
+.rocket-component.crew-capsule-fixed {
+    cursor: default;
+    pointer-events: none;
+}
+
+.rocket-component.crew-capsule-fixed:hover {
+    filter: none;
+}
+
+/* Crew Capsule Shape */
+.component-shape.crew-capsule {
+    width: 36px;
+    height: 40px;
+    background: linear-gradient(90deg, #ddd 0%, #fff 30%, #fff 70%, #ddd 100%);
+    border-radius: 50% 50% 30% 30% / 60% 60% 40% 40%;
+    position: relative;
+    box-shadow: 
+        inset 0 -10px 20px rgba(0,0,0,0.2),
+        inset 0 5px 10px rgba(255,255,255,0.8),
+        0 4px 8px rgba(0,0,0,0.3);
+}
+
+.component-shape.crew-capsule::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 16px;
+    height: 12px;
+    background: linear-gradient(180deg, #1a4a8a 0%, #0a2a4a 100%);
+    border-radius: 50% 50% 40% 40%;
+    box-shadow: inset 0 2px 4px rgba(255,255,255,0.3);
+}
+
+.component-shape.crew-capsule::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 10px;
+    height: 4px;
+    background: #ff4444;
+    border-radius: 2px;
+}
+
 .rocket-component.dragging {
     opacity: 0.5;
     transform: scale(0.95);
@@ -471,18 +737,24 @@ body {
     border-radius: 8px;
 }
 
-/* Instant Label for Timing */
+/* Instant Label for Timing - Compact */
 .instant-label {
-    padding: 10px 20px;
+    padding: 4px 8px;
     background: linear-gradient(135deg, var(--success), #006622);
-    border-radius: 8px;
+    border-radius: 4px;
     color: white;
     font-family: 'Orbitron', monospace;
-    font-size: 14px;
+    font-size: 9px;
     font-weight: bold;
     text-transform: uppercase;
-    letter-spacing: 2px;
-    box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+    letter-spacing: 1px;
+    box-shadow: 0 0 8px rgba(0, 255, 136, 0.4);
+}
+
+/* Unit label for timing */
+.timing-item .unit {
+    font-size: 10px;
+    color: var(--text-secondary);
 }
 
 /* Component Shapes */
@@ -1179,26 +1451,129 @@ body {
     border-bottom: 1px solid var(--glass-border);
 }
 
+/* Timing list - compact version for sidebar */
 #timing-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 6px;
 }
 
 .timing-item {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px 15px;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
     background: linear-gradient(135deg, rgba(0, 212, 255, 0.1), rgba(0, 0, 0, 0.3));
-    border-radius: 12px;
+    border-radius: 8px;
     border: 1px solid var(--glass-border);
     transition: all 0.3s ease;
+    cursor: grab;
+}
+
+.timing-item:active {
+    cursor: grabbing;
+}
+
+.timing-item.dragging {
+    opacity: 0.5;
+    transform: scale(0.98);
+}
+
+.timing-item.drag-over {
+    border-color: var(--accent);
+    box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
+}
+
+.drag-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    background: rgba(255, 255, 255, 0.05);
+    border-right: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    font-size: 12px;
+    letter-spacing: -2px;
+    cursor: grab;
+    user-select: none;
+    border-radius: 8px 0 0 8px;
+}
+
+.drag-handle:hover {
+    background: rgba(0, 212, 255, 0.2);
+    color: var(--primary);
+}
+
+.timing-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+}
+
+.crew-capsule-indicator {
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.15), rgba(0, 0, 0, 0.3));
+    border-color: rgba(255, 215, 0, 0.5);
+    cursor: default;
+    padding: 8px 10px;
+}
+
+.crew-capsule-indicator .timing-main {
+    justify-content: center;
+    gap: 8px;
+}
+
+.crew-capsule-indicator .component-icon {
+    font-size: 16px;
+}
+
+.crew-capsule-indicator .component-name {
+    color: #ffd700;
+    font-size: 11px;
+}
+
+.crew-capsule-indicator .fixed-label {
+    font-size: 9px;
+    color: var(--text-secondary);
+    background: rgba(255, 215, 0, 0.2);
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.position-label {
+    font-size: 9px;
+    color: var(--success);
+    opacity: 0.7;
+}
+
+.remove-btn {
+    background: rgba(255, 50, 50, 0.2);
+    border: 1px solid rgba(255, 50, 50, 0.4);
+    color: #ff6666;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    margin-left: auto;
+}
+
+.remove-btn:hover {
+    background: rgba(255, 50, 50, 0.4);
+    border-color: #ff4444;
+    transform: scale(1.1);
 }
 
 .timing-item:hover {
     border-color: var(--primary);
-    box-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
 }
 
 .timing-item.first-component {
@@ -1206,22 +1581,27 @@ body {
     border-color: var(--success);
 }
 
+.timing-item.first-component .drag-handle {
+    background: rgba(0, 255, 136, 0.1);
+}
+
 .timing-item .timing-main {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .timing-item .timing-badges {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     flex-wrap: wrap;
 }
 
 .timing-badge {
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 11px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 9px;
     font-weight: 600;
     font-family: 'Orbitron', monospace;
 }
@@ -1263,34 +1643,37 @@ body {
 }
 
 .timing-end {
-    font-size: 11px;
+    font-size: 9px;
     color: var(--text-secondary);
     font-style: italic;
 }
 
 .timing-item .component-name {
     flex: 1;
-    font-size: 14px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .timing-item input {
-    width: 80px;
-    padding: 10px 12px;
+    width: 55px;
+    padding: 5px 6px;
     background: var(--bg-dark);
     border: 2px solid var(--primary);
-    border-radius: 8px;
+    border-radius: 5px;
     color: var(--primary);
     font-family: 'Orbitron', monospace;
-    font-size: 18px;
+    font-size: 12px;
     font-weight: bold;
     text-align: center;
 }
 
 .timing-item input:focus {
     outline: none;
-    box-shadow: 0 0 15px rgba(0, 212, 255, 0.6);
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.6);
     border-color: var(--accent);
 }
 

@@ -21,6 +21,9 @@ class RocketEngine {
         this.running = false;
         this.finished = false;
         
+        // Preview components (for launchpad view)
+        this.previewComponents = [];
+        
         // Camera
         this.camera = {
             x: 0,
@@ -48,6 +51,9 @@ class RocketEngine {
         
         // Bind resize handler
         window.addEventListener('resize', () => this.resize());
+        
+        // Start preview render loop
+        this.startPreviewLoop();
     }
     
     resize() {
@@ -57,13 +63,213 @@ class RocketEngine {
         this.launchX = this.canvas.width / 2;
     }
     
+    // Set components for preview (before launch)
+    setPreviewComponents(components) {
+        this.previewComponents = components;
+    }
+    
+    // Preview render loop (when not in simulation)
+    startPreviewLoop() {
+        const renderPreview = () => {
+            if (!this.running) {
+                this.renderPreview();
+            }
+            requestAnimationFrame(renderPreview);
+        };
+        renderPreview();
+    }
+    
+    // Render the launchpad preview with rocket
+    renderPreview() {
+        const ctx = this.ctx;
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Draw sky/altitude markers for context
+        this.drawSky();
+        
+        // Draw target/goal so player knows where to aim
+        if (this.level && this.level.target) {
+            this.drawTarget();
+        }
+        
+        // Draw ground and launch pad
+        this.drawGround();
+        this.drawLaunchTower();
+        
+        // Draw preview rocket on pad
+        if (this.previewComponents && this.previewComponents.length > 0) {
+            this.drawPreviewRocket();
+        } else {
+            // Draw just crew capsule if no components
+            this.drawCrewCapsuleOnly();
+        }
+    }
+    
+    drawLaunchTower() {
+        const ctx = this.ctx;
+        const padX = this.launchX;
+        const padY = this.groundY;
+        
+        // Launch pad base - concrete platform
+        ctx.fillStyle = '#3a3a3a';
+        ctx.fillRect(padX - 100, padY - 8, 200, 25);
+        
+        // Platform details - yellow warning stripes
+        ctx.fillStyle = '#f4c430';
+        for (let i = 0; i < 10; i++) {
+            ctx.fillRect(padX - 95 + i * 20, padY - 6, 10, 4);
+        }
+        
+        // Flame trench (dark pit under pad)
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(padX - 40, padY + 5, 80, 12);
+        
+        // Service tower (gantry) - left side
+        const towerX = padX - 80;
+        
+        // Main tower structure
+        ctx.fillStyle = '#c0392b'; // Red-orange like real towers
+        ctx.fillRect(towerX - 15, padY - 280, 12, 280);
+        ctx.fillRect(towerX + 3, padY - 280, 12, 280);
+        
+        // Cross bracing
+        ctx.strokeStyle = '#e74c3c';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 7; i++) {
+            const y1 = padY - 20 - i * 40;
+            const y2 = padY - 60 - i * 40;
+            ctx.beginPath();
+            ctx.moveTo(towerX - 15, y1);
+            ctx.lineTo(towerX + 15, y2);
+            ctx.moveTo(towerX + 15, y1);
+            ctx.lineTo(towerX - 15, y2);
+            ctx.stroke();
+        }
+        
+        // Horizontal platforms
+        ctx.fillStyle = '#95a5a6';
+        for (let i = 0; i < 4; i++) {
+            const platformY = padY - 60 - i * 65;
+            ctx.fillRect(towerX - 18, platformY, 60, 5);
+        }
+        
+        // Umbilical arm (swing arm)
+        const armY = padY - 150;
+        ctx.fillStyle = '#7f8c8d';
+        ctx.save();
+        ctx.translate(towerX + 20, armY);
+        ctx.fillRect(0, -4, 55, 8);
+        // Arm tip
+        ctx.fillStyle = '#95a5a6';
+        ctx.fillRect(50, -8, 10, 16);
+        ctx.restore();
+        
+        // Lightning rod at top
+        ctx.strokeStyle = '#ecf0f1';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(towerX, padY - 280);
+        ctx.lineTo(towerX, padY - 310);
+        ctx.stroke();
+        
+        // Small support structures on right
+        ctx.fillStyle = '#555';
+        ctx.fillRect(padX + 60, padY - 30, 6, 30);
+        ctx.fillRect(padX + 75, padY - 25, 6, 25);
+        
+        // Fuel/equipment containers
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillRect(padX + 55, padY - 50, 35, 20);
+        ctx.fillStyle = '#34495e';
+        ctx.fillRect(padX + 55, padY - 48, 35, 3);
+    }
+    
+    drawPreviewRocket() {
+        const ctx = this.ctx;
+        
+        // Add crew capsule to preview - always on TOP (drawn first, at highest position)
+        const crewCapsule = {
+            id: 'crew-capsule',
+            name: 'Crew Capsule',
+            category: 'special',
+            stats: { mass: 8 },
+            shape: 'crew-capsule',
+            size: { width: 36, height: 40 }
+        };
+        
+        // Components are stored bottom-to-top: index 0 = bottom (first engine), last = just below capsule
+        // Crew capsule goes on top
+        const allComponents = [...this.previewComponents, crewCapsule];
+        
+        // Calculate total height
+        const rocketHeight = allComponents.reduce((h, c) => h + (c.size?.height || 30) + 2, 0);
+        
+        // Position rocket on pad - rocketY is the TOP of the rocket
+        const rocketX = this.launchX;
+        const rocketY = this.groundY - rocketHeight;
+        
+        ctx.save();
+        ctx.translate(rocketX, rocketY);
+        
+        // Draw from TOP to BOTTOM visually
+        // Last component (crew capsule) should be at yOffset=0 (top)
+        // First component (engine, index 0) should be at bottom
+        // So we reverse the drawing order
+        let yOffset = 0;
+        for (let i = allComponents.length - 1; i >= 0; i--) {
+            const comp = allComponents[i];
+            const height = comp.size?.height || 30;
+            const width = comp.size?.width || 40;
+            
+            ctx.save();
+            ctx.translate(0, yOffset + height / 2);
+            this.drawComponentShape(ctx, comp, width, height);
+            ctx.restore();
+            
+            yOffset += height + 2;
+        }
+        
+        ctx.restore();
+    }
+    
+    drawCrewCapsuleOnly() {
+        const ctx = this.ctx;
+        
+        const crewCapsule = {
+            shape: 'crew-capsule',
+            size: { width: 36, height: 40 }
+        };
+        
+        const rocketX = this.launchX;
+        const rocketY = this.groundY - 42;
+        
+        ctx.save();
+        ctx.translate(rocketX, rocketY);
+        this.drawComponentShape(ctx, crewCapsule, 36, 40);
+        ctx.restore();
+    }
+    
     // Initialize rocket for simulation
     initRocket(components, timings) {
+        // Add crew capsule as the topmost component (always present)
+        const crewCapsule = {
+            id: 'crew-capsule',
+            name: 'Crew Capsule',
+            category: 'special',
+            stats: { mass: 8 },
+            shape: 'crew-capsule',
+            size: { width: 36, height: 40 }
+        };
+        const allComponents = [...components, crewCapsule];
+        const allTimings = [...timings, 0]; // Crew capsule has no timing
+        
         // Calculate rocket height based on components
-        const rocketHeight = components.reduce((h, c) => h + (c.size?.height || 30) + 2, 0);
+        const rocketHeight = allComponents.reduce((h, c) => h + (c.size?.height || 30) + 2, 0);
         
         // Calculate fuel bonuses from fuel tanks
-        const fuelBonus = this.calculateFuelBonus(components);
+        const fuelBonus = this.calculateFuelBonus(allComponents);
         
         this.rocket = {
             x: this.launchX,
@@ -72,7 +278,7 @@ class RocketEngine {
             vy: 0,
             angle: -90,  // Pointing up (in degrees, -90 is up)
             angularVelocity: 0,
-            components: components.map((c, i) => {
+            components: allComponents.map((c, i) => {
                 // Apply fuel bonus to engines
                 let burnTime = c.stats?.burnTime || c.stats?.duration || 0;
                 if (c.category === 'engines') {
@@ -81,7 +287,7 @@ class RocketEngine {
                 return {
                     ...c,
                     index: i,
-                    timing: timings[i] || 0,
+                    timing: allTimings[i] || 0,
                     active: false,
                     burned: false,
                     separated: false,
@@ -90,13 +296,13 @@ class RocketEngine {
                     rotationPhase: 'idle'  // Track rotation state: idle, turning, holding, returning
                 };
             }),
-            mass: this.calculateMass(components),
-            dragCoefficient: this.calculateDrag(components),
+            mass: this.calculateMass(allComponents),
+            dragCoefficient: this.calculateDrag(allComponents),
             crashed: false,
             landed: false,
-            hasLandingGear: components.some(c => c.category === 'landing'),
-            maxLandingSpeed: this.getMaxLandingSpeed(components),
-            hasParachute: components.some(c => c.id === 'parachute'),
+            hasLandingGear: allComponents.some(c => c.category === 'landing'),
+            maxLandingSpeed: this.getMaxLandingSpeed(allComponents),
+            hasParachute: allComponents.some(c => c.id === 'parachute'),
             parachuteDeployed: false
         };
         
@@ -109,6 +315,10 @@ class RocketEngine {
         this.orbitTime = 0;
         this.maxAltitudeReached = 0;
         this.finished = false;
+        
+        // Reset camera to start position
+        this.camera.y = 0;
+        this.camera.targetY = 0;
     }
     
     calculateFuelBonus(components) {
@@ -616,8 +826,13 @@ class RocketEngine {
     }
     
     updateCamera() {
-        // Follow rocket with smooth camera
-        this.camera.targetY = Math.min(0, -(this.rocket.y - this.canvas.height * 0.6));
+        // Follow rocket with smooth camera - keep rocket centered vertically
+        const rocketHeight = this.rocket.components.filter(c => !c.separated).reduce((h, c) => h + (c.size?.height || 30) + 2, 0);
+        const rocketCenterY = this.rocket.y + rocketHeight / 2;
+        
+        // Camera follows rocket, keeping it roughly in the center-bottom of screen
+        // The camera.y is a vertical offset that's subtracted during rendering
+        this.camera.targetY = Math.min(0, -(rocketCenterY - this.canvas.height * 0.65));
         this.camera.y += (this.camera.targetY - this.camera.y) * this.camera.smoothing;
     }
     
@@ -634,12 +849,21 @@ class RocketEngine {
             
             const speed = Math.sqrt(rocket.vx * rocket.vx + rocket.vy * rocket.vy);
             
-            if (speed > rocket.maxLandingSpeed || !rocket.hasLandingGear) {
+            // Landing tolerance: can land up to 2x max speed but with penalty
+            // Landing without gear always crashes
+            // Landing with gear within max speed = perfect
+            // Landing with gear up to 2x max speed = hard landing (penalty)
+            // Landing with gear above 2x max speed = crash
+            const hardLandingThreshold = rocket.maxLandingSpeed * 2;
+            
+            if (!rocket.hasLandingGear || speed > hardLandingThreshold) {
                 rocket.crashed = true;
                 this.createExplosion();
                 this.finishSimulation();
             } else {
                 rocket.landed = true;
+                rocket.landingSpeed = speed; // Store for results calculation
+                rocket.hardLanding = speed > rocket.maxLandingSpeed;
                 rocket.vx = 0;
                 rocket.vy = 0;
                 
@@ -661,15 +885,18 @@ class RocketEngine {
                 rocket.x >= platformX - target.width/2 && rocket.x <= platformX + target.width/2) {
                 
                 const speed = Math.sqrt(rocket.vx * rocket.vx + rocket.vy * rocket.vy);
+                const hardLandingThreshold = rocket.maxLandingSpeed * 2;
                 
                 if (rocket.vy > 0) { // Falling onto platform
                     rocket.y = platformY - rocketHeight;
                     
-                    if (speed > rocket.maxLandingSpeed || !rocket.hasLandingGear) {
+                    if (!rocket.hasLandingGear || speed > hardLandingThreshold) {
                         rocket.crashed = true;
                         this.createExplosion();
                     } else {
                         rocket.landed = true;
+                        rocket.landingSpeed = speed;
+                        rocket.hardLanding = speed > rocket.maxLandingSpeed;
                         rocket.vx = 0;
                         rocket.vy = 0;
                     }
@@ -887,16 +1114,19 @@ class RocketEngine {
         // Calculate results
         const results = this.calculateResults();
         
-        // Continue animation for explosion, then callback after delay
-        const explosionDuration = this.rocket.crashed ? 3000 : 500;
+        // Continue animation for explosion if crashed, quick for success
+        const delay = this.rocket.crashed ? 2500 : 150;
         
         // Keep updating particles for explosion animation
         setTimeout(() => {
             this.running = false;
+            // Reset camera for preview mode
+            this.camera.y = 0;
+            this.camera.targetY = 0;
             if (this.onFinish) {
                 this.onFinish(results);
             }
-        }, explosionDuration);
+        }, delay);
     }
     
     calculateResults() {
@@ -922,7 +1152,7 @@ class RocketEngine {
                     Math.pow(rocket.x - platformX, 2) + 
                     Math.pow(rocket.y - platformY, 2)
                 );
-                landingSpeed = Math.sqrt(rocket.vx * rocket.vx + rocket.vy * rocket.vy);
+                landingSpeed = rocket.landingSpeed || Math.sqrt(rocket.vx * rocket.vx + rocket.vy * rocket.vy);
                 
                 if (rocket.crashed) {
                     distance = Infinity;
@@ -944,8 +1174,28 @@ class RocketEngine {
             distance = Infinity;
         }
         
-        const score = calculateScore(this.level, distance, landingSpeed);
-        const credits = calculateCreditsEarned(this.level, score);
+        let score = calculateScore(this.level, distance, landingSpeed);
+        
+        // For landing missions: if rocket landed (even hard landing), ensure minimum passing score
+        // as long as they're on target
+        if (this.level.objectiveType === 'landing' && rocket.landed && !rocket.crashed) {
+            const platformX = this.launchX + target.x;
+            const onPlatform = Math.abs(rocket.x - platformX) <= target.width / 2;
+            if (onPlatform && score < 400) {
+                // Hard landing on target - give passing score but reduced
+                score = rocket.hardLanding ? 450 : 500;
+            }
+        }
+        
+        let credits = calculateCreditsEarned(this.level, score);
+        
+        // Apply hard landing penalty (reduce credits by 30%)
+        let hardLandingPenalty = 0;
+        if (rocket.hardLanding && !rocket.crashed) {
+            hardLandingPenalty = Math.floor(credits * 0.3);
+            credits -= hardLandingPenalty;
+        }
+        
         const passed = isLevelPassed(score);
         
         return {
@@ -955,6 +1205,9 @@ class RocketEngine {
             passed,
             crashed: rocket.crashed,
             landed: rocket.landed,
+            hardLanding: rocket.hardLanding,
+            hardLandingPenalty,
+            landingSpeed: rocket.landingSpeed ? Math.round(rocket.landingSpeed) : null,
             maxAltitude: Math.round(this.maxAltitudeReached),
             finalTime: this.time.toFixed(1)
         };
@@ -983,6 +1236,9 @@ class RocketEngine {
         // Draw ground
         this.drawGround();
         
+        // Draw launch tower (visible during flight too)
+        this.drawLaunchTower();
+        
         // Draw separated stages (debris)
         this.drawSeparatedStages();
         
@@ -1007,17 +1263,19 @@ class RocketEngine {
             ctx.globalAlpha = 0.6; // Make debris slightly transparent
             
             let yOffset = 0;
-            stage.components.forEach(comp => {
+            // Draw from last to first (same as main rocket)
+            for (let i = stage.components.length - 1; i >= 0; i--) {
+                const comp = stage.components[i];
                 const height = comp.size?.height || 30;
                 const width = comp.size?.width || 40;
                 
                 ctx.save();
-                ctx.translate(0, -yOffset - height / 2);
+                ctx.translate(0, yOffset + height / 2);
                 this.drawComponentShape(ctx, comp, width, height);
                 ctx.restore();
                 
                 yOffset += height + 2;
-            });
+            }
             
             ctx.globalAlpha = 1;
             ctx.restore();
@@ -1272,18 +1530,22 @@ class RocketEngine {
         ctx.translate(rocket.x, rocket.y);
         ctx.rotate((rocket.angle + 90) * Math.PI / 180);
         
-        // Draw components from bottom to top (skip separated ones)
+        // rocket.y is the TOP of the rocket
+        // Draw from top to bottom: crew capsule (last index) at top, engine (index 0) at bottom
+        // In canvas, positive Y goes DOWN, so we use positive yOffset
         let yOffset = 0;
         
-        rocket.components.forEach((comp, i) => {
+        // Draw in reverse order: last component (crew capsule) first at top
+        for (let i = rocket.components.length - 1; i >= 0; i--) {
+            const comp = rocket.components[i];
             // Skip separated components - they're drawn as debris
-            if (comp.separated) return;
+            if (comp.separated) continue;
             
             const height = comp.size?.height || 30;
             const width = comp.size?.width || 40;
             
             ctx.save();
-            ctx.translate(0, -yOffset - height/2);
+            ctx.translate(0, yOffset + height/2);
             
             // Component glow when active
             if (comp.active) {
@@ -1302,7 +1564,7 @@ class RocketEngine {
             ctx.restore();
             
             yOffset += height + 2;
-        });
+        }
         
         ctx.restore();
     }
