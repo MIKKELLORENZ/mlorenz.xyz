@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Time It! - Rocket Assembly Game</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="game-container">
+        <!-- Sky Canvas for simulation -->
+        <canvas id="sky-canvas"></canvas>
+        
+        <!-- Stars overlay -->
+        <div id="stars"></div>
+        
+        <!-- HUD -->
+        <div id="hud">
+            <div id="level-info">
+                <span class="label">MISSION</span>
+                <span id="level-number">1</span>
+            </div>
+            <div id="mission-type">
+                <span class="label">OBJECTIVE</span>
+                <span id="objective-text">Fly through the hoop</span>
+            </div>
+            <div id="credits-display">
+                <span class="label">CREDITS</span>
+                <span id="credits">500</span>
+            </div>
+            <div id="score-display">
+                <span class="label">SCORE</span>
+                <span id="score">0</span>
+            </div>
+        </div>
+        
+        <!-- Mission Briefing Modal -->
+        <div id="mission-modal" class="modal">
+            <div class="modal-content">
+                <h2 id="mission-title">MISSION 1</h2>
+                <div id="mission-objective-icon"></div>
+                <p id="mission-description">Your first mission: Launch your rocket through the hoop!</p>
+                <div id="mission-details">
+                    <div class="detail">
+                        <span class="detail-label">Target</span>
+                        <span id="target-height">500m</span>
+                    </div>
+                    <div class="detail">
+                        <span class="detail-label">Budget</span>
+                        <span id="mission-budget">💰 200</span>
+                    </div>
+                    <div class="detail">
+                        <span class="detail-label">Bonus Credits</span>
+                        <span id="bonus-credits">+100</span>
+                    </div>
+                </div>
+                <button id="start-mission-btn" class="btn primary">START MISSION</button>
+            </div>
+        </div>
+        
+        <!-- Results Modal -->
+        <div id="results-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2 id="results-title">MISSION COMPLETE!</h2>
+                <div id="results-icon"></div>
+                <div id="results-stats">
+                    <div class="stat">
+                        <span class="stat-label">Distance to Target</span>
+                        <span id="result-distance">0m</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Points Earned</span>
+                        <span id="result-points">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Credits Earned</span>
+                        <span id="result-credits">0</span>
+                    </div>
+                </div>
+                <button id="next-mission-btn" class="btn primary">NEXT MISSION</button>
+                <button id="retry-mission-btn" class="btn secondary">RETRY</button>
+            </div>
+        </div>
+        
+        <!-- Main Game Area -->
+        <div id="game-area">
+            <!-- Assembly Panel -->
+            <div id="assembly-panel">
+                <h2>🚀 ROCKET ASSEMBLY</h2>
+                
+                <div id="rocket-preview">
+                    <div id="rocket-build-area">
+                        <div id="rocket-slots"></div>
+                    </div>
+                    <div id="launch-pad"></div>
+                </div>
+                
+                <div id="timing-controls">
+                    <h3>⏱️ TIMING SEQUENCE</h3>
+                    <div id="timing-list"></div>
+                </div>
+                
+                <div id="action-buttons">
+                    <button id="clear-btn" class="btn danger">CLEAR</button>
+                    <button id="launch-btn" class="btn launch">🚀 LAUNCH</button>
+                </div>
+            </div>
+            
+            <!-- Catalog Panel -->
+            <div id="catalog-panel">
+                <h2>📦 COMPONENTS CATALOG</h2>
+                
+                <div id="catalog-tabs">
+                    <button class="tab-btn active" data-category="engines">Engines</button>
+                    <button class="tab-btn" data-category="rotation">Rotation</button>
+                    <button class="tab-btn" data-category="brakes">Brakes</button>
+                    <button class="tab-btn" data-category="landing">Landing</button>
+                    <button class="tab-btn" data-category="special">Special</button>
+                </div>
+                
+                <div id="catalog-items"></div>
+            </div>
+        </div>
+        
+        <!-- Flight Info (shown during simulation) -->
+        <div id="flight-info" class="hidden">
+            <div class="flight-stat">
+                <span class="label">ALTITUDE</span>
+                <span id="altitude">0m</span>
+            </div>
+            <div class="flight-stat">
+                <span class="label">VELOCITY</span>
+                <span id="velocity">0 m/s</span>
+            </div>
+            <div class="flight-stat">
+                <span class="label">TIME</span>
+                <span id="flight-time">0.0s</span>
+            </div>
+            <div class="flight-stat">
+                <span class="label">DISTANCE TO TARGET</span>
+                <span id="distance-to-target">---</span>
+            </div>
+        </div>
+        
+        <!-- Simulation Controls -->
+        <div id="sim-controls" class="hidden">
+            <button id="abort-btn" class="btn danger">ABORT MISSION</button>
+        </div>
+    </div>
+    
+    <script src="js/components.js"></script>
+    <script src="js/levels.js"></script>
+    <script src="js/engine.js"></script>
+    <script src="js/game.js"></script>
+</body>
+</html>
