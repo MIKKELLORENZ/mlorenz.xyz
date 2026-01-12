@@ -22,6 +22,9 @@
             z-index: 100;
             text-align: center;
             pointer-events: none; /* Allow clicks to pass through the container */
+            padding-left: env(safe-area-inset-left);
+            padding-right: env(safe-area-inset-right);
+            padding-bottom: env(safe-area-inset-bottom);
         }
         
         .control-pad {
@@ -32,20 +35,21 @@
         }
         
         .touch-btn {
-            width: 60px;
-            height: 60px;
+            width: clamp(56px, 14vw, 84px);
+            height: clamp(56px, 14vw, 84px);
             border-radius: 50%;
             background-color: rgba(255, 255, 255, 0.3);
             border: 2px solid rgba(255, 255, 255, 0.6);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 24px;
+            font-size: clamp(22px, 5vw, 34px);
             color: white;
             margin: 0 5px;
             pointer-events: auto; /* Make buttons clickable */
             user-select: none;
             -webkit-tap-highlight-color: transparent;
+            touch-action: none;
         }
         
         .touch-btn:active, .touch-btn.active {
@@ -78,6 +82,11 @@
                 max-height: fit-content !important;
                 overflow: hidden !important;
             }
+
+            /* Make bottom controls easier to hit on phones */
+            #touchControls {
+                bottom: 8px;
+            }
         }
     </style>
 </head>
@@ -92,15 +101,15 @@
             <div id="rightRotateBtn" class="touch-btn">↻</div>
         </div>
         <div class="control-pad">
-            <div id="leftTranslateBtn" class="touch-btn">▶</div>
-            <div id="rightTranslateBtn" class="touch-btn">◀</div>
+            <div id="leftTranslateBtn" class="touch-btn">◀</div>
+            <div id="rightTranslateBtn" class="touch-btn">▶</div>
         </div>
     </div>
     
     <!-- Mini HUD for oxygen and fuel -->
     <div id="mini-hud">
         <div class="mini-label">
-            <span>OXYGEN</span>
+            <span>🫁 OXYGEN</span>
             <span id="mini-oxygen-value">100%</span>
         </div>
         <div class="mini-bar-container">
@@ -108,7 +117,7 @@
         </div>
         
         <div class="mini-label">
-            <span>FUEL</span>
+            <span>⛽ FUEL</span>
             <span id="mini-fuel-value">100%</span>
         </div>
         <div class="mini-bar-container">
@@ -118,11 +127,13 @@
     
     <!-- Simplified HUD without oxygen and fuel -->
     <div id="hud">
-        Score: <span id="scoreValue">0</span><br>
-        High Score: <span id="highScoreValue">0</span><br>
-        Vertical Velocity: <span id="verticalVelocityValue">0</span><br>
-        Horizontal Velocity: <span id="horizontalVelocityValue">0</span><br>
-        Height: <span id="heightValue">0m</span>
+        <div><span style="color: #8090b0;">SCORE</span><span id="scoreValue">0</span></div>
+        <div><span style="color: #8090b0;">HIGH SCORE</span><span id="highScoreValue">0</span></div>
+        <div style="margin-top: 12px; border-top: 1px solid rgba(100,150,255,0.15); padding-top: 12px;">
+            <span style="color: #8090b0;">V-SPEED</span><span id="verticalVelocityValue">0</span><span style="color: #6080a0; font-size: 11px;"> m/s</span>
+        </div>
+        <div><span style="color: #8090b0;">H-SPEED</span><span id="horizontalVelocityValue">0</span><span style="color: #6080a0; font-size: 11px;"> m/s</span></div>
+        <div><span style="color: #8090b0;">ALTITUDE</span><span id="heightValue">0m</span></div>
     </div>
 
     <div id="message">
@@ -141,10 +152,24 @@
         // Canvas setup
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d', { alpha: false }); // Disable alpha for better performance
-        let width = window.innerWidth;
-        let height = window.innerHeight;
-        canvas.width = width;
-        canvas.height = height;
+        let width = 0;
+        let height = 0;
+
+        function resizeCanvas() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+
+            const dpr = Math.max(1, window.devicePixelRatio || 1);
+            canvas.style.width = width + 'px';
+            canvas.style.height = height + 'px';
+            canvas.width = Math.floor(width * dpr);
+            canvas.height = Math.floor(height * dpr);
+
+            // Keep all game math in CSS pixels.
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+
+        resizeCanvas();
         
         // Cache DOM elements for HUD updates (avoid repeated lookups)
         const hudElements = {
@@ -159,12 +184,14 @@
             heightValue: document.getElementById('heightValue')
         };
 
-        // Mobile detection and setup
+        // Mobile/touch detection and setup
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const isCoarsePointer = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+        const shouldShowTouchControls = isMobile || isCoarsePointer;
         const touchControls = document.getElementById('touchControls');
         
-        // Show touch controls on mobile devices
-        if (isMobile) {
+        // Show touch controls on touch-first devices
+        if (shouldShowTouchControls) {
             touchControls.style.display = 'block';
             
             // Adjust HUD positioning for better mobile visibility
@@ -184,6 +211,9 @@
                     e.preventDefault();
                 }
             }, { passive: false });
+
+            // Prevent long-press context menu on controls
+            touchControls.addEventListener('contextmenu', (e) => e.preventDefault());
         }
         
         // Touch control buttons
@@ -195,103 +225,72 @@
         
         // Touch control event listeners
         function setupTouchControls() {
-            // Main thrust (Up arrow)
-            mainThrustBtn.addEventListener('touchstart', function(e) {
-                e.preventDefault();
-                keys['arrowup'] = true;
-                this.classList.add('active');
-                
-                // If main thruster was just activated, record the time
-                if (!mainThrusterStartTime) {
-                    mainThrusterStartTime = Date.now();
-                    
-                    // Cancel any pending pump reset sound when thruster is reactivated
-                    if (mainThrusterReleaseTimer !== null) {
-                        clearTimeout(mainThrusterReleaseTimer);
-                        mainThrusterReleaseTimer = null;
-                    }
+            function bindHoldControl(element, key, { onPress, onRelease } = {}) {
+                const press = (e) => {
+                    e.preventDefault();
+                    keys[key] = true;
+                    element.classList.add('active');
+                    if (onPress) onPress();
+                };
+                const release = (e) => {
+                    e.preventDefault();
+                    keys[key] = false;
+                    element.classList.remove('active');
+                    if (onRelease) onRelease();
+                };
+
+                if (window.PointerEvent) {
+                    element.addEventListener('pointerdown', press);
+                    element.addEventListener('pointerup', release);
+                    element.addEventListener('pointercancel', release);
+                    element.addEventListener('pointerleave', release);
+                } else {
+                    element.addEventListener('touchstart', press, { passive: false });
+                    element.addEventListener('touchend', release, { passive: false });
+                    element.addEventListener('touchcancel', release, { passive: false });
                 }
-            });
-            
-            mainThrustBtn.addEventListener('touchend', function(e) {
-                e.preventDefault();
-                keys['arrowup'] = false;
-                this.classList.remove('active');
-                
-                // Similar logic to keyup handler for the pump reset sound
-                if (mainEngineSoundPlaying) {
-                    const thrusterDuration = Date.now() - mainThrusterStartTime;
-                    
-                    if (thrusterDuration >= MIN_THRUSTER_TIME) {
+            }
+
+            // Main thrust (Up arrow)
+            bindHoldControl(mainThrustBtn, 'arrowup', {
+                onPress: () => {
+                    if (!mainThrusterStartTime) {
+                        mainThrusterStartTime = Date.now();
                         if (mainThrusterReleaseTimer !== null) {
                             clearTimeout(mainThrusterReleaseTimer);
-                        }
-                        
-                        mainThrusterReleaseTimer = setTimeout(() => {
-                            pumpResetSound.currentTime = 0;
-                            pumpResetSound.play();
                             mainThrusterReleaseTimer = null;
-                        }, 1500);
+                        }
                     }
+                },
+                onRelease: () => {
+                    if (mainEngineSoundPlaying && mainThrusterStartTime) {
+                        const thrusterDuration = Date.now() - mainThrusterStartTime;
+                        if (thrusterDuration >= MIN_THRUSTER_TIME) {
+                            if (mainThrusterReleaseTimer !== null) {
+                                clearTimeout(mainThrusterReleaseTimer);
+                            }
+                            mainThrusterReleaseTimer = setTimeout(() => {
+                                pumpResetSound.currentTime = 0;
+                                pumpResetSound.play();
+                                mainThrusterReleaseTimer = null;
+                            }, 1500);
+                        }
+                    }
+                    mainThrusterStartTime = null;
                 }
-                mainThrusterStartTime = null;
             });
-            
-            // Left rotation (Left arrow)
-            leftRotateBtn.addEventListener('touchstart', function(e) {
-                e.preventDefault();
-                keys['arrowleft'] = true;
-                this.classList.add('active');
-            });
-            
-            leftRotateBtn.addEventListener('touchend', function(e) {
-                e.preventDefault();
-                keys['arrowleft'] = false;
-                this.classList.remove('active');
-            });
-            
-            // Right rotation (Right arrow)
-            rightRotateBtn.addEventListener('touchstart', function(e) {
-                e.preventDefault();
-                keys['arrowright'] = true;
-                this.classList.add('active');
-            });
-            
-            rightRotateBtn.addEventListener('touchend', function(e) {
-                e.preventDefault();
-                keys['arrowright'] = false;
-                this.classList.remove('active');
-            });
-            
-            // Left translation (A key)
-            leftTranslateBtn.addEventListener('touchstart', function(e) {
-                e.preventDefault();
-                keys['a'] = true;
-                this.classList.add('active');
-            });
-            
-            leftTranslateBtn.addEventListener('touchend', function(e) {
-                e.preventDefault();
-                keys['a'] = false;
-                this.classList.remove('active');
-            });
-            
-            // Right translation (D key)
-            rightTranslateBtn.addEventListener('touchstart', function(e) {
-                e.preventDefault();
-                keys['d'] = true;
-                this.classList.add('active');
-            });
-            
-            rightTranslateBtn.addEventListener('touchend', function(e) {
-                e.preventDefault();
-                keys['d'] = false;
-                this.classList.remove('active');
-            });
+
+            // Left/Right rotation
+            bindHoldControl(leftRotateBtn, 'arrowleft');
+            bindHoldControl(rightRotateBtn, 'arrowright');
+
+            // Translation (A/D)
+            bindHoldControl(leftTranslateBtn, 'a');
+            bindHoldControl(rightTranslateBtn, 'd');
         }
         
-        // Set up touch controls if on mobile
-        if (isMobile) {
+        // Set up touch controls if on a touch-first device
+        if (shouldShowTouchControls) {
             setupTouchControls();
         }
 
@@ -444,27 +443,85 @@
         let breathingSoundPlaying = false;
         let translationEngineSoundPlaying = false; // New variable for A/D thrusters
         
-        // Stars
+        // Stars with subtle visuals
         let stars = [];
-        const NUM_STARS = 800;
-        const STAR_COLOR = 'white';
-        const STAR_MIN_RADIUS = 0.5;
-        const STAR_MAX_RADIUS = 1.5;
+        let nebulaClouds = [];
+        let shootingStars = [];
+        const NUM_STARS = 600;
+        const NUM_NEBULA_CLOUDS = 5;
+        const STAR_COLORS = [
+            '#FFFFFF', '#FFFFFF', '#FFFFFF', '#FFFFFF', // Most stars white
+            '#E8E8F0', '#F0F0FF', // Slight blue tint
+            '#FFF8F0', '#FFFAF5' // Slight warm tint
+        ];
+        const STAR_MIN_RADIUS = 0.2;
+        const STAR_MAX_RADIUS = 1.0;
 
         function generateStars() {
             stars = [];
+            nebulaClouds = [];
+            
+            // Generate nebula clouds first (background layer) - more subtle
+            for (let i = 0; i < NUM_NEBULA_CLOUDS; i++) {
+                nebulaClouds.push({
+                    x: Math.random() * width * 3 - width * 0.5,
+                    y: Math.random() * height * 1.5,
+                    radius: 150 + Math.random() * 200,
+                    color: [
+                        `rgba(80, 40, 120, ${0.015 + Math.random() * 0.015})`, // Purple
+                        `rgba(40, 60, 120, ${0.015 + Math.random() * 0.015})`,  // Blue
+                        `rgba(100, 40, 60, ${0.01 + Math.random() * 0.01})`,  // Red
+                        `rgba(40, 80, 80, ${0.01 + Math.random() * 0.01})`, // Teal
+                    ][Math.floor(Math.random() * 4)],
+                    parallax: 0.1 + Math.random() * 0.2
+                });
+            }
+            
+            // Generate stars with subtle properties
             for (let i = 0; i < NUM_STARS; i++) {
+                const isBrightStar = Math.random() < 0.02; // Only 2% chance of slightly brighter star
                 stars.push({
                     x: Math.random() * width * 2,
                     y: Math.random() * height * 2,
-                    radius: Math.random() * (STAR_MAX_RADIUS - STAR_MIN_RADIUS) + STAR_MIN_RADIUS,
-                    alpha: Math.random() * 0.5 + 0.5,
-                    twinkleSpeed: Math.random() * 0.010 + 0.005,
+                    radius: isBrightStar ? 
+                        (0.8 + Math.random() * 0.4) : 
+                        (Math.random() * (STAR_MAX_RADIUS - STAR_MIN_RADIUS) + STAR_MIN_RADIUS),
+                    color: STAR_COLORS[Math.floor(Math.random() * STAR_COLORS.length)],
+                    alpha: Math.random() * 0.3 + 0.3, // Lower alpha range (0.3-0.6)
+                    twinkleSpeed: Math.random() * 0.008 + 0.003,
                     twinkleDirection: Math.random() < 0.5 ? 1 : -1,
-                    parallax: Math.random() * 0.5 + 0.5
+                    parallax: Math.random() * 0.5 + 0.5,
+                    hasCross: false, // No cross effects
+                    glowSize: isBrightStar ? 1 : 0 // Minimal glow
                 });
             }
         }
+        
+        // Shooting star management
+        function updateShootingStars(deltaTimeSec) {
+            // Spawn new shooting stars occasionally
+            if (Math.random() < 0.001) { // ~0.1% chance per frame
+                shootingStars.push({
+                    x: Math.random() * width * 2,
+                    y: Math.random() * height * 0.5,
+                    vx: -300 - Math.random() * 200,
+                    vy: 150 + Math.random() * 100,
+                    length: 50 + Math.random() * 100,
+                    alpha: 1.0,
+                    life: 1.0
+                });
+            }
+            
+            // Update existing shooting stars
+            for (let star of shootingStars) {
+                star.x += star.vx * deltaTimeSec;
+                star.y += star.vy * deltaTimeSec;
+                star.life -= deltaTimeSec * 1.5;
+                star.alpha = star.life;
+            }
+            shootingStars = shootingStars.filter(s => s.life > 0);
+        }
+        
         generateStars();
 
         // Function to start the game after loading
@@ -580,6 +637,7 @@
         let cameraY = 0;
 
         let dustParticles = [];
+        let floatingScoreTexts = []; // Array to track floating score texts
 
         function generateLandscape() {
             terrain = [];
@@ -725,23 +783,31 @@
                 }
             }
         });
-        window.addEventListener('resize', onResize);
+        let resizeRaf = null;
+        function requestResize() {
+            if (resizeRaf !== null) return;
+            resizeRaf = requestAnimationFrame(() => {
+                resizeRaf = null;
+                onResize();
+            });
+        }
+
+        window.addEventListener('resize', requestResize);
+        window.addEventListener('orientationchange', requestResize);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', requestResize);
+        }
         document.getElementById('restartButton').addEventListener('click', restartGame);
 
         function onResize() {
-            width = window.innerWidth;
-            height = window.innerHeight;
-            canvas.width = width;
-            canvas.height = height;
+            resizeCanvas();
             generateStars();
             generateLandscape();
             updateHUD();
             
-            // Reposition touch controls based on new screen size if mobile
-            if (isMobile) {
-                // Adjust control positions based on new dimensions
-                const controlHeight = touchControls.offsetHeight;
-                document.getElementById('hud').style.bottom = (controlHeight + 10) + 'px';
+            // Keep touch controls visible after orientation changes
+            if (shouldShowTouchControls) {
+                touchControls.style.display = 'block';
             }
         }
 
@@ -994,11 +1060,13 @@
             cameraY = lander.y - height / 2;
 
             // Optimized collision detection using binary search
-            let landerBottom = { x: lander.x, y: lander.y + 20 };
+            // Landing feet are at y+26 (below the body which ends at y+20)
+            let landerBottom = { x: lander.x, y: lander.y + 26 };
             const groundY = getTerrainHeightAt(landerBottom.x);
             
             if (landerBottom.y >= groundY) {
-                lander.y = groundY - 20;
+                // Position lander so landing feet (at y+26) rest on ground, not the body bottom (y+20)
+                lander.y = groundY - 26;
 
                 let safeLandingSpeed = 57;
                 let verticalSpeed = lander.vy;
@@ -1046,6 +1114,7 @@
 
             updateMeteorites(deltaTimeSec);
             updateDustParticles(deltaTimeSec);
+            updateFloatingScoreTexts(deltaTimeSec);
             updateStars(deltaTimeSec);
             updateHUD();
         }
@@ -1103,6 +1172,12 @@
             const vxFactor = lander.vx * 0.00010;
             const vyFactor = lander.vy * 0.00010;
             
+            // Update nebula clouds parallax
+            for (let cloud of nebulaClouds) {
+                cloud.x -= vxFactor * cloud.parallax;
+                cloud.y -= vyFactor * cloud.parallax;
+            }
+            
             for (let i = 0; i < stars.length; i++) {
                 const star = stars[i];
                 star.x -= vxFactor * star.parallax;
@@ -1117,6 +1192,9 @@
                     star.twinkleDirection = 1;
                 }
             }
+            
+            // Update shooting stars
+            updateShootingStars(deltaTimeSec);
         }
         
         // Cache terrain gradient
@@ -1152,8 +1230,10 @@
         function getTerrainGradient() {
             if (lastGradientCameraY !== cameraY) {
                 cachedTerrainGradient = ctx.createLinearGradient(0, cameraY, 0, cameraY + height);
-                cachedTerrainGradient.addColorStop(0, '#7B7B7B');
-                cachedTerrainGradient.addColorStop(1, '#4B4B4B');
+                cachedTerrainGradient.addColorStop(0, '#8B8B8B');
+                cachedTerrainGradient.addColorStop(0.3, '#6B6B6B');
+                cachedTerrainGradient.addColorStop(0.6, '#5B5B5B');
+                cachedTerrainGradient.addColorStop(1, '#3B3B3B');
                 lastGradientCameraY = cameraY;
             }
             return cachedTerrainGradient;
@@ -1190,26 +1270,119 @@
         }
 
         function draw() {
-            // Fill with dark background (faster than clearRect when alpha is disabled)
-            ctx.fillStyle = '#000011';
+            // Create deep space gradient background
+            const bgGradient = ctx.createRadialGradient(width/2, height/3, 0, width/2, height/2, height);
+            bgGradient.addColorStop(0, '#0a0a1a');
+            bgGradient.addColorStop(0.5, '#050510');
+            bgGradient.addColorStop(1, '#000005');
+            ctx.fillStyle = bgGradient;
             ctx.fillRect(0, 0, width, height);
 
             // Initialize lander gradients if not done yet
             if (!cachedBodyGradient) {
                 initLanderGradients();
             }
+            
+            // Draw nebula clouds (very far background)
+            for (let cloud of nebulaClouds) {
+                const gradient = ctx.createRadialGradient(cloud.x, cloud.y, 0, cloud.x, cloud.y, cloud.radius);
+                gradient.addColorStop(0, cloud.color);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(cloud.x, cloud.y, cloud.radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw Earth in the far background (parallax effect)
+            const earthX = width * 0.85 - (cameraX * 0.01);
+            const earthY = height * 0.15 - (cameraY * 0.005);
+            const earthRadius = 60;
+            
+            // Earth glow
+            const earthGlow = ctx.createRadialGradient(earthX, earthY, earthRadius * 0.9, earthX, earthY, earthRadius * 2);
+            earthGlow.addColorStop(0, 'rgba(100, 150, 255, 0.15)');
+            earthGlow.addColorStop(1, 'transparent');
+            ctx.fillStyle = earthGlow;
+            ctx.beginPath();
+            ctx.arc(earthX, earthY, earthRadius * 2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Earth body
+            const earthGradient = ctx.createRadialGradient(earthX - 15, earthY - 15, 0, earthX, earthY, earthRadius);
+            earthGradient.addColorStop(0, '#5588DD');
+            earthGradient.addColorStop(0.3, '#3366BB');
+            earthGradient.addColorStop(0.6, '#224488');
+            earthGradient.addColorStop(1, '#112244');
+            ctx.fillStyle = earthGradient;
+            ctx.beginPath();
+            ctx.arc(earthX, earthY, earthRadius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Earth cloud patterns
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.ellipse(earthX - 20, earthY - 10, 25, 8, -0.3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(earthX + 15, earthY + 15, 20, 6, 0.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+            
+            // Earth atmosphere rim
+            ctx.strokeStyle = 'rgba(150, 200, 255, 0.4)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(earthX, earthY, earthRadius + 2, 0, Math.PI * 2);
+            ctx.stroke();
 
-            // Draw stars - optimized: group by alpha ranges to reduce state changes
-            ctx.fillStyle = STAR_COLOR;
-            // Draw stars in batches of similar alpha to minimize globalAlpha changes
+            // Draw stars with subtle effects
             for (let i = 0; i < stars.length; i++) {
                 const star = stars[i];
-                // Only set alpha if it changed significantly (reduces state changes)
                 ctx.globalAlpha = star.alpha;
+                
+                // Draw subtle glow for bright stars only
+                if (star.glowSize > 0) {
+                    const glowGradient = ctx.createRadialGradient(star.x, star.y, 0, star.x, star.y, star.glowSize * 2);
+                    glowGradient.addColorStop(0, star.color);
+                    glowGradient.addColorStop(1, 'transparent');
+                    ctx.fillStyle = glowGradient;
+                    ctx.beginPath();
+                    ctx.arc(star.x, star.y, star.glowSize * 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                // Draw star core
+                ctx.fillStyle = star.color;
                 ctx.beginPath();
                 ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
                 ctx.fill();
             }
+            
+            // Draw shooting stars
+            for (let shootingStar of shootingStars) {
+                ctx.save();
+                ctx.globalAlpha = shootingStar.alpha;
+                const gradient = ctx.createLinearGradient(
+                    shootingStar.x, shootingStar.y,
+                    shootingStar.x - shootingStar.vx * 0.2, shootingStar.y - shootingStar.vy * 0.2
+                );
+                gradient.addColorStop(0, 'white');
+                gradient.addColorStop(1, 'transparent');
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(shootingStar.x, shootingStar.y);
+                ctx.lineTo(
+                    shootingStar.x - shootingStar.vx * 0.15,
+                    shootingStar.y - shootingStar.vy * 0.15
+                );
+                ctx.stroke();
+                ctx.restore();
+            }
+            
             ctx.globalAlpha = 1.0;
 
             ctx.save();
@@ -1227,45 +1400,169 @@
             ctx.lineTo(terrain[endIdx].x, cameraY + height);
             ctx.closePath();
             ctx.fill();
+            
+            // Draw terrain surface highlight line
+            ctx.strokeStyle = 'rgba(180, 180, 190, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(terrain[startIdx].x, terrain[startIdx].y);
+            for (let i = startIdx + 1; i <= endIdx; i++) {
+                ctx.lineTo(terrain[i].x, terrain[i].y);
+            }
+            ctx.stroke();
+            
+            // Draw subtle terrain texture lines
+            ctx.strokeStyle = 'rgba(100, 100, 110, 0.15)';
+            ctx.lineWidth = 1;
+            for (let i = startIdx; i <= endIdx; i += 5) {
+                if (terrain[i]) {
+                    ctx.beginPath();
+                    ctx.moveTo(terrain[i].x, terrain[i].y);
+                    ctx.lineTo(terrain[i].x + (Math.random() - 0.5) * 10, terrain[i].y + 30 + Math.random() * 20);
+                    ctx.stroke();
+                }
+            }
 
-            // Only draw visible craters (frustum culling)
+            // Only draw visible craters (frustum culling) with enhanced visuals
             const viewLeft = cameraX - 50;
             const viewRight = cameraX + width + 50;
             
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
             for (let i = 0; i < craterMarks.length; i++) {
                 const crater = craterMarks[i];
                 if (crater.x >= viewLeft && crater.x <= viewRight) {
+                    // Crater shadow (deeper part)
+                    const craterGradient = ctx.createRadialGradient(
+                        crater.x - crater.radius * 0.2, crater.y - crater.radius * 0.2, 0,
+                        crater.x, crater.y, crater.radius
+                    );
+                    craterGradient.addColorStop(0, 'rgba(0, 0, 0, 0.6)');
+                    craterGradient.addColorStop(0.7, 'rgba(0, 0, 0, 0.3)');
+                    craterGradient.addColorStop(1, 'rgba(0, 0, 0, 0.1)');
+                    ctx.fillStyle = craterGradient;
                     ctx.beginPath();
-                    ctx.arc(crater.x, crater.y, crater.radius, 0, Math.PI * 2);
+                    ctx.ellipse(crater.x, crater.y, crater.radius, crater.radius * 0.4, 0, 0, Math.PI * 2);
                     ctx.fill();
+                    
+                    // Crater rim highlight
+                    ctx.strokeStyle = 'rgba(150, 150, 150, 0.3)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.ellipse(crater.x, crater.y, crater.radius * 0.95, crater.radius * 0.35, 0, Math.PI, Math.PI * 2);
+                    ctx.stroke();
                 }
             }
 
-            // Only draw visible rocks (frustum culling)
-            ctx.fillStyle = '#3D3D3D';
+            // Only draw visible rocks (frustum culling) with enhanced visuals
             for (let i = 0; i < rocks.length; i++) {
                 const rock = rocks[i];
                 if (rock.x >= viewLeft && rock.x <= viewRight) {
+                    // Rock shadow
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
                     ctx.beginPath();
-                    ctx.arc(rock.x, rock.y, rock.size, 0, Math.PI * 2);
+                    ctx.ellipse(rock.x + 2, rock.y + rock.size * 0.3, rock.size * 1.2, rock.size * 0.3, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Rock body with gradient
+                    const rockGradient = ctx.createRadialGradient(
+                        rock.x - rock.size * 0.3, rock.y - rock.size * 0.3, 0,
+                        rock.x, rock.y, rock.size
+                    );
+                    rockGradient.addColorStop(0, '#5D5D5D');
+                    rockGradient.addColorStop(0.7, '#3D3D3D');
+                    rockGradient.addColorStop(1, '#2D2D2D');
+                    ctx.fillStyle = rockGradient;
+                    ctx.beginPath();
+                    ctx.arc(rock.x, rock.y - rock.size * 0.2, rock.size, 0, Math.PI * 2);
                     ctx.fill();
                 }
             }
 
-            // Only draw visible landing zones
+            // Only draw visible landing zones with enhanced visuals
             for (let i = 0; i < landingZones.length; i++) {
                 const zone = landingZones[i];
                 if (zone.x + zone.width >= viewLeft && zone.x <= viewRight) {
-                    ctx.fillStyle = zone.landed ? '#555555' : 'yellow';
-                    // Make landing pads more visible on mobile with a brighter outline
-                    if (isMobile) {
-                        ctx.fillRect(zone.x, zone.y - 8, zone.width, 8); // Make slightly taller
-                        ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)';
-                        ctx.lineWidth = 2;
-                        ctx.strokeRect(zone.x, zone.y - 8, zone.width, 8);
+                    const padHeight = isMobile ? 8 : 6;
+                    const centerX = zone.x + zone.width / 2;
+                    
+                    // Draw subtle landing pad glow (pulsing)
+                    if (!zone.landed) {
+                        const pulseAlpha = 0.08 + Math.sin(Date.now() * 0.003) * 0.05;
+                        const glowGradient = ctx.createRadialGradient(
+                            centerX, zone.y - padHeight/2, 0,
+                            centerX, zone.y - padHeight/2, zone.width * 0.5
+                        );
+                        glowGradient.addColorStop(0, `rgba(255, 255, 150, ${pulseAlpha})`);
+                        glowGradient.addColorStop(1, 'transparent');
+                        ctx.fillStyle = glowGradient;
+                        ctx.beginPath();
+                        ctx.ellipse(centerX, zone.y - padHeight/2, zone.width * 0.5, 15, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    
+                    // Draw landing pad base with gradient
+                    const padGradient = ctx.createLinearGradient(zone.x, zone.y - padHeight, zone.x, zone.y);
+                    if (zone.landed) {
+                        padGradient.addColorStop(0, '#666666');
+                        padGradient.addColorStop(1, '#444444');
                     } else {
-                        ctx.fillRect(zone.x, zone.y - 5, zone.width, 5);
+                        padGradient.addColorStop(0, '#FFE066');
+                        padGradient.addColorStop(0.5, '#FFD700');
+                        padGradient.addColorStop(1, '#CC9900');
+                    }
+                    ctx.fillStyle = padGradient;
+                    ctx.fillRect(zone.x, zone.y - padHeight, zone.width, padHeight);
+                    
+                    // Draw landing pad markings
+                    ctx.strokeStyle = zone.landed ? '#888888' : '#FFFFFF';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    ctx.beginPath();
+                    ctx.moveTo(zone.x + 5, zone.y - padHeight/2);
+                    ctx.lineTo(zone.x + zone.width - 5, zone.y - padHeight/2);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    
+                    // Draw beacon lights at edges (only if not landed)
+                    if (!zone.landed) {
+                        const beaconPulse = Math.sin(Date.now() * 0.005) * 0.5 + 0.5;
+                        
+                        // Left beacon
+                        ctx.fillStyle = `rgba(255, 100, 100, ${0.4 + beaconPulse * 0.3})`;
+                        ctx.beginPath();
+                        ctx.arc(zone.x + 3, zone.y - padHeight - 5, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        // Left beacon glow (subtle)
+                        const leftGlow = ctx.createRadialGradient(zone.x + 3, zone.y - padHeight - 5, 0, zone.x + 3, zone.y - padHeight - 5, 8);
+                        leftGlow.addColorStop(0, `rgba(255, 100, 100, ${beaconPulse * 0.2})`);
+                        leftGlow.addColorStop(1, 'transparent');
+                        ctx.fillStyle = leftGlow;
+                        ctx.beginPath();
+                        ctx.arc(zone.x + 3, zone.y - padHeight - 5, 8, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        // Right beacon
+                        ctx.fillStyle = `rgba(100, 255, 100, ${0.4 + beaconPulse * 0.3})`;
+                        ctx.beginPath();
+                        ctx.arc(zone.x + zone.width - 3, zone.y - padHeight - 5, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        // Right beacon glow (subtle)
+                        const rightGlow = ctx.createRadialGradient(zone.x + zone.width - 3, zone.y - padHeight - 5, 0, zone.x + zone.width - 3, zone.y - padHeight - 5, 8);
+                        rightGlow.addColorStop(0, `rgba(100, 255, 100, ${beaconPulse * 0.2})`);
+                        rightGlow.addColorStop(1, 'transparent');
+                        ctx.fillStyle = rightGlow;
+                        ctx.beginPath();
+                        ctx.arc(zone.x + zone.width - 3, zone.y - padHeight - 5, 8, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    
+                    // Draw point value indicator
+                    if (!zone.landed) {
+                        ctx.font = 'bold 10px Arial';
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(`+${zone.points}`, centerX, zone.y - padHeight - 15);
                     }
                 }
             }
@@ -1274,9 +1571,36 @@
                 if (!meteor.exploded) {
                     ctx.save();
                     ctx.translate(meteor.x, meteor.y);
-                    ctx.fillStyle = 'gray';
+                    
+                    // Meteor trail
+                    const trailGrad = ctx.createLinearGradient(0, 0, -meteor.vx * 0.1, -meteor.vy * 0.1);
+                    trailGrad.addColorStop(0, 'rgba(255, 200, 100, 0.8)');
+                    trailGrad.addColorStop(0.5, 'rgba(255, 150, 50, 0.4)');
+                    trailGrad.addColorStop(1, 'transparent');
+                    ctx.strokeStyle = trailGrad;
+                    ctx.lineWidth = 4;
                     ctx.beginPath();
-                    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(-meteor.vx * 0.15, -meteor.vy * 0.15);
+                    ctx.stroke();
+                    
+                    // Meteor glow
+                    const glowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, 15);
+                    glowGrad.addColorStop(0, 'rgba(255, 200, 150, 0.6)');
+                    glowGrad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = glowGrad;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 15, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Meteor body
+                    const bodyGrad = ctx.createRadialGradient(-2, -2, 0, 0, 0, 6);
+                    bodyGrad.addColorStop(0, '#AAA');
+                    bodyGrad.addColorStop(0.5, '#777');
+                    bodyGrad.addColorStop(1, '#444');
+                    ctx.fillStyle = bodyGrad;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 6, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.restore();
                 }
@@ -1286,10 +1610,16 @@
                 if (meteor.exploded && meteor.explosionParticles) {
                     for (let particle of meteor.explosionParticles) {
                         ctx.save();
-                        ctx.globalAlpha = particle.alpha;
-                        ctx.fillStyle = 'orange';
+                        ctx.globalAlpha = particle.alpha * 0.7;
+                        
+                        // Reduced meteor explosion particles
+                        const expGrad = ctx.createRadialGradient(particle.x, particle.y, 0, particle.x, particle.y, 4);
+                        expGrad.addColorStop(0, '#FFCC66');
+                        expGrad.addColorStop(0.5, '#FF7722');
+                        expGrad.addColorStop(1, 'rgba(255, 100, 0, 0.1)');
+                        ctx.fillStyle = expGrad;
                         ctx.beginPath();
-                        ctx.arc(particle.x, particle.y, 3, 0, Math.PI * 2);
+                        ctx.arc(particle.x, particle.y, 4, 0, Math.PI * 2);
                         ctx.fill();
                         ctx.restore();
                     }
@@ -1298,8 +1628,20 @@
 
             for (let dust of dustParticles) {
                 ctx.save();
-                ctx.globalAlpha = dust.alpha;
-                ctx.fillStyle = 'rgba(128,128,128, 0.6)';
+                ctx.globalAlpha = dust.alpha * 0.8;
+                
+                // Create dust glow effect
+                const dustGradient = ctx.createRadialGradient(dust.x, dust.y, 0, dust.x, dust.y, dust.size * 2);
+                dustGradient.addColorStop(0, 'rgba(180, 170, 160, 0.8)');
+                dustGradient.addColorStop(0.5, 'rgba(150, 140, 130, 0.4)');
+                dustGradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = dustGradient;
+                ctx.beginPath();
+                ctx.arc(dust.x, dust.y, dust.size * 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Dust core
+                ctx.fillStyle = 'rgba(200, 190, 180, 0.9)';
                 ctx.beginPath();
                 ctx.arc(dust.x, dust.y, dust.size, 0, Math.PI * 2);
                 ctx.fill();
@@ -1307,13 +1649,26 @@
             }
 
             if (lander.crashed) {
-                // Draw explosion particles
+                // Draw explosion particles with enhanced effects
                 for (let particle of lander.explosionParticles) {
                     ctx.save();
                     ctx.globalAlpha = particle.alpha;
-                    ctx.fillStyle = 'orange';
+                    
+                    // Particle glow
+                    const particleGlow = ctx.createRadialGradient(particle.x, particle.y, 0, particle.x, particle.y, particle.size * 2);
+                    const hue = 30 + Math.random() * 30; // Orange to yellow range
+                    particleGlow.addColorStop(0, `hsla(${hue}, 100%, 70%, 1)`);
+                    particleGlow.addColorStop(0.5, `hsla(${hue}, 100%, 50%, 0.5)`);
+                    particleGlow.addColorStop(1, 'transparent');
+                    ctx.fillStyle = particleGlow;
                     ctx.beginPath();
-                    ctx.arc(particle.x, particle.y, 5, 0, Math.PI * 2);
+                    ctx.arc(particle.x, particle.y, particle.size * 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Particle core
+                    ctx.fillStyle = `hsl(${hue}, 100%, 80%)`;
+                    ctx.beginPath();
+                    ctx.arc(particle.x, particle.y, particle.size * 0.5, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.restore();
                 }
@@ -1454,29 +1809,76 @@
                 ctx.translate(lander.x, lander.y);
                 ctx.rotate(lander.angle);
 
-                // Draw main thruster flame FIRST (behind vehicle)
+                // Draw main thruster flame FIRST (behind vehicle) with enhanced effects
                 if (keys['arrowup'] && fuel > 0 && !lander.controlsDisabled) {
                     // Give the flame some variability
-                    const flameHeight = 30 + Math.random() * 7; 
-                    const flameWidth = 7 + Math.random() * 1;
+                    const flameHeight = 35 + Math.random() * 12; 
+                    const flameWidth = 8 + Math.random() * 2;
                     const flameStartY = 5; // Start below body
+                    
+                    // Outer glow effect
+                    const outerGlow = ctx.createRadialGradient(0, flameStartY + flameHeight * 0.5, 0, 0, flameStartY + flameHeight * 0.5, flameHeight * 0.8);
+                    outerGlow.addColorStop(0, 'rgba(255, 200, 100, 0.4)');
+                    outerGlow.addColorStop(0.5, 'rgba(255, 150, 50, 0.2)');
+                    outerGlow.addColorStop(1, 'transparent');
+                    ctx.fillStyle = outerGlow;
+                    ctx.beginPath();
+                    ctx.ellipse(0, flameStartY + flameHeight * 0.4, flameWidth * 2, flameHeight * 0.6, 0, 0, Math.PI * 2);
+                    ctx.fill();
 
-                    // Use cached flame gradient
-                    ctx.fillStyle = cachedFlameGradient;
+                    // Main flame with enhanced gradient
+                    const flameGradient = ctx.createRadialGradient(0, flameStartY + 10, 0, 0, flameStartY + flameHeight * 0.6, flameHeight * 0.7);
+                    flameGradient.addColorStop(0.0, '#FFFFFF');
+                    flameGradient.addColorStop(0.15, '#FFFFAA');
+                    flameGradient.addColorStop(0.35, '#FFCC44');
+                    flameGradient.addColorStop(0.6, '#FF8800');
+                    flameGradient.addColorStop(0.85, '#FF4400');
+                    flameGradient.addColorStop(1.0, 'rgba(255, 50, 0, 0.3)');
+                    
+                    ctx.fillStyle = flameGradient;
                     ctx.beginPath();
                     ctx.moveTo(0, flameStartY);
                     ctx.bezierCurveTo(
                         -flameWidth, flameStartY + flameHeight * 0.3,
-                        -flameWidth, flameStartY + flameHeight * 0.7,
+                        -flameWidth * 1.2, flameStartY + flameHeight * 0.6,
                         0, flameStartY + flameHeight
                     );
                     ctx.bezierCurveTo(
-                        flameWidth, flameStartY + flameHeight * 0.7,
+                        flameWidth * 1.2, flameStartY + flameHeight * 0.6,
                         flameWidth, flameStartY + flameHeight * 0.3,
                         0, flameStartY
                     );
                     ctx.closePath();
                     ctx.fill();
+                    
+                    // Inner bright core
+                    const innerHeight = flameHeight * 0.6;
+                    const innerWidth = flameWidth * 0.5;
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.beginPath();
+                    ctx.moveTo(0, flameStartY + 2);
+                    ctx.bezierCurveTo(
+                        -innerWidth, flameStartY + innerHeight * 0.3,
+                        -innerWidth, flameStartY + innerHeight * 0.6,
+                        0, flameStartY + innerHeight
+                    );
+                    ctx.bezierCurveTo(
+                        innerWidth, flameStartY + innerHeight * 0.6,
+                        innerWidth, flameStartY + innerHeight * 0.3,
+                        0, flameStartY + 2
+                    );
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // Add random spark particles
+                    for (let i = 0; i < 3; i++) {
+                        const sparkX = (Math.random() - 0.5) * flameWidth;
+                        const sparkY = flameStartY + Math.random() * flameHeight;
+                        ctx.fillStyle = `rgba(255, ${200 + Math.random() * 55}, 100, ${0.5 + Math.random() * 0.5})`;
+                        ctx.beginPath();
+                        ctx.arc(sparkX, sparkY, 1 + Math.random(), 0, Math.PI * 2);
+                        ctx.fill();
+                    }
                 }
 
                 // Display "Unconscious..." label when oxygen is depleted but player hasn't crashed yet
@@ -1499,8 +1901,54 @@
                     ctx.restore();
                 }
 
-                // Main body - more capsule shaped
-                ctx.fillStyle = '#E0E0E8';
+                // Main body - more detailed capsule with enhanced gradients
+                // Draw soft shadow under lander for grounding effect
+                ctx.save();
+                const groundY = getTerrainHeightAt(lander.x);
+                const heightAboveGround = groundY - (lander.y + 20);
+                if (heightAboveGround < 100 && heightAboveGround > 0) {
+                    const shadowScale = Math.max(0.2, 0.6 * (1 - heightAboveGround / 100));
+                    const shadowAlpha = Math.max(0.05, 0.15 * (1 - heightAboveGround / 100));
+                    
+                    // Create soft diffused shadow with multiple layers
+                    ctx.save();
+                    ctx.rotate(-lander.angle); // Counter-rotate for shadow
+                    
+                    // Outer soft blur layer
+                    const shadowGradient = ctx.createRadialGradient(0, groundY - lander.y, 0, 0, groundY - lander.y, 30 * shadowScale);
+                    shadowGradient.addColorStop(0, `rgba(0, 0, 0, ${shadowAlpha * 0.6})`);
+                    shadowGradient.addColorStop(0.4, `rgba(0, 0, 0, ${shadowAlpha * 0.3})`);
+                    shadowGradient.addColorStop(1, 'transparent');
+                    ctx.fillStyle = shadowGradient;
+                    ctx.beginPath();
+                    ctx.ellipse(0, groundY - lander.y, 30 * shadowScale, 8 * shadowScale, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.restore();
+                }
+                ctx.restore();
+                
+                // Lander glow effect when thrusting
+                if (keys['arrowup'] && fuel > 0 && !lander.controlsDisabled) {
+                    const thrustGlow = ctx.createRadialGradient(0, 10, 0, 0, 10, 40);
+                    thrustGlow.addColorStop(0, 'rgba(255, 200, 100, 0.2)');
+                    thrustGlow.addColorStop(0.5, 'rgba(255, 150, 50, 0.1)');
+                    thrustGlow.addColorStop(1, 'transparent');
+                    ctx.fillStyle = thrustGlow;
+                    ctx.beginPath();
+                    ctx.arc(0, 10, 40, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                // Main body hull with enhanced metallic gradient
+                const hullGradient = ctx.createLinearGradient(-20, -20, 20, 15);
+                hullGradient.addColorStop(0, '#F8F8FF');
+                hullGradient.addColorStop(0.2, '#E8E8F0');
+                hullGradient.addColorStop(0.5, '#D8D8E5');
+                hullGradient.addColorStop(0.8, '#C8C8D5');
+                hullGradient.addColorStop(1, '#B8B8C8');
+                
+                ctx.fillStyle = hullGradient;
                 ctx.beginPath();
                 ctx.moveTo(-15, -20);
                 ctx.quadraticCurveTo(-18, -20, -18, -15);
@@ -1513,120 +1961,269 @@
                 ctx.closePath();
                 ctx.fill();
                 
-                // Body gradient - use cached
-                ctx.fillStyle = cachedBodyGradient;
-                ctx.fill();
-                
-                // Outline
-                ctx.strokeStyle = '#999999';
+                // Hull highlight on top edge
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
                 ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(-14, -19);
+                ctx.quadraticCurveTo(0, -21, 14, -19);
                 ctx.stroke();
                 
-                // Viewport with reflection effect - use cached
-                ctx.fillStyle = cachedViewportGradient;
+                // Outline
+                ctx.strokeStyle = '#888899';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                
+                // Viewport with enhanced reflection effect
+                const viewportGradient = ctx.createRadialGradient(1, -12, 1, 0, -10, 8);
+                viewportGradient.addColorStop(0, '#FFFFFF');
+                viewportGradient.addColorStop(0.2, '#AACCFF');
+                viewportGradient.addColorStop(0.5, '#6699DD');
+                viewportGradient.addColorStop(1, '#3366AA');
+                ctx.fillStyle = viewportGradient;
                 ctx.beginPath();
                 ctx.arc(0, -10, 7, 0, Math.PI * 2);
                 ctx.fill();
                 
-                // Viewport border
-                ctx.strokeStyle = '#666666';
-                ctx.lineWidth = 1.5;
+                // Viewport reflection highlight
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                ctx.beginPath();
+                ctx.ellipse(-2, -12, 2, 1.5, -0.5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Viewport border with glow
+                ctx.strokeStyle = '#4466AA';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.strokeStyle = 'rgba(100, 150, 255, 0.3)';
+                ctx.lineWidth = 4;
                 ctx.stroke();
                 
-                // Decorative details - antenna
-                ctx.strokeStyle = '#999999';
-                ctx.lineWidth = 1;
+                // Decorative details - antenna with improved design
+                ctx.strokeStyle = '#AAAAAA';
+                ctx.lineWidth = 1.5;
                 ctx.beginPath();
                 ctx.moveTo(0, -20);
-                ctx.lineTo(0, -28);
-                ctx.lineTo(3, -30);
+                ctx.lineTo(0, -30);
                 ctx.stroke();
                 
-                // Landing gear - more detailed
-                ctx.strokeStyle = '#777777';
-                ctx.lineWidth = 2;
+                // Antenna tip with glow
+                ctx.fillStyle = '#FF4444';
+                ctx.beginPath();
+                ctx.arc(0, -31, 2, 0, Math.PI * 2);
+                ctx.fill();
+                // Antenna tip glow
+                const antennaGlow = ctx.createRadialGradient(0, -31, 0, 0, -31, 6);
+                antennaGlow.addColorStop(0, 'rgba(255, 100, 100, 0.5)');
+                antennaGlow.addColorStop(1, 'transparent');
+                ctx.fillStyle = antennaGlow;
+                ctx.beginPath();
+                ctx.arc(0, -31, 6, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Landing gear - more detailed with metallic look
+                const legGradient = ctx.createLinearGradient(-20, 8, -20, 25);
+                legGradient.addColorStop(0, '#888899');
+                legGradient.addColorStop(0.5, '#666677');
+                legGradient.addColorStop(1, '#555566');
+                ctx.strokeStyle = legGradient;
+                ctx.lineWidth = 3;
                 
                 // Left leg
                 ctx.beginPath();
                 ctx.moveTo(-12, 8);
                 ctx.lineTo(-20, 25);
                 ctx.stroke();
+                
+                // Left foot pad
+                ctx.fillStyle = '#555566';
+                ctx.beginPath();
+                ctx.ellipse(-20, 26, 5, 2, 0, 0, Math.PI * 2);
+                ctx.fill();
 
                 // Right leg
                 ctx.beginPath();
                 ctx.moveTo(12, 8);
                 ctx.lineTo(20, 25);
                 ctx.stroke();
-
-                // Small details - side thrusters
-                ctx.fillStyle = '#888888';
+                
+                // Right foot pad
                 ctx.beginPath();
-                ctx.rect(-16, -2, 2, 5);
-                ctx.rect(14, -2, 2, 5);
+                ctx.ellipse(20, 26, 5, 2, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Side thrusters with nozzle detail
+                const thrusterGradient = ctx.createLinearGradient(-18, -2, -14, -2);
+                thrusterGradient.addColorStop(0, '#666677');
+                thrusterGradient.addColorStop(0.5, '#888899');
+                thrusterGradient.addColorStop(1, '#777788');
+                ctx.fillStyle = thrusterGradient;
+                ctx.beginPath();
+                ctx.roundRect(-18, -3, 4, 6, 1);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.roundRect(14, -3, 4, 6, 1);
                 ctx.fill();
                 
-                // Panel lines
-                ctx.strokeStyle = '#AAAAAA';
+                // Panel lines with subtle styling
+                ctx.strokeStyle = 'rgba(150, 150, 170, 0.5)';
                 ctx.lineWidth = 0.5;
                 ctx.beginPath();
-                ctx.moveTo(-10, -15);
-                ctx.lineTo(10, -15);
-                ctx.moveTo(-12, 0);
-                ctx.lineTo(12, 0);
+                ctx.moveTo(-12, -15);
+                ctx.lineTo(12, -15);
+                ctx.moveTo(-14, 0);
+                ctx.lineTo(14, 0);
                 ctx.stroke();
+                
+                // Rivet details
+                ctx.fillStyle = 'rgba(100, 100, 120, 0.5)';
+                const rivetPositions = [[-12, -17], [12, -17], [-12, 7], [12, 7]];
+                for (let pos of rivetPositions) {
+                    ctx.beginPath();
+                    ctx.arc(pos[0], pos[1], 1, 0, Math.PI * 2);
+                    ctx.fill();
+                }
 
+                // Enhanced side thruster effects (A key - left thrust)
                 if (keys['a'] && fuel > 0 && !lander.controlsDisabled) {
-                    ctx.fillStyle = 'orange';
+                    const thrustLen = 12 + Math.random() * 8;
+                    const thrustGrad = ctx.createLinearGradient(-15, 0, -15 - thrustLen, 0);
+                    thrustGrad.addColorStop(0, 'white');
+                    thrustGrad.addColorStop(0.3, '#FFDD66');
+                    thrustGrad.addColorStop(0.7, '#FF8800');
+                    thrustGrad.addColorStop(1, 'rgba(255, 100, 0, 0.3)');
+                    ctx.fillStyle = thrustGrad;
                     ctx.beginPath();
-                    ctx.moveTo(-15, -2.5);
-                    ctx.lineTo(-25 - Math.random() * 5, 0);
-                    ctx.lineTo(-15, 2.5);
+                    ctx.moveTo(-15, -3);
+                    ctx.lineTo(-15 - thrustLen, 0);
+                    ctx.lineTo(-15, 3);
                     ctx.closePath();
+                    ctx.fill();
+                    // Glow
+                    ctx.fillStyle = 'rgba(255, 200, 100, 0.3)';
+                    ctx.beginPath();
+                    ctx.arc(-18, 0, 6, 0, Math.PI * 2);
                     ctx.fill();
                 }
 
+                // Enhanced side thruster effects (D key - right thrust)
                 if (keys['d'] && fuel > 0 && !lander.controlsDisabled) {
-                    ctx.fillStyle = 'orange';
+                    const thrustLen = 12 + Math.random() * 8;
+                    const thrustGrad = ctx.createLinearGradient(15, 0, 15 + thrustLen, 0);
+                    thrustGrad.addColorStop(0, 'white');
+                    thrustGrad.addColorStop(0.3, '#FFDD66');
+                    thrustGrad.addColorStop(0.7, '#FF8800');
+                    thrustGrad.addColorStop(1, 'rgba(255, 100, 0, 0.3)');
+                    ctx.fillStyle = thrustGrad;
                     ctx.beginPath();
-                    ctx.moveTo(15, -2.5);
-                    ctx.lineTo(25 - Math.random() * 5, 0);
-                    ctx.lineTo(15, 2.5);
+                    ctx.moveTo(15, -3);
+                    ctx.lineTo(15 + thrustLen, 0);
+                    ctx.lineTo(15, 3);
                     ctx.closePath();
+                    ctx.fill();
+                    // Glow
+                    ctx.fillStyle = 'rgba(255, 200, 100, 0.3)';
+                    ctx.beginPath();
+                    ctx.arc(18, 0, 6, 0, Math.PI * 2);
                     ctx.fill();
                 }
 
+                // Enhanced rotation thruster effects (Right arrow - rotate right)
                 if (keys['arrowright'] && fuel > 0 && !lander.controlsDisabled) {
-                    ctx.fillStyle = 'white';
+                    const thrustLen = 10 + Math.random() * 6;
+                    const thrustGrad = ctx.createLinearGradient(-15, -14, -15 - thrustLen, -14);
+                    thrustGrad.addColorStop(0, 'white');
+                    thrustGrad.addColorStop(0.4, '#AADDFF');
+                    thrustGrad.addColorStop(1, 'rgba(150, 200, 255, 0.2)');
+                    ctx.fillStyle = thrustGrad;
                     ctx.beginPath();
-                    ctx.moveTo(-15, -16.5);
-                    ctx.lineTo(-25 - Math.random() * 5, -10);
-                    ctx.lineTo(-15, -12.5);
+                    ctx.moveTo(-15, -16);
+                    ctx.lineTo(-15 - thrustLen, -14);
+                    ctx.lineTo(-15, -12);
                     ctx.closePath();
+                    ctx.fill();
+                    // Glow
+                    ctx.fillStyle = 'rgba(150, 200, 255, 0.4)';
+                    ctx.beginPath();
+                    ctx.arc(-17, -14, 5, 0, Math.PI * 2);
                     ctx.fill();
                 }
 
+                // Enhanced rotation thruster effects (Left arrow - rotate left)
                 if (keys['arrowleft'] && fuel > 0 && !lander.controlsDisabled) {
-                    ctx.fillStyle = 'white';
+                    const thrustLen = 10 + Math.random() * 6;
+                    const thrustGrad = ctx.createLinearGradient(15, -14, 15 + thrustLen, -14);
+                    thrustGrad.addColorStop(0, 'white');
+                    thrustGrad.addColorStop(0.4, '#AADDFF');
+                    thrustGrad.addColorStop(1, 'rgba(150, 200, 255, 0.2)');
+                    ctx.fillStyle = thrustGrad;
                     ctx.beginPath();
-                    ctx.moveTo(15, -16.5);
-                    ctx.lineTo(25 - Math.random() * 5, -10);
-                    ctx.lineTo(15, -12.5);
+                    ctx.moveTo(15, -16);
+                    ctx.lineTo(15 + thrustLen, -14);
+                    ctx.lineTo(15, -12);
                     ctx.closePath();
+                    ctx.fill();
+                    // Glow
+                    ctx.fillStyle = 'rgba(150, 200, 255, 0.4)';
+                    ctx.beginPath();
+                    ctx.arc(17, -14, 5, 0, Math.PI * 2);
                     ctx.fill();
                 }
 
                 ctx.restore();
             }
+            
+            // Draw floating score texts
+            for (let scoreText of floatingScoreTexts) {
+                ctx.save();
+                ctx.globalAlpha = scoreText.alpha;
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                // Glow effect
+                ctx.shadowColor = '#00FF00';
+                ctx.shadowBlur = 15;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+                
+                // Draw text with green glow
+                ctx.fillStyle = '#00FF00';
+                ctx.fillText(scoreText.text, scoreText.x - cameraX, scoreText.y - cameraY);
+                
+                // Draw again for stronger glow
+                ctx.fillText(scoreText.text, scoreText.x - cameraX, scoreText.y - cameraY);
+                
+                ctx.restore();
+            }
 
             ctx.restore();
+            
+            // Draw subtle vignette effect (screen overlay)
+            const vignetteGradient = ctx.createRadialGradient(width/2, height/2, height * 0.4, width/2, height/2, height * 1.0);
+            vignetteGradient.addColorStop(0, 'transparent');
+            vignetteGradient.addColorStop(0.8, 'transparent');
+            vignetteGradient.addColorStop(1, 'rgba(0, 0, 10, 0.2)');
+            ctx.fillStyle = vignetteGradient;
+            ctx.fillRect(0, 0, width, height);
+            
+            // Draw scanline effect (subtle CRT feel)
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
+            for (let y = 0; y < height; y += 4) {
+                ctx.fillRect(0, y, width, 2);
+            }
         }
 
         let lastTime = 0;
         let hudUpdateCounter = 0;  // Add counter for throttling HUD updates
         let hudUpdateFrequency = 5;  // Only update every 5 frames
+        let velocityUpdateCounter = 0; // Separate counter for velocity updates
+        let velocityUpdateFrequency = 8; // Update velocity every 8 frames (~7-8 times per second at 60fps)
         let lastHeightDisplay = 0;
         let lastVelocityDisplay = 0;
         let lastHorizontalVelocityDisplay = 0; // Add variable for horizontal velocity
+        let smoothedVerticalVelocity = 0;
+        let smoothedHorizontalVelocity = 0;
 
         // Track last HUD values to avoid unnecessary DOM updates
         let lastHudState = {
@@ -1645,7 +2242,6 @@
             hudUpdateCounter = 0;
             
             const groundY = getTerrainHeightAt(lander.x);
-            const heightAboveTerrain = groundY - (lander.y + 20);
 
             const fuelPct = Math.floor(Math.max(0, Math.min((fuel / 1700) * 100, 100)));
             const oxygenPct = Math.floor(Math.max(0, Math.min((oxygen / 60) * 100, 100)));
@@ -1656,11 +2252,16 @@
                 hudElements.miniFuelValue.textContent = fuelPct + '%';
                 hudElements.miniFuelBar.style.width = fuelPct + '%';
                 
-                // Update fuel color
-                const newFuelColor = fuelPct > 50 ? '#00c400' : (fuelPct > 20 ? 'yellow' : 'red');
-                if (newFuelColor !== lastHudState.fuelColor) {
-                    lastHudState.fuelColor = newFuelColor;
-                    hudElements.miniFuelBar.style.backgroundColor = newFuelColor;
+                // Update fuel color with enhanced gradients
+                if (fuelPct > 50) {
+                    hudElements.miniFuelBar.style.background = 'linear-gradient(180deg, #00ff66 0%, #00dd44 50%, #00bb33 100%)';
+                    hudElements.miniFuelBar.style.boxShadow = '0 0 12px rgba(0, 255, 100, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4)';
+                } else if (fuelPct > 20) {
+                    hudElements.miniFuelBar.style.background = 'linear-gradient(180deg, #ffee00 0%, #ddcc00 50%, #bbaa00 100%)';
+                    hudElements.miniFuelBar.style.boxShadow = '0 0 12px rgba(255, 230, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4)';
+                } else {
+                    hudElements.miniFuelBar.style.background = 'linear-gradient(180deg, #ff4444 0%, #dd2222 50%, #bb0000 100%)';
+                    hudElements.miniFuelBar.style.boxShadow = '0 0 15px rgba(255, 50, 50, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.3)';
                 }
             }
             
@@ -1669,11 +2270,16 @@
                 hudElements.miniOxygenValue.textContent = oxygenPct + '%';
                 hudElements.miniOxygenBar.style.width = oxygenPct + '%';
                 
-                // Update oxygen color
-                const newOxygenColor = oxygen > 10 ? '#009dff' : (oxygen > 5 ? 'orange' : 'red');
-                if (newOxygenColor !== lastHudState.oxygenColor) {
-                    lastHudState.oxygenColor = newOxygenColor;
-                    hudElements.miniOxygenBar.style.backgroundColor = newOxygenColor;
+                // Update oxygen color with enhanced gradients
+                if (oxygen > 10) {
+                    hudElements.miniOxygenBar.style.background = 'linear-gradient(180deg, #00d4ff 0%, #00a8dd 50%, #0088bb 100%)';
+                    hudElements.miniOxygenBar.style.boxShadow = '0 0 12px rgba(0, 200, 255, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4)';
+                } else if (oxygen > 5) {
+                    hudElements.miniOxygenBar.style.background = 'linear-gradient(180deg, #ffaa44 0%, #ee8822 50%, #cc6600 100%)';
+                    hudElements.miniOxygenBar.style.boxShadow = '0 0 12px rgba(255, 150, 50, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4)';
+                } else {
+                    hudElements.miniOxygenBar.style.background = 'linear-gradient(180deg, #ff4444 0%, #dd2222 50%, #bb0000 100%)';
+                    hudElements.miniOxygenBar.style.boxShadow = '0 0 15px rgba(255, 50, 50, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.3)';
                 }
             }
 
@@ -1687,24 +2293,32 @@
                 hudElements.highScoreValue.textContent = highScore;
             }
             
-            // Update velocity and height displays
-            const absoluteVelocity = Math.floor(Math.abs(lander.vy));
-            const absoluteHorizontalVelocity = Math.floor(Math.abs(lander.vx));
+            // Update height display (can update more frequently)
+            const heightAboveTerrain = groundY - (lander.y + 26);
             const heightInMeters = Math.floor(heightAboveTerrain / 10);
-            
-            if (absoluteVelocity !== lastVelocityDisplay) {
-                lastVelocityDisplay = absoluteVelocity;
-                hudElements.verticalVelocityValue.textContent = absoluteVelocity;
-            }
-            
-            if (absoluteHorizontalVelocity !== lastHorizontalVelocityDisplay) {
-                lastHorizontalVelocityDisplay = absoluteHorizontalVelocity;
-                hudElements.horizontalVelocityValue.textContent = absoluteHorizontalVelocity;
-            }
-            
             if (heightInMeters !== lastHeightDisplay) {
                 lastHeightDisplay = heightInMeters;
                 hudElements.heightValue.textContent = heightInMeters + 'm';
+            }
+            
+            // Update velocity displays less frequently with smoothing
+            velocityUpdateCounter++;
+            if (velocityUpdateCounter >= velocityUpdateFrequency) {
+                velocityUpdateCounter = 0;
+                
+                // Scale down velocity values for display (divide by 10 for more readable numbers)
+                smoothedVerticalVelocity = Math.floor(Math.abs(lander.vy) / 10);
+                smoothedHorizontalVelocity = Math.floor(Math.abs(lander.vx) / 10);
+                
+                if (smoothedVerticalVelocity !== lastVelocityDisplay) {
+                    lastVelocityDisplay = smoothedVerticalVelocity;
+                    hudElements.verticalVelocityValue.textContent = smoothedVerticalVelocity;
+                }
+                
+                if (smoothedHorizontalVelocity !== lastHorizontalVelocityDisplay) {
+                    lastHorizontalVelocityDisplay = smoothedHorizontalVelocity;
+                    hudElements.horizontalVelocityValue.textContent = smoothedHorizontalVelocity;
+                }
             }
         }
 
@@ -1894,6 +2508,17 @@
                 fuel = Math.min(fuel, 1700);
                 oxygen = Math.min(oxygen, 60);
                 
+                // Add floating score text
+                const totalPoints = platform.points + 50; // platform points + landing bonus
+                floatingScoreTexts.push({
+                    x: lander.x,
+                    y: lander.y - 50,
+                    text: '+' + totalPoints,
+                    alpha: 1.0,
+                    life: 2.0, // 2 seconds
+                    vy: -30 // Float upward
+                });
+                
                 // Optimize sound playback for minimal delay
                 try {
                     fuelUpSound.pause(); // Stop any existing playback
@@ -2013,6 +2638,7 @@
             craterMarks = [];
             rocks = [];
             dustParticles = [];
+            floatingScoreTexts = [];
             document.getElementById('message').style.display = 'none';
             lander.vx = 0;
             lander.vy = 0;
@@ -2127,6 +2753,15 @@
                 dust.alpha = Math.max(dust.lifespan / 1.0, 0);
             }
             dustParticles = dustParticles.filter(dust => dust.alpha > 0 && dust.x > cameraX - 50 && dust.x < cameraX + width + 50 && dust.y > cameraY - 50 && dust.y < cameraY + height + 50);
+        }
+        
+        function updateFloatingScoreTexts(deltaTimeSec) {
+            for (let scoreText of floatingScoreTexts) {
+                scoreText.y += scoreText.vy * deltaTimeSec;
+                scoreText.life -= deltaTimeSec;
+                scoreText.alpha = Math.max(scoreText.life / 2.0, 0);
+            }
+            floatingScoreTexts = floatingScoreTexts.filter(st => st.life > 0);
         }
 
         function updateMeteorites(deltaTimeSec) {
