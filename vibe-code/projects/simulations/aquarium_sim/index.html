@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aquarium Simulator</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐠</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+        <!-- ============================================
+             TOP BAR
+             ============================================ -->
+        <header class="topbar">
+            <div class="topbar-left">
+                <div class="logo">
+                    <span class="logo-icon">🐠</span>
+                    <span>Aquarium Sim</span>
+                </div>
+                <div class="time-display">
+                    <span class="time-icon">🕐</span>
+                    <span id="timeDisplay">Day 1, 00:00</span>
+                </div>
+            </div>
+            
+            <div class="topbar-center">
+                <div class="speed-controls">
+                    <button class="speed-btn active" data-speed="1">1×</button>
+                    <button class="speed-btn" data-speed="2">2×</button>
+                    <button class="speed-btn" data-speed="5">5×</button>
+                    <button class="speed-btn" data-speed="10">10×</button>
+                </div>
+                <button class="pause-btn" id="pauseBtn" title="Pause/Resume">⏸️</button>
+                
+                <div class="warnings-container" id="warningsContainer">
+                    <!-- Warnings will be inserted here -->
+                </div>
+            </div>
+            
+            <div class="topbar-right">
+                <button class="icon-btn" id="photoBtn" title="Take Photo">📷</button>
+                <button class="icon-btn" id="exportBtn" title="Export Save">💾</button>
+                <button class="icon-btn" id="importBtn" title="Import Save">📂</button>
+                <button class="icon-btn" id="newTankBtn" title="New Tank">🆕</button>
+                <span class="fps-display" id="fpsDisplay">60 FPS</span>
+            </div>
+        </header>
+        
+        <!-- ============================================
+             MAIN TANK AREA
+             ============================================ -->
+        <main class="main-area">
+            <canvas id="tankCanvas"></canvas>
+            
+            <!-- Placement Indicator -->
+            <div class="placement-indicator" id="placementIndicator">
+                Click to place: <strong id="placementName">---</strong>
+                <span>(Right-click to cancel)</span>
+            </div>
+        </main>
+        
+        <!-- ============================================
+             SIDEBAR
+             ============================================ -->
+        <aside class="sidebar">
+            <nav class="tab-nav">
+                <button class="tab-btn active" data-tab="add">Add</button>
+                <button class="tab-btn" data-tab="manage">Manage</button>
+                <button class="tab-btn" data-tab="actions">Actions</button>
+                <button class="tab-btn" data-tab="stats">Stats</button>
+                <button class="tab-btn" data-tab="log">Log</button>
+            </nav>
+            
+            <!-- Add Tab -->
+            <div class="tab-content active" id="add-tab">
+                <nav class="category-nav">
+                    <button class="category-btn active" data-category="fish">🐟 Fish</button>
+                    <button class="category-btn" data-category="invertebrates">🦐 Inverts</button>
+                    <button class="category-btn" data-category="plants">🌿 Plants</button>
+                    <button class="category-btn" data-category="equipment">⚙️ Equipment</button>
+                </nav>
+                <div class="shop-items" id="shopItems">
+                    <!-- Shop items will be populated by JS -->
+                </div>
+            </div>
+            
+            <!-- Manage Tab -->
+            <div class="tab-content" id="manage-tab">
+                <div id="entityList">
+                    <!-- Entity list will be populated by JS -->
+                </div>
+            </div>
+            
+            <!-- Actions Tab -->
+            <div class="tab-content" id="actions-tab">
+                <div class="actions-section">
+                    <h4>Daily Care</h4>
+                    <button class="action-btn primary" id="feedBtn">
+                        <span class="icon">🍽️</span>
+                        <span>Feed Fish</span>
+                    </button>
+                    <button class="action-btn" id="waterChangeBtn">
+                        <span class="icon">💧</span>
+                        <span>Water Change</span>
+                    </button>
+                    <button class="action-btn" id="cleanFilterBtn">
+                        <span class="icon">🔧</span>
+                        <span>Clean Filter</span>
+                    </button>
+                </div>
+                
+                <div class="actions-section">
+                    <h4>Treatments</h4>
+                    <button class="action-btn" id="bacteriaBtn">
+                        <span class="icon">🦠</span>
+                        <span>Bacteria Starter</span>
+                    </button>
+                    <button class="action-btn" id="conditionerBtn">
+                        <span class="icon">💊</span>
+                        <span>Water Conditioner</span>
+                    </button>
+                    <button class="action-btn" id="bufferBtn">
+                        <span class="icon">⚗️</span>
+                        <span>pH Buffer</span>
+                    </button>
+                    <button class="action-btn" id="fertilizerBtn">
+                        <span class="icon">🌱</span>
+                        <span>Plant Fertilizer</span>
+                    </button>
+                    <button class="action-btn" id="algaeTreatBtn">
+                        <span class="icon">🧪</span>
+                        <span>Algae Treatment</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Stats Tab -->
+            <div class="tab-content" id="stats-tab">
+                <div id="statsContent">
+                    <!-- Stats will be populated by JS -->
+                </div>
+            </div>
+            
+            <!-- Log Tab -->
+            <div class="tab-content" id="log-tab">
+                <div id="logContent">
+                    <!-- Log entries will be populated by JS -->
+                </div>
+            </div>
+        </aside>
+        
+        <!-- ============================================
+             CHARTS PANEL
+             ============================================ -->
+        <section class="charts-panel">
+            <div class="charts-header">
+                <h3>Water Parameters</h3>
+                <div class="tips-container" id="tipsContainer">
+                    <!-- Tips will be inserted here -->
+                </div>
+            </div>
+            <div class="charts-container">
+                <canvas id="chartsCanvas"></canvas>
+                <div id="miniDashboard">
+                    <!-- Mini dashboard will be populated by JS -->
+                </div>
+            </div>
+        </section>
+    </div>
+    
+    <!-- ============================================
+         MODALS
+         ============================================ -->
+    
+    <!-- Water Change Modal -->
+    <div class="modal" id="waterChangeModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <button class="modal-close">&times;</button>
+            <h3>💧 Water Change</h3>
+            <div class="modal-body">
+                <p style="margin-bottom: 16px; color: var(--text-secondary);">
+                    Select how much water to change. Larger changes remove more waste but may stress fish.
+                </p>
+                <div class="slider-container">
+                    <input type="range" id="waterChangeSlider" min="10" max="80" value="25" step="5">
+                    <div class="slider-value"><span id="waterChangeValue">25%</span></div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-close">Cancel</button>
+                <button class="modal-btn primary" id="confirmWaterChange">Perform Change</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Scripts (loaded in order, no modules for file:// compatibility) -->
+    <script src="utils.js"></script>
+    <script src="data/species.js"></script>
+    <script src="sim.js"></script>
+    <script src="render.js"></script>
+    <script src="charts.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
