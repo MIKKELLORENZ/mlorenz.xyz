@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Privacy Manifest for Moon Lander iOS App
+    Required for App Store submission as of iOS 17 / Spring 2024
+    
+    This manifest declares what privacy-sensitive APIs and data the app accesses.
+-->
+<plist version="1.0">
+<dict>
+    <!-- Privacy Nutrition Label Data -->
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array>
+        <!-- No data collected - the game stores high scores locally only -->
+    </array>
+    
+    <!-- Tracking Declaration -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+    
+    <key>NSPrivacyTrackingDomains</key>
+    <array>
+        <!-- No tracking domains used -->
+    </array>
+    
+    <!-- Required Reason APIs -->
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <!-- UserDefaults / Preferences API for storing high scores -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+                <!-- Reason: The app accesses user defaults to store game preferences and high scores -->
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

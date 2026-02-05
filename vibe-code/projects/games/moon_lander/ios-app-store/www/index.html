@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Moon Lander">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="theme-color" content="#000000">
+    
+    <!-- iOS-specific meta tags -->
+    <meta name="apple-touch-fullscreen" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <!-- Prevent text selection and callouts -->
+    <meta name="touch-callout" content="none">
+    
+    <title>Moon Lander</title>
+    
+    <!-- App Icons for iOS -->
+    <link rel="apple-touch-icon" href="icons/icon-180.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="icons/icon-167.png">
+    
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/moon_lander.css">
+    
+    <style>
+        /* iOS-specific critical styles */
+        * {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        html, body {
+            position: fixed;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background-color: #000000;
+        }
+        
+        /* Safe area insets for notched devices */
+        body {
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+            padding-left: env(safe-area-inset-left);
+            padding-right: env(safe-area-inset-right);
+        }
+        
+        canvas {
+            display: block;
+            background: radial-gradient(circle at top, #000022, #000000);
+            touch-action: none;
+        }
+        
+        /* Mobile touch controls styling - Always visible on iOS */
+        #touchControls {
+            display: block;
+            position: fixed;
+            bottom: 10px;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            text-align: center;
+            pointer-events: none;
+            padding-left: env(safe-area-inset-left);
+            padding-right: env(safe-area-inset-right);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        
+        .control-pad {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        
+        .touch-btn {
+            width: clamp(60px, 15vw, 90px);
+            height: clamp(60px, 15vw, 90px);
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.25);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(24px, 6vw, 36px);
+            color: white;
+            margin: 0 8px;
+            pointer-events: auto;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: none;
+            transition: background-color 0.1s ease;
+        }
+        
+        .touch-btn:active, .touch-btn.active {
+            background-color: rgba(255, 255, 255, 0.45);
+            transform: scale(0.95);
+        }
+        
+        /* HUD adjustments for iOS */
+        #mini-hud {
+            top: max(10px, env(safe-area-inset-top, 10px)) !important;
+            left: max(10px, env(safe-area-inset-left, 10px)) !important;
+            width: 45% !important;
+            max-width: 200px !important;
+        }
+        
+        #hud {
+            top: max(10px, env(safe-area-inset-top, 10px)) !important;
+            right: max(10px, env(safe-area-inset-right, 10px)) !important;
+            left: auto !important;
+            width: 45% !important;
+            max-width: 200px !important;
+            font-size: 13px !important;
+            padding: 8px !important;
+        }
+        
+        /* Loading screen */
+        #loadingScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(ellipse at center, #0a0a2e 0%, #050510 50%, #000005 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+            box-sizing: border-box;
+        }
+        
+        /* Message overlay */
+        #message {
+            max-width: calc(100vw - 40px - env(safe-area-inset-left) - env(safe-area-inset-right));
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- Touch controls for iOS -->
+    <div id="touchControls">
+        <div class="control-pad">
+            <div id="leftRotateBtn" class="touch-btn">↺</div>
+            <div id="mainThrustBtn" class="touch-btn">▲</div>
+            <div id="rightRotateBtn" class="touch-btn">↻</div>
+        </div>
+        <div class="control-pad">
+            <div id="leftTranslateBtn" class="touch-btn">◀</div>
+            <div id="rightTranslateBtn" class="touch-btn">▶</div>
+        </div>
+    </div>
+    
+    <!-- Mini HUD for oxygen and fuel -->
+    <div id="mini-hud">
+        <div class="mini-label">
+            <span>🫁 OXYGEN</span>
+            <span id="mini-oxygen-value">100%</span>
+        </div>
+        <div class="mini-bar-container">
+            <div id="mini-oxygen-bar"></div>
+        </div>
+        
+        <div class="mini-label">
+            <span>⛽ FUEL</span>
+            <span id="mini-fuel-value">100%</span>
+        </div>
+        <div class="mini-bar-container">
+            <div id="mini-fuel-bar"></div>
+        </div>
+    </div>
+    
+    <!-- HUD -->
+    <div id="hud">
+        <div><span style="color: #8090b0;">SCORE</span><span id="scoreValue">0</span></div>
+        <div><span style="color: #8090b0;">HIGH SCORE</span><span id="highScoreValue">0</span></div>
+        <div style="margin-top: 8px; border-top: 1px solid rgba(100,150,255,0.15); padding-top: 8px;">
+            <span style="color: #8090b0;">V-SPEED</span><span id="verticalVelocityValue">0</span><span style="color: #6080a0; font-size: 10px;"> m/s</span>
+        </div>
+        <div><span style="color: #8090b0;">H-SPEED</span><span id="horizontalVelocityValue">0</span><span style="color: #6080a0; font-size: 10px;"> m/s</span></div>
+        <div><span style="color: #8090b0;">ALTITUDE</span><span id="heightValue">0m</span></div>
+    </div>
+
+    <div id="message">
+        <div id="gameMessage">Game Over!</div>
+        <button id="restartButton">Restart</button>
+    </div>
+    
+    <div id="loadingScreen">
+        <div id="progressContainer">
+            <div id="progressBar"></div>
+        </div>
+        <div id="progressText">0%</div>
+        <button id="startButton">START MISSION</button>
+    </div>
+
+    <!-- Capacitor Core -->
+    <script src="js/capacitor.js"></script>
+    
+    <!-- Game Logic -->
+    <script src="js/game.js"></script>
+</body>
+</html>

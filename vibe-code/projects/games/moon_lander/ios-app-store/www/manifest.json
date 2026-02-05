@@ -1,0 +1,62 @@
+{
+    "name": "Moon Lander",
+    "short_name": "MoonLander",
+    "description": "Navigate your lunar lander through treacherous terrain and land safely on designated platforms",
+    "version": "1.0.0",
+    "start_url": "/index.html",
+    "display": "fullscreen",
+    "orientation": "any",
+    "background_color": "#000000",
+    "theme_color": "#000000",
+    "icons": [
+        {
+            "src": "icons/icon-40.png",
+            "sizes": "40x40",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/icon-60.png",
+            "sizes": "60x60",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/icon-76.png",
+            "sizes": "76x76",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/icon-120.png",
+            "sizes": "120x120",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/icon-152.png",
+            "sizes": "152x152",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/icon-167.png",
+            "sizes": "167x167",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/icon-180.png",
+            "sizes": "180x180",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/icon-1024.png",
+            "sizes": "1024x1024",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": ["games", "entertainment"],
+    "screenshots": [],
+    "related_applications": [
+        {
+            "platform": "itunes",
+            "url": "https://apps.apple.com/app/moon-lander/id[YOUR_APP_ID]"
+        }
+    ]
+}

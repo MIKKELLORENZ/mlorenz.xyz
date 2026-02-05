@@ -51,7 +51,8 @@ class AudioEngine {
         this.startTime = this.audioContext.currentTime - this.pauseTime;
 
         this.tracks.forEach(track => {
-            if (track.buffer) {
+            // Play if track has a buffer OR has regions with buffers
+            if (track.buffer || (track.regions && track.regions.length > 0)) {
                 track.play(this.pauseTime);
             }
         });
@@ -119,12 +120,18 @@ class AudioEngine {
     }
 
     updateDuration() {
-        this.duration = Math.max(...this.tracks.map(t => t.duration || 0), 0);
+        const trackDurations = this.tracks.map(track => {
+            if (track.regions && track.regions.length > 0) {
+                return Math.max(...track.regions.map(r => r.startTime + r.duration));
+            }
+            return track.duration || 0;
+        });
+        this.duration = Math.max(...trackDurations, 0);
     }
 
     async exportAudio() {
         // Create offline context for rendering
-        const maxDuration = Math.max(...this.tracks.map(t => t.duration || 0));
+        const maxDuration = this.duration || Math.max(...this.tracks.map(t => t.duration || 0));
         const offlineContext = new OfflineAudioContext(
             2, // stereo
             maxDuration * this.audioContext.sampleRate,
@@ -233,6 +240,7 @@ class Track {
         this.gainNode = null;
         this.panNode = null;
         this.eqLow = null;
+        this.eqLowMid = null;
         this.eqMid = null;
         this.eqHigh = null;
         this.compressor = null;
@@ -246,6 +254,8 @@ class Track {
         this.duration = 0;
         this.startOffset = 0;
         this.isMuted = false;
+        this.isSoloed = false;
+        this.isArmed = false;
         this.regions = []; // Audio regions
         this.automation = {
             volume: [],
@@ -265,12 +275,18 @@ class Track {
         this.panNode = this.audioContext.createStereoPanner();
         this.panNode.pan.value = 0;
         
-        // 3-band EQ
+        // 4-band EQ
         this.eqLow = this.audioContext.createBiquadFilter();
-        this.eqLow.type = 'peaking';
+        this.eqLow.type = 'lowshelf';
         this.eqLow.frequency.value = 100;
         this.eqLow.Q.value = 1;
         this.eqLow.gain.value = 0;
+        
+        this.eqLowMid = this.audioContext.createBiquadFilter();
+        this.eqLowMid.type = 'peaking';
+        this.eqLowMid.frequency.value = 400;
+        this.eqLowMid.Q.value = 1;
+        this.eqLowMid.gain.value = 0;
         
         this.eqMid = this.audioContext.createBiquadFilter();
         this.eqMid.type = 'peaking';
@@ -279,7 +295,7 @@ class Track {
         this.eqMid.gain.value = 0;
         
         this.eqHigh = this.audioContext.createBiquadFilter();
-        this.eqHigh.type = 'peaking';
+        this.eqHigh.type = 'highshelf';
         this.eqHigh.frequency.value = 8000;
         this.eqHigh.Q.value = 1;
         this.eqHigh.gain.value = 0;
@@ -313,10 +329,11 @@ class Track {
         
         this.convolver.connect(this.reverbWet);
         
-        // Connect chain: gain -> pan -> EQ -> compressor -> effects -> destination
+        // Connect chain: gain -> pan -> EQ (4-band) -> compressor -> effects -> destination
         this.gainNode.connect(this.panNode);
         this.panNode.connect(this.eqLow);
-        this.eqLow.connect(this.eqMid);
+        this.eqLow.connect(this.eqLowMid);
+        this.eqLowMid.connect(this.eqMid);
         this.eqMid.connect(this.eqHigh);
         this.eqHigh.connect(this.compressor);
         
@@ -358,12 +375,18 @@ class Track {
         if (this.regions && this.regions.length > 0) {
             // Sort regions by z-index (most recently selected/moved on top)
             const sortedRegions = [...this.regions].sort((a, b) => {
-                const zA = parseInt(a.element.style.zIndex) || 0;
-                const zB = parseInt(b.element.style.zIndex) || 0;
+                const zA = a.element ? (parseInt(a.element.style.zIndex) || 0) : 0;
+                const zB = b.element ? (parseInt(b.element.style.zIndex) || 0) : 0;
                 return zA - zB; // Lower z-index plays first, will be overridden by higher
             });
             
             sortedRegions.forEach(region => {
+                // Skip regions without a buffer
+                if (!region.buffer) {
+                    console.warn('Region has no buffer, skipping:', region);
+                    return;
+                }
+                
                 if (region.startTime + region.duration > offset) {
                     const source = this.audioContext.createBufferSource();
                     source.buffer = region.buffer;
@@ -510,9 +533,6 @@ class Track {
     }
 
     async renderOffline(offlineContext, destination) {
-        const source = offlineContext.createBufferSource();
-        source.buffer = this.buffer;
-        
         // Recreate the effects chain for offline rendering
         const gainNode = offlineContext.createGain();
         gainNode.gain.value = this.gainNode.gain.value;
@@ -547,16 +567,89 @@ class Track {
         compressor.attack.value = this.compressor.attack.value;
         compressor.release.value = this.compressor.release.value;
         
+        // Delay
+        const delayNode = offlineContext.createDelay(5.0);
+        delayNode.delayTime.value = this.delayNode.delayTime.value;
+        const delayFeedback = offlineContext.createGain();
+        delayFeedback.gain.value = this.delayFeedback.gain.value;
+        const delayWet = offlineContext.createGain();
+        delayWet.gain.value = this.delayWet.gain.value;
+        delayNode.connect(delayFeedback);
+        delayFeedback.connect(delayNode);
+        delayNode.connect(delayWet);
+        
+        // Reverb
+        const convolver = offlineContext.createConvolver();
+        convolver.buffer = this.convolver.buffer;
+        const reverbWet = offlineContext.createGain();
+        reverbWet.gain.value = this.reverbWet.gain.value;
+        convolver.connect(reverbWet);
+        
         // Connect chain
-        source.connect(gainNode);
         gainNode.connect(panNode);
         panNode.connect(eqLow);
         eqLow.connect(eqMid);
         eqMid.connect(eqHigh);
         eqHigh.connect(compressor);
-        compressor.connect(destination);
+        compressor.connect(destination); // Dry
+        compressor.connect(delayNode);
+        delayWet.connect(destination);
+        compressor.connect(convolver);
+        reverbWet.connect(destination);
         
-        source.start(0);
+        // Automation (offline)
+        const applyOfflineAutomation = (audioParam, points, defaultValue) => {
+            audioParam.setValueAtTime(defaultValue, 0);
+            if (points && points.length > 0) {
+                points.forEach(point => {
+                    audioParam.linearRampToValueAtTime(point.value, point.time);
+                });
+            }
+        };
+        applyOfflineAutomation(gainNode.gain, this.automation.volume, this.gainNode.gain.value);
+        applyOfflineAutomation(delayWet.gain, this.automation.delay, this.delayWet.gain.value);
+        applyOfflineAutomation(reverbWet.gain, this.automation.reverb, this.reverbWet.gain.value);
+        
+        const renderRegion = (region) => {
+            const source = offlineContext.createBufferSource();
+            source.buffer = region.buffer;
+            
+            const sourceGain = offlineContext.createGain();
+            sourceGain.gain.value = 1.0;
+            source.connect(sourceGain);
+            sourceGain.connect(gainNode);
+            
+            if (region.crossfade) {
+                if (region.crossfade.fadeOut) {
+                    const fadeOutStart = region.crossfade.fadeOut.start - region.startTime;
+                    const fadeOutDuration = region.crossfade.fadeOut.duration;
+                    const fadeStartTime = region.startTime + fadeOutStart;
+                    sourceGain.gain.setValueAtTime(1.0, fadeStartTime);
+                    sourceGain.gain.linearRampToValueAtTime(0.0, fadeStartTime + fadeOutDuration);
+                }
+                if (region.crossfade.fadeIn) {
+                    const fadeInStart = region.crossfade.fadeIn.start - region.startTime;
+                    const fadeInDuration = region.crossfade.fadeIn.duration;
+                    const fadeStartTime = region.startTime + fadeInStart;
+                    sourceGain.gain.setValueAtTime(0.0, region.startTime);
+                    sourceGain.gain.setValueAtTime(0.0, fadeStartTime);
+                    sourceGain.gain.linearRampToValueAtTime(1.0, fadeStartTime + fadeInDuration);
+                }
+            }
+            
+            source.start(region.startTime, region.startOffset, region.duration);
+        };
+        
+        if (this.regions && this.regions.length > 0) {
+            this.regions.forEach(renderRegion);
+        } else if (this.buffer) {
+            renderRegion({
+                buffer: this.buffer,
+                startTime: 0,
+                startOffset: 0,
+                duration: this.buffer.duration
+            });
+        }
     }
 
     dispose() {

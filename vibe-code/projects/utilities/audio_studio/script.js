@@ -2,15 +2,42 @@
 let audioEngine;
 let trackCounter = 0;
 let currentTrack = null;
+let selectedTrack = null; // Currently selected track for keyboard shortcuts
 let pixelsPerSecond = 100;
 let selectedRegion = null;
 let isDraggingRegion = false;
+let isResizingRegion = false;
+let resizeState = null;
 let dragOffset = { x: 0, y: 0 };
 let timelineScroll = 0;
 let zoomLevel = 1.0;
 let snapEnabled = true;
 let snapValue = 0.25; // quarter note
 let bpm = 120;
+let settingsInitialized = false;
+
+// Undo/Redo system
+let undoStack = [];
+let redoStack = [];
+const MAX_UNDO_LEVELS = 50;
+
+// Loop state
+let loopEnabled = false;
+let loopStart = 0;
+let loopEnd = 10;
+
+// Recording state
+let isRecording = false;
+let mediaRecorder = null;
+let recordingStream = null;
+let recordingChunks = [];
+let recordingStartTime = 0;
+let recordingTrack = null;
+
+// Input metering
+let inputAnalyser = null;
+let inputSource = null;
+let inputMeterAnimationId = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
@@ -25,18 +52,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     setupTimeline();
     startMetering();
+    updateTrackControlsWidthVar();
+    initializeSliderFills();
 });
 
 // Event Listeners
 function setupEventListeners() {
     // Transport controls
-    document.getElementById('playBtn').addEventListener('click', () => audioEngine.play());
-    document.getElementById('pauseBtn').addEventListener('click', () => audioEngine.pause());
+    document.getElementById('recordBtn').addEventListener('click', toggleRecording);
+    document.getElementById('playPauseBtn').addEventListener('click', togglePlayPause);
     document.getElementById('stopBtn').addEventListener('click', () => {
+        // Stop recording if active
+        if (isRecording) {
+            stopRecording();
+        }
         audioEngine.stop();
         updateTimeDisplay();
         updatePlayhead();
+        updatePlayPauseButton();
     });
+    
+    // Loop button
+    document.getElementById('loopBtn').addEventListener('click', toggleLoop);
     
     // Add track
     document.getElementById('addTrackBtn').addEventListener('click', createTrack);
@@ -66,8 +103,10 @@ function setupEventListeners() {
     document.getElementById('masterVolume').addEventListener('input', (e) => {
         const value = parseFloat(e.target.value);
         audioEngine.masterGain.gain.value = value;
-        const db = 20 * Math.log10(value);
-        document.getElementById('masterVolumeValue').textContent = db.toFixed(1) + ' dB';
+        const db = value > 0 ? 20 * Math.log10(value) : -Infinity;
+        document.getElementById('masterVolumeValue').textContent = db === -Infinity ? '-∞ dB' : db.toFixed(1) + ' dB';
+        // Update slider fill
+        updateSliderFill(e.target, value * 100);
     });
     
     // Master settings
@@ -103,65 +142,791 @@ function setupEventListeners() {
     // Global region dragging
     document.addEventListener('mousemove', handleRegionDrag);
     document.addEventListener('mouseup', handleRegionDragEnd);
+    document.addEventListener('mousemove', handleRegionResize);
+    document.addEventListener('mouseup', handleRegionResizeEnd);
     
     // Scrolling and Zooming
     const tracksWrapper = document.querySelector('.tracks-wrapper');
     tracksWrapper.addEventListener('wheel', handleWheelScroll, { passive: false });
+    tracksWrapper.addEventListener('scroll', handleTracksScroll);
     
     // Keyboard shortcuts
     document.addEventListener('keydown', handleKeyPress);
+
+    // Keep layout vars in sync
+    window.addEventListener('resize', () => {
+        updateTrackControlsWidthVar();
+        updateTimelineZoom();
+    });
+}
+
+function getTrackControlsWidth() {
+    const spacer = document.querySelector('.track-controls-spacer');
+    if (spacer) return spacer.offsetWidth || 200;
+    const controls = document.querySelector('.track-controls');
+    return controls ? controls.offsetWidth : 200;
+}
+
+function syncRulerScroll() {
+    const ruler = document.getElementById('timelineRuler');
+    if (ruler) {
+        ruler.style.transform = `translateX(${-timelineScroll}px)`;
+    }
+}
+
+function handleTracksScroll(e) {
+    timelineScroll = e.target.scrollLeft;
+    syncRulerScroll();
 }
 
 function handleKeyPress(e) {
+    // Ignore if typing in input fields
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+    
     // Delete key to remove selected region
-    if (e.key === 'Delete' && selectedRegion) {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRegion) {
+        e.preventDefault();
         const track = audioEngine.tracks.find(t => 
             t.regions && t.regions.some(r => r.element === selectedRegion)
         );
         if (track) {
-            const regionIndex = track.regions.findIndex(r => r.element === selectedRegion);
-            if (regionIndex !== -1) {
-                track.regions[regionIndex].element.remove();
-                track.regions.splice(regionIndex, 1);
-                selectedRegion = null;
-            }
+            const regionData = track.regions.find(r => r.element === selectedRegion);
+            pushUndo('Delete Region', () => {
+                const regionIndex = track.regions.findIndex(r => r.element === selectedRegion);
+                if (regionIndex !== -1) {
+                    track.regions.splice(regionIndex, 1);
+                    selectedRegion.remove();
+                    selectedRegion = null;
+                    audioEngine.updateDuration();
+                    updateTimelineZoom();
+                    updateTimeDisplay();
+                }
+            }, () => {
+                // Redo: recreate region
+                const trackElement = document.querySelector(`.track[data-track-id="${track.id}"]`);
+                createRegionFromData({...regionData, element: null}, track, trackElement);
+            });
         }
     }
     
     // Space bar to play/pause
-    if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+    if (e.code === 'Space') {
         e.preventDefault();
-        if (audioEngine.isPlaying) {
-            audioEngine.pause();
-        } else {
-            audioEngine.play();
+        togglePlayPause();
+    }
+    
+    // Undo: Cmd/Ctrl + Z
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+    }
+    
+    // Redo: Cmd/Ctrl + Shift + Z or Cmd/Ctrl + Y
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'Z' || e.key === 'y')) {
+        e.preventDefault();
+        redo();
+    }
+    
+    // M - Mute selected track
+    if (e.key === 'm' || e.key === 'M') {
+        if (selectedTrack) {
+            const track = audioEngine.tracks.find(t => t.id === selectedTrack.dataset.trackId);
+            if (track) {
+                const muteBtn = selectedTrack.querySelector('.mute-btn');
+                muteBtn.click();
+            }
         }
+    }
+    
+    // S - Solo selected track
+    if (e.key === 's' || e.key === 'S') {
+        if (selectedTrack) {
+            const track = audioEngine.tracks.find(t => t.id === selectedTrack.dataset.trackId);
+            if (track) {
+                const soloBtn = selectedTrack.querySelector('.solo-btn');
+                soloBtn.click();
+            }
+        }
+    }
+    
+    // L - Toggle loop
+    if (e.key === 'l' || e.key === 'L') {
+        toggleLoop();
+    }
+    
+    // R - Toggle recording
+    if (e.key === 'r' || e.key === 'R') {
+        toggleRecording();
+    }
+    
+    // Enter - Return to start (or loop start if looping)
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const seekTime = loopEnabled ? loopStart : 0;
+        audioEngine.seek(seekTime);
+        updatePlayhead();
+        updateTimeDisplay();
+    }
+    
+    // + / = - Zoom in
+    if (e.key === '+' || e.key === '=') {
+        zoomLevel *= 1.2;
+        zoomLevel = Math.min(10, zoomLevel);
+        updateTimelineZoom();
+    }
+    
+    // - - Zoom out
+    if (e.key === '-') {
+        zoomLevel *= 0.8;
+        zoomLevel = Math.max(0.5, zoomLevel);
+        updateTimelineZoom();
+    }
+    
+    // Cmd/Ctrl + D - Duplicate selected region
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        if (selectedRegion) {
+            const track = audioEngine.tracks.find(t => 
+                t.regions && t.regions.some(r => r.element === selectedRegion)
+            );
+            if (track) {
+                const regionData = track.regions.find(r => r.element === selectedRegion);
+                const trackElement = document.querySelector(`.track[data-track-id="${track.id}"]`);
+                duplicateRegion(regionData, track, trackElement);
+            }
+        }
+    }
+}
+
+// Solo/Mute State Management
+function updateSoloMuteStates() {
+    const hasSoloed = audioEngine.tracks.some(t => t.isSoloed);
+    
+    audioEngine.tracks.forEach(track => {
+        const trackElement = document.querySelector(`.track[data-track-id="${track.id}"]`);
+        const volumeSlider = trackElement?.querySelector('.track-volume');
+        const targetVolume = volumeSlider ? parseFloat(volumeSlider.value) : 0.8;
+        
+        if (track.isMuted) {
+            // Muted tracks are always silent
+            track.gainNode.gain.value = 0;
+        } else if (hasSoloed) {
+            // If any track is soloed, only soloed tracks play
+            track.gainNode.gain.value = track.isSoloed ? targetVolume : 0;
+        } else {
+            // Normal playback
+            track.gainNode.gain.value = targetVolume;
+        }
+    });
+}
+
+// ============================================
+// Play/Pause Toggle and Transport Helpers
+// ============================================
+function togglePlayPause() {
+    if (audioEngine.isPlaying) {
+        // Stop recording when pausing
+        if (isRecording) {
+            stopRecording();
+        }
+        audioEngine.pause();
+    } else {
+        audioEngine.play();
+    }
+    updatePlayPauseButton();
+}
+
+function updatePlayPauseButton() {
+    const btn = document.getElementById('playPauseBtn');
+    if (audioEngine.isPlaying) {
+        btn.innerHTML = '⏸';
+        btn.classList.add('playing');
+        btn.title = 'Pause (Space)';
+    } else {
+        btn.innerHTML = '▶';
+        btn.classList.remove('playing');
+        btn.title = 'Play (Space)';
+    }
+}
+
+// ============================================
+// Loop System
+// ============================================
+function toggleLoop() {
+    loopEnabled = !loopEnabled;
+    const loopBtn = document.getElementById('loopBtn');
+    loopBtn.classList.toggle('loop-active', loopEnabled);
+    
+    // Update loop region display
+    updateLoopDisplay();
+    
+    // If looping is now enabled, set default loop region if not set
+    if (loopEnabled && loopEnd <= loopStart) {
+        loopEnd = Math.min((audioEngine.duration || 60), loopStart + 10);
+    }
+}
+
+function updateLoopDisplay() {
+    // Remove existing loop region display
+    document.querySelectorAll('.loop-region').forEach(el => el.remove());
+    
+    if (!loopEnabled) return;
+    
+    const duration = audioEngine.duration || 60;
+    const totalWidth = duration * pixelsPerSecond * zoomLevel;
+    
+    // Add loop region to ruler
+    const ruler = document.getElementById('timelineRuler');
+    const loopRegion = document.createElement('div');
+    loopRegion.className = 'loop-region';
+    loopRegion.style.left = `${(loopStart / duration) * totalWidth}px`;
+    loopRegion.style.width = `${((loopEnd - loopStart) / duration) * totalWidth}px`;
+    ruler.appendChild(loopRegion);
+}
+
+// ============================================
+// Recording System
+// ============================================
+async function toggleRecording() {
+    if (isRecording) {
+        await stopRecording();
+    } else {
+        await startRecording();
+    }
+}
+
+async function startRecording() {
+    // Find an armed track
+    const armedTrack = audioEngine.tracks.find(t => t.isArmed);
+    if (!armedTrack) {
+        showNotification('No track armed for recording. Click the ● button on a track first.');
+        return;
+    }
+    
+    // Always use the input metering stream if available, or create new one
+    try {
+        if (inputAnalyser && inputAnalyser._stream && inputAnalyser._stream.active) {
+            // Reuse the existing stream from input metering
+            recordingStream = inputAnalyser._stream;
+            console.log('Reusing input metering stream for recording, active:', recordingStream.active);
+        } else {
+            // Create new stream and set up metering at the same time
+            recordingStream = await navigator.mediaDevices.getUserMedia({ 
+                audio: {
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false
+                }
+            });
+            console.log('Created new stream for recording');
+            
+            // Also set up input metering with this stream
+            await setupInputMeteringWithStream(recordingStream, armedTrack.id);
+        }
+    } catch (err) {
+        console.error('Microphone access denied:', err);
+        showNotification('Microphone access denied. Please allow microphone access to record.');
+        return;
+    }
+    
+    // Set up MediaRecorder with best available format
+    let mimeType = 'audio/webm;codecs=opus';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/webm';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'audio/ogg';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = ''; // Let browser choose
+            }
+        }
+    }
+    
+    console.log('Using MIME type:', mimeType || 'browser default');
+    
+    const options = mimeType ? { mimeType } : {};
+    mediaRecorder = new MediaRecorder(recordingStream, options);
+    recordingChunks = [];
+    
+    mediaRecorder.ondataavailable = (e) => {
+        console.log('Recording chunk received:', e.data.size, 'bytes');
+        if (e.data.size > 0) {
+            recordingChunks.push(e.data);
+        }
+    };
+    
+    mediaRecorder.onstop = async () => {
+        console.log('Recording stopped, total chunks:', recordingChunks.length);
+        await processRecording();
+    };
+    
+    mediaRecorder.onerror = (e) => {
+        console.error('MediaRecorder error:', e);
+        showNotification('Recording error: ' + e.error?.message || 'Unknown error');
+    };
+    
+    // Start recording
+    // Apply latency compensation - MediaRecorder has ~100-200ms latency
+    // We subtract this from the start time so the recording aligns properly
+    const latencyCompensation = 0.247; // 250ms compensation (adjustable)
+    recordingTrack = armedTrack;
+    recordingStartTime = Math.max(0, audioEngine.getCurrentTime() - latencyCompensation);
+    mediaRecorder.start(100); // Collect data every 100ms
+    isRecording = true;
+    
+    // Automatically start playback when recording starts
+    if (!audioEngine.isPlaying) {
+        audioEngine.play();
+        updatePlayPauseButton();
+    }
+    
+    // Update UI
+    updateRecordButton();
+    
+    // Add recording indicator to the track
+    const trackElement = document.querySelector(`.track[data-track-id="${armedTrack.id}"]`);
+    if (trackElement) {
+        // Remove existing indicator if any
+        trackElement.querySelectorAll('.recording-indicator').forEach(el => el.remove());
+        const indicator = document.createElement('div');
+        indicator.className = 'recording-indicator';
+        trackElement.appendChild(indicator);
+    }
+    
+    showNotification('Recording started...');
+}
+
+async function stopRecording() {
+    if (!isRecording || !mediaRecorder) return;
+    
+    isRecording = false;
+    mediaRecorder.stop();
+    
+    // Only stop the stream if it's not being used by input metering
+    if (recordingStream && (!inputAnalyser || inputAnalyser._stream !== recordingStream)) {
+        recordingStream.getTracks().forEach(track => track.stop());
+    }
+    recordingStream = null;
+    
+    // Update UI
+    updateRecordButton();
+    
+    // Remove recording indicator
+    document.querySelectorAll('.recording-indicator').forEach(el => el.remove());
+}
+
+async function processRecording() {
+    console.log('processRecording called');
+    console.log('recordingChunks.length:', recordingChunks.length);
+    console.log('recordingTrack:', recordingTrack?.id);
+    
+    if (recordingChunks.length === 0) {
+        console.log('No recording chunks to process');
+        return;
+    }
+    
+    if (!recordingTrack) {
+        console.log('No recording track set');
+        return;
+    }
+    
+    const savedTrack = recordingTrack;
+    const savedStartTime = recordingStartTime;
+    
+    // Create blob from chunks
+    const totalSize = recordingChunks.reduce((acc, chunk) => acc + chunk.size, 0);
+    console.log('Total chunks size:', totalSize);
+    
+    const blob = new Blob(recordingChunks, { type: recordingChunks[0]?.type || 'audio/webm' });
+    console.log('Recording blob size:', blob.size, 'type:', blob.type);
+    
+    if (blob.size === 0) {
+        showNotification('Recording was empty. Please try again.');
+        recordingChunks = [];
+        recordingTrack = null;
+        return;
+    }
+    
+    // Decode audio
+    try {
+        console.log('AudioContext state:', audioEngine.audioContext.state);
+        
+        // Resume audio context if needed
+        if (audioEngine.audioContext.state === 'suspended') {
+            await audioEngine.audioContext.resume();
+        }
+        
+        const arrayBuffer = await blob.arrayBuffer();
+        console.log('ArrayBuffer size:', arrayBuffer.byteLength);
+        
+        const audioBuffer = await audioEngine.audioContext.decodeAudioData(arrayBuffer);
+        console.log('Decoded audio buffer:', audioBuffer.duration, 'seconds, channels:', audioBuffer.numberOfChannels);
+        
+        // Analyze the actual recorded audio levels
+        const channelData = audioBuffer.getChannelData(0);
+        let maxSample = 0;
+        let sumSquares = 0;
+        for (let i = 0; i < channelData.length; i++) {
+            const abs = Math.abs(channelData[i]);
+            if (abs > maxSample) maxSample = abs;
+            sumSquares += channelData[i] * channelData[i];
+        }
+        const rms = Math.sqrt(sumSquares / channelData.length);
+        console.log('Recorded audio analysis - Peak:', maxSample.toFixed(4), 'RMS:', rms.toFixed(4), 'Peak dB:', (20 * Math.log10(maxSample)).toFixed(1));
+        
+        // Create region on the armed track
+        const trackElement = document.querySelector(`.track[data-track-id="${savedTrack.id}"]`);
+        console.log('Track element found:', !!trackElement);
+        
+        if (trackElement && audioBuffer) {
+            const regionData = {
+                buffer: audioBuffer,
+                startTime: savedStartTime,
+                duration: audioBuffer.duration,
+                startOffset: 0,
+                endOffset: audioBuffer.duration,
+                name: `Recording ${new Date().toLocaleTimeString()}`
+            };
+            
+            console.log('Creating region with data:', { startTime: savedStartTime, duration: audioBuffer.duration });
+            createRegionFromData(regionData, savedTrack, trackElement);
+            
+            // Update duration
+            audioEngine.updateDuration();
+            updateTimelineZoom();
+            updateTimeDisplay();
+            
+            showNotification(`Recording added to ${savedTrack.name}`);
+        } else {
+            console.error('Track element not found or audioBuffer is null');
+        }
+    } catch (err) {
+        console.error('Failed to decode recording:', err);
+        showNotification('Failed to process recording: ' + err.message);
+    }
+    
+    // Clear state
+    recordingChunks = [];
+    recordingTrack = null;
+}
+
+// Input metering functions
+async function startInputMetering(trackId) {
+    // Stop any existing input metering first
+    stopInputMetering();
+    
+    try {
+        // Request microphone access
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false
+            }
+        });
+        
+        console.log('Got microphone stream:', stream.active, stream.getAudioTracks());
+        
+        await setupInputMeteringWithStream(stream, trackId);
+        
+    } catch (err) {
+        console.error('Failed to start input metering:', err);
+        showNotification('Microphone access denied');
+    }
+}
+
+async function setupInputMeteringWithStream(stream, trackId) {
+    // Resume audio context if needed
+    if (audioEngine.audioContext.state === 'suspended') {
+        await audioEngine.audioContext.resume();
+        console.log('Audio context resumed');
+    }
+    
+    // Stop existing metering (but don't stop the stream)
+    if (inputMeterAnimationId) {
+        cancelAnimationFrame(inputMeterAnimationId);
+        inputMeterAnimationId = null;
+    }
+    if (inputSource) {
+        inputSource.disconnect();
+        inputSource = null;
+    }
+    
+    // Create analyser node
+    inputAnalyser = audioEngine.audioContext.createAnalyser();
+    inputAnalyser.fftSize = 2048;
+    inputAnalyser.smoothingTimeConstant = 0.5;
+    
+    // Connect stream to analyser
+    inputSource = audioEngine.audioContext.createMediaStreamSource(stream);
+    inputSource.connect(inputAnalyser);
+    
+    // Store stream reference for cleanup
+    inputAnalyser._stream = stream;
+    inputAnalyser._trackId = trackId;
+    
+    // Start metering animation
+    meterLogCounter = 0;
+    updateInputMeter();
+    
+    console.log('Input metering started for track:', trackId, 'stream active:', stream.active);
+}
+
+function stopInputMetering() {
+    if (inputMeterAnimationId) {
+        cancelAnimationFrame(inputMeterAnimationId);
+        inputMeterAnimationId = null;
+    }
+    
+    if (inputSource) {
+        inputSource.disconnect();
+        inputSource = null;
+    }
+    
+    if (inputAnalyser) {
+        if (inputAnalyser._stream) {
+            inputAnalyser._stream.getTracks().forEach(t => t.stop());
+        }
+        inputAnalyser = null;
+    }
+    
+    // Reset all input meters
+    document.querySelectorAll('.input-meter-bar').forEach(bar => {
+        bar.style.width = '0%';
+    });
+    document.querySelectorAll('.input-meter-peak').forEach(peak => {
+        peak.style.left = '0%';
+    });
+}
+
+let meterLogCounter = 0;
+
+function updateInputMeter() {
+    if (!inputAnalyser) return;
+    
+    // Use time domain data for more accurate level metering
+    const bufferLength = inputAnalyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+    inputAnalyser.getByteTimeDomainData(dataArray);
+    
+    // Calculate peak level from waveform (centered around 128)
+    let maxDeviation = 0;
+    let sum = 0;
+    for (let i = 0; i < bufferLength; i++) {
+        const deviation = Math.abs(dataArray[i] - 128);
+        sum += deviation;
+        if (deviation > maxDeviation) {
+            maxDeviation = deviation;
+        }
+    }
+    const avgDeviation = sum / bufferLength;
+    
+    // Convert to percentage (128 is max deviation from center)
+    // Use a combination of peak and average for better responsiveness
+    const peakLevel = (maxDeviation / 128) * 100;
+    const avgLevel = (avgDeviation / 128) * 100;
+    
+    // Log every 60 frames (about once per second)
+    meterLogCounter++;
+    if (meterLogCounter % 60 === 0) {
+        // Also log the first few raw samples to see actual values
+        const sampleValues = Array.from(dataArray.slice(0, 10));
+        console.log('Input meter - peak:', peakLevel.toFixed(1), '% avg:', avgLevel.toFixed(2), '% samples:', sampleValues);
+    }
+    
+    // Update meter bars for armed tracks
+    const trackId = inputAnalyser._trackId;
+    const meterBar = document.querySelector(`.input-meter-bar[data-track-id="${trackId}"]`);
+    const meterPeak = document.querySelector(`.input-meter-peak[data-track-id="${trackId}"]`);
+    
+    // Log element state occasionally
+    if (meterLogCounter % 120 === 1) {
+        console.log('Meter elements found:', { meterBar: !!meterBar, meterPeak: !!meterPeak, trackId });
+        const track = document.querySelector(`.track[data-track-id="${trackId}"]`);
+        console.log('Track has armed class:', track?.classList.contains('armed'));
+    }
+    
+    if (meterBar) {
+        // Scale for good visibility - peak level * 3 gives good range
+        const displayLevel = Math.min(peakLevel * 3, 100);
+        meterBar.style.width = `${displayLevel}%`;
+    }
+    if (meterPeak) {
+        // Peak hold (simplified)
+        const currentPeak = parseFloat(meterPeak.style.left) || 0;
+        const newPeak = Math.min(peakLevel * 3, 100);
+        if (newPeak > currentPeak) {
+            meterPeak.style.left = `${newPeak}%`;
+        } else {
+            meterPeak.style.left = `${Math.max(currentPeak - 2, 0)}%`;
+        }
+    }
+    
+    inputMeterAnimationId = requestAnimationFrame(updateInputMeter);
+}
+
+function updateRecordButton() {
+    const btn = document.getElementById('recordBtn');
+    if (isRecording) {
+        btn.classList.add('recording');
+        btn.title = 'Stop Recording (R)';
+    } else {
+        btn.classList.remove('recording');
+        btn.title = 'Record from microphone (R)';
+    }
+}
+
+function showNotification(message) {
+    // Simple notification - could be enhanced with a toast system
+    console.log(message);
+    // Create temporary notification element
+    const notification = document.createElement('div');
+    notification.className = 'notification';
+    notification.textContent = message;
+    notification.style.cssText = `
+        position: fixed;
+        top: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #2d2d30;
+        color: white;
+        padding: 12px 24px;
+        border-radius: 6px;
+        border: 1px solid #0e639c;
+        z-index: 10000;
+        animation: fadeInOut 3s forwards;
+    `;
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 3000);
+}
+
+// ============================================
+// Undo/Redo System
+// ============================================
+function pushUndo(description, undoFn, redoFn) {
+    undoStack.push({ description, undo: undoFn, redo: redoFn });
+    if (undoStack.length > MAX_UNDO_LEVELS) {
+        undoStack.shift();
+    }
+    redoStack = []; // Clear redo stack on new action
+    
+    // Execute the action
+    undoFn();
+}
+
+function undo() {
+    if (undoStack.length === 0) {
+        showUndoIndicator('Nothing to undo');
+        return;
+    }
+    const action = undoStack.pop();
+    redoStack.push(action);
+    action.redo(); // Redo function reverses the undo
+    showUndoIndicator(`Undo: ${action.description}`);
+}
+
+function redo() {
+    if (redoStack.length === 0) {
+        showUndoIndicator('Nothing to redo');
+        return;
+    }
+    const action = redoStack.pop();
+    undoStack.push(action);
+    action.undo(); // Undo function re-applies the action
+    showUndoIndicator(`Redo: ${action.description}`);
+}
+
+function showUndoIndicator(message) {
+    const existing = document.querySelector('.undo-indicator');
+    if (existing) existing.remove();
+    
+    const indicator = document.createElement('div');
+    indicator.className = 'undo-indicator';
+    indicator.textContent = message;
+    document.body.appendChild(indicator);
+    
+    setTimeout(() => indicator.remove(), 1500);
+}
+
+// ============================================
+// Slider Fill Updates
+// ============================================
+function updateSliderFill(slider, percentage) {
+    slider.style.setProperty('--fill', `${percentage}%`);
+}
+
+function initializeSliderFills() {
+    // Initialize master volume slider fill
+    const masterVolume = document.getElementById('masterVolume');
+    if (masterVolume) {
+        updateSliderFill(masterVolume, parseFloat(masterVolume.value) * 100);
     }
 }
 
 function handleWheelScroll(e) {
     e.preventDefault();
     
-    if (e.ctrlKey) {
-        // Zoom in/out with Ctrl + Wheel
+    if (e.ctrlKey || e.metaKey) {
+        // Ctrl/Cmd + Wheel: Zoom in/out CENTERED ON CURSOR
+        const tracksWrapper = document.querySelector('.tracks-wrapper');
+        const rect = tracksWrapper.getBoundingClientRect();
+        const trackControlsWidth = getTrackControlsWidth();
+        
+        // Get cursor position relative to timeline area (excluding track controls)
+        const cursorX = e.clientX - rect.left - trackControlsWidth + tracksWrapper.scrollLeft;
+        const duration = audioEngine.duration || 60;
+        const oldTotalWidth = duration * pixelsPerSecond * zoomLevel;
+        
+        // Calculate what time position the cursor is over
+        const cursorTime = (cursorX / oldTotalWidth) * duration;
+        
+        // Apply zoom
         const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
+        const oldZoom = zoomLevel;
         zoomLevel *= zoomDelta;
-        zoomLevel = Math.max(0.5, Math.min(10, zoomLevel)); // Clamp between 0.5x and 10x
+        zoomLevel = Math.max(0.5, Math.min(10, zoomLevel));
         
-        updateTimelineZoom();
-    } else {
-        // Horizontal scroll with wheel
-        const scrollDelta = e.deltaY;
-        timelineScroll += scrollDelta;
+        // Calculate new total width
+        const newTotalWidth = duration * pixelsPerSecond * zoomLevel;
         
-        const maxScroll = Math.max(0, (audioEngine.duration || 60) * pixelsPerSecond * zoomLevel - window.innerWidth + 300);
+        // Calculate new scroll position to keep cursor at same visual position
+        const newCursorX = (cursorTime / duration) * newTotalWidth;
+        const cursorOffsetFromViewport = e.clientX - rect.left - trackControlsWidth;
+        timelineScroll = newCursorX - cursorOffsetFromViewport;
+        
+        // Clamp scroll
+        const maxScroll = Math.max(0, newTotalWidth - (tracksWrapper.clientWidth - trackControlsWidth));
         timelineScroll = Math.max(0, Math.min(maxScroll, timelineScroll));
         
+        updateTimelineZoom();
+    } else if (e.shiftKey) {
+        // Shift + Wheel: Horizontal scroll
+        const scrollDelta = e.deltaY;
+        timelineScroll += scrollDelta;
+        const duration = audioEngine.duration || 60;
+        const totalWidth = duration * pixelsPerSecond * zoomLevel;
+        const tracksWrapper = document.querySelector('.tracks-wrapper');
+        const maxScroll = Math.max(0, totalWidth - tracksWrapper.clientWidth);
+        timelineScroll = Math.max(0, Math.min(maxScroll, timelineScroll));
         updateTimelineScroll();
+    } else if (e.altKey) {
+        // Alt + Wheel: Vertical zoom (waveform amplitude) - future feature placeholder
+        // For now, use as track height zoom
+        const tracks = document.querySelectorAll('.track');
+        const currentHeight = parseInt(getComputedStyle(tracks[0]).height) || 120;
+        const newHeight = e.deltaY > 0 ? currentHeight * 0.9 : currentHeight * 1.1;
+        const clampedHeight = Math.max(60, Math.min(300, newHeight));
+        tracks.forEach(track => {
+            track.style.height = `${clampedHeight}px`;
+        });
+    } else {
+        // Plain wheel: Vertical scroll (native behavior)
+        const tracksWrapper = document.querySelector('.tracks-wrapper');
+        tracksWrapper.scrollTop += e.deltaY;
     }
 }
 
 function updateTimelineZoom() {
+    updateTrackControlsWidthVar();
     // Update all track timelines width based on zoom
     const duration = audioEngine.duration || 60;
     const newWidth = duration * pixelsPerSecond * zoomLevel;
@@ -169,6 +934,11 @@ function updateTimelineZoom() {
     document.querySelectorAll('.track-timeline').forEach(timeline => {
         timeline.style.width = `${newWidth}px`;
     });
+
+    const tracksWrapper = document.querySelector('.tracks-wrapper');
+    const maxScroll = Math.max(0, newWidth - tracksWrapper.clientWidth);
+    timelineScroll = Math.min(timelineScroll, maxScroll);
+    tracksWrapper.scrollLeft = timelineScroll;
     
     updateTimelineRuler();
     updateAllRegions(); // Changed from updateAllWaveforms
@@ -224,6 +994,7 @@ function updateTimelineScroll() {
     // Scroll all track timelines horizontally
     const tracksWrapper = document.querySelector('.tracks-wrapper');
     tracksWrapper.scrollLeft = timelineScroll;
+    syncRulerScroll();
 }
 
 function snapToGrid(timeInSeconds) {
@@ -273,28 +1044,34 @@ function updateTimelineRuler() {
         marker.textContent = formatTime(time);
         ruler.appendChild(marker);
     }
+
+    syncRulerScroll();
+    updateLoopDisplay();
 }
 
 function updateTimelineGrid() {
     // Add/update vertical grid lines on all track timelines
+    const duration = audioEngine.duration || 60;
+    const totalWidth = duration * pixelsPerSecond * zoomLevel;
+    
     document.querySelectorAll('.track-timeline').forEach(timeline => {
         // Remove existing grid
         const existingGrid = timeline.querySelector('.timeline-grid');
         if (existingGrid) existingGrid.remove();
         
-        // Create new grid
+        // Create new grid container with explicit width to match timeline
         const grid = document.createElement('div');
         grid.className = 'timeline-grid';
-        grid.style.position = 'absolute';
-        grid.style.top = '0';
-        grid.style.left = '0';
-        grid.style.width = '100%';
-        grid.style.height = '100%';
-        grid.style.pointerEvents = 'none';
-        grid.style.zIndex = '1';
-        
-        const duration = audioEngine.duration || 60;
-        const totalWidth = duration * pixelsPerSecond * zoomLevel;
+        grid.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: ${totalWidth}px;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+            overflow: visible;
+        `;
         
         // Calculate grid interval based on snap settings or zoom level
         let gridInterval;
@@ -313,19 +1090,17 @@ function updateTimelineGrid() {
         
         for (let i = 0; i <= numLines; i++) {
             const time = i * gridInterval;
-            const line = document.createElement('div');
-            line.style.position = 'absolute';
-            line.style.left = `${(time / duration) * totalWidth}px`;
-            line.style.top = '0';
-            line.style.width = '1px';
-            line.style.height = '100%';
-            line.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-            
-            // Emphasize major grid lines (every 4 beats or major time intervals)
             const isMajor = (i % 4 === 0);
-            if (isMajor) {
-                line.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            }
+            const line = document.createElement('div');
+            line.className = 'timeline-grid-line' + (isMajor ? ' major' : '');
+            line.style.cssText = `
+                position: absolute;
+                left: ${(time / duration) * totalWidth}px;
+                top: 0;
+                width: 1px;
+                height: 100%;
+                background: ${isMajor ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)'};
+            `;
             
             grid.appendChild(line);
         }
@@ -337,7 +1112,8 @@ function updateTimelineGrid() {
 function handleTimelineClick(e) {
     const ruler = e.currentTarget;
     const rect = ruler.getBoundingClientRect();
-    const x = e.clientX - rect.left + timelineScroll;
+    const tracksWrapper = document.querySelector('.tracks-wrapper');
+    const x = e.clientX - rect.left + tracksWrapper.scrollLeft;
     const totalWidth = (audioEngine.duration || 60) * pixelsPerSecond * zoomLevel;
     const percentage = x / totalWidth;
     let time = percentage * (audioEngine.duration || 60);
@@ -361,15 +1137,18 @@ function updatePlayhead() {
     
     // Auto-scroll to follow playhead
     const tracksWrapper = document.querySelector('.tracks-wrapper');
-    const wrapperWidth = tracksWrapper.clientWidth - 200;
+    const trackControlsWidth = getTrackControlsWidth();
+    const wrapperWidth = tracksWrapper.clientWidth - trackControlsWidth;
     const scrollPos = tracksWrapper.scrollLeft;
     
     if (position > scrollPos + wrapperWidth - 100) {
         tracksWrapper.scrollLeft = position - wrapperWidth + 100;
         timelineScroll = tracksWrapper.scrollLeft;
+        syncRulerScroll();
     } else if (position < scrollPos + 100) {
         tracksWrapper.scrollLeft = Math.max(0, position - 100);
         timelineScroll = tracksWrapper.scrollLeft;
+        syncRulerScroll();
     }
 }
 
@@ -403,7 +1182,11 @@ function createTrack() {
         <div class="track-controls">
             <div class="track-name-row">
                 <input type="text" class="track-name" value="${trackName}" data-track-id="${trackId}">
-                <button class="mute-btn" data-track-id="${trackId}">M</button>
+                <div class="track-btns">
+                    <button class="record-btn" data-track-id="${trackId}" title="Arm for recording">●</button>
+                    <button class="mute-btn" data-track-id="${trackId}" title="Mute (M)">M</button>
+                    <button class="solo-btn" data-track-id="${trackId}" title="Solo (S)">S</button>
+                </div>
             </div>
             <div class="track-controls-row">
                 <div class="control-group">
@@ -419,9 +1202,19 @@ function createTrack() {
                     <span class="control-value pan-value">C</span>
                 </div>
             </div>
-            <button class="settings-btn" data-track-id="${trackId}">
-                ⚙ Effects & EQ
-            </button>
+            <div class="track-actions-row">
+                <button class="settings-btn" data-track-id="${trackId}">
+                    ⚙ FX
+                </button>
+                <button class="delete-track-btn" data-track-id="${trackId}" title="Delete Track">✕</button>
+            </div>
+            <div class="track-meter">
+                <div class="track-meter-bar" data-track-id="${trackId}"></div>
+            </div>
+            <div class="input-meter">
+                <div class="input-meter-bar" data-track-id="${trackId}"></div>
+                <div class="input-meter-peak" data-track-id="${trackId}"></div>
+            </div>
             <div class="effect-indicators"></div>
         </div>
         <div class="track-timeline">
@@ -433,6 +1226,7 @@ function createTrack() {
     `;
     
     document.getElementById('tracksContainer').appendChild(trackElement);
+    updateTrackControlsWidthVar();
     
     // Setup drag and drop
     setupDragAndDrop(trackElement, track);
@@ -443,6 +1237,21 @@ function createTrack() {
         track.name = e.target.value;
     });
     
+    // Record arm button
+    const recordBtn = trackElement.querySelector('.record-btn');
+    recordBtn.addEventListener('click', async (e) => {
+        track.isArmed = !track.isArmed;
+        recordBtn.classList.toggle('active', track.isArmed);
+        trackElement.classList.toggle('armed', track.isArmed);
+        
+        // Start/stop input metering
+        if (track.isArmed) {
+            await startInputMetering(track.id);
+        } else {
+            stopInputMetering();
+        }
+    });
+
     // Mute button
     const muteBtn = trackElement.querySelector('.mute-btn');
     muteBtn.addEventListener('click', (e) => {
@@ -454,6 +1263,31 @@ function createTrack() {
             const volumeSlider = trackElement.querySelector('.track-volume');
             track.gainNode.gain.value = parseFloat(volumeSlider.value);
             muteBtn.classList.remove('active');
+        }
+        updateSoloMuteStates();
+    });
+
+    // Solo button
+    const soloBtn = trackElement.querySelector('.solo-btn');
+    soloBtn.addEventListener('click', (e) => {
+        track.isSoloed = !track.isSoloed;
+        soloBtn.classList.toggle('active', track.isSoloed);
+        updateSoloMuteStates();
+    });
+
+    // Delete track button
+    const deleteBtn = trackElement.querySelector('.delete-track-btn');
+    deleteBtn.addEventListener('click', (e) => {
+        if (audioEngine.tracks.length <= 1) {
+            alert('Cannot delete the last track.');
+            return;
+        }
+        if (confirm(`Delete "${track.name}"?`)) {
+            audioEngine.removeTrack(track.id);
+            trackElement.remove();
+            audioEngine.updateDuration();
+            updateTimelineZoom();
+            updateTimeDisplay();
         }
     });
     
@@ -467,7 +1301,10 @@ function createTrack() {
         }
         const db = value > 0 ? 20 * Math.log10(value) : -Infinity;
         volumeValue.textContent = db === -Infinity ? '-∞ dB' : db.toFixed(1) + ' dB';
+        updateSliderFill(e.target, value * 100);
     });
+    // Initialize fill
+    updateSliderFill(volumeSlider, parseFloat(volumeSlider.value) * 100);
     
     // Pan control
     const panSlider = trackElement.querySelector('.track-pan');
@@ -482,6 +1319,15 @@ function createTrack() {
         } else {
             panValue.textContent = 'C';
         }
+        // Pan slider uses center-based fill (handled by CSS)
+    });
+    
+    // Track selection (click on track controls to select)
+    const trackControls = trackElement.querySelector('.track-controls');
+    trackControls.addEventListener('click', (e) => {
+        // Don't select if clicking on a button or input
+        if (e.target.closest('button') || e.target.closest('input')) return;
+        selectTrack(trackElement);
     });
     
     // Settings button
@@ -492,6 +1338,13 @@ function createTrack() {
     
     // Right-click context menu on timeline
     const timeline = trackElement.querySelector('.track-timeline');
+    timeline.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.audio-region')) return;
+        if (selectedRegion) {
+            selectedRegion.classList.remove('selected');
+            selectedRegion = null;
+        }
+    });
     timeline.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showContextMenu(e, track, trackElement);
@@ -537,22 +1390,32 @@ function setupDragAndDrop(trackElement, track) {
 }
 
 async function loadAudioFile(track, file, trackElement, startTime = 0) {
+    // Show loading overlay
+    const timeline = trackElement.querySelector('.track-timeline');
+    const loadingOverlay = document.createElement('div');
+    loadingOverlay.className = 'track-loading-overlay';
+    loadingOverlay.innerHTML = '<div class="track-loading-spinner"></div>';
+    timeline.appendChild(loadingOverlay);
+    
     try {
         const buffer = await track.loadAudio(file);
-        audioEngine.updateDuration();
-        updateTimelineRuler();
         
         // Apply snap to start time
         const snappedStartTime = snapEnabled ? snapToGrid(startTime) : startTime;
         
         // Create audio region
         createAudioRegion(track, trackElement, buffer, snappedStartTime);
+        audioEngine.updateDuration();
+        updateTimelineZoom();
         
         trackElement.classList.add('has-audio');
         updateTimeDisplay();
     } catch (error) {
         console.error('Error loading audio:', error);
         alert('Error loading audio file');
+    } finally {
+        // Remove loading overlay
+        loadingOverlay.remove();
     }
 }
 
@@ -617,7 +1480,7 @@ function createAudioRegion(track, trackElement, buffer, startTime = 0) {
     setupRegionInteraction(region, regionData, track, trackElement);
     
     // Update timeline zoom to accommodate new region
-    updateTimelineZoom();
+    // Timeline updates happen after duration recalculation
 }
 
 function setupRegionInteraction(region, regionData, track, trackElement) {
@@ -634,6 +1497,24 @@ function setupRegionInteraction(region, regionData, track, trackElement) {
         
         region.classList.add('selected');
         selectedRegion = region;
+        region.style.zIndex = Date.now().toString();
+        
+        // Alt+Click to duplicate
+        if (e.altKey) {
+            const duplicatedData = duplicateRegion(regionData, track, trackElement);
+            if (duplicatedData) {
+                dragOffset.regionData = duplicatedData;
+                dragOffset.track = track;
+                dragOffset.trackElement = trackElement;
+                selectedRegion = duplicatedData.element;
+                selectedRegion.classList.add('selected');
+                isDraggingRegion = true;
+                const rect = duplicatedData.element.getBoundingClientRect();
+                dragOffset.x = e.clientX - rect.left;
+                dragOffset.y = e.clientY - rect.top;
+                return;
+            }
+        }
         
         // Start dragging
         isDraggingRegion = true;
@@ -645,15 +1526,32 @@ function setupRegionInteraction(region, regionData, track, trackElement) {
         dragOffset.regionData = regionData;
     });
     
+    // Right-click context menu on region
+    region.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showRegionContextMenu(e, regionData, track, trackElement);
+    });
+    
     // Double-click to split
     region.addEventListener('dblclick', (e) => {
         e.stopPropagation();
         splitRegionAtPosition(region, regionData, track, trackElement, e);
     });
+
+    // Resize handles
+    const leftHandle = region.querySelector('.region-handle.left');
+    const rightHandle = region.querySelector('.region-handle.right');
+    [leftHandle, rightHandle].forEach(handle => {
+        handle.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            startRegionResize(e, handle.classList.contains('left') ? 'left' : 'right', regionData, track, trackElement);
+        });
+    });
 }
 
 function handleRegionDrag(e) {
-    if (!isDraggingRegion || !selectedRegion) return;
+    if (isResizingRegion || !isDraggingRegion || !selectedRegion) return;
     
     selectedRegion.classList.add('dragging');
     
@@ -683,7 +1581,7 @@ function handleRegionDrag(e) {
 }
 
 function handleRegionDragEnd(e) {
-    if (!isDraggingRegion || !selectedRegion) return;
+    if (isResizingRegion || !isDraggingRegion || !selectedRegion) return;
     
     isDraggingRegion = false;
     selectedRegion.classList.remove('dragging');
@@ -748,7 +1646,135 @@ function handleRegionDragEnd(e) {
         // Recalculate position based on snap
         const left = (dragOffset.regionData.startTime / duration) * totalWidth;
         selectedRegion.style.left = `${left}px`;
+
+        audioEngine.updateDuration();
+        updateTimelineZoom();
+        updateTimeDisplay();
     }
+}
+
+function startRegionResize(e, direction, regionData, track, trackElement) {
+    isDraggingRegion = false;
+    isResizingRegion = true;
+    selectedRegion = regionData.element;
+    selectedRegion.classList.add('selected');
+    selectedRegion.style.zIndex = Date.now().toString();
+
+    resizeState = {
+        direction,
+        regionData,
+        track,
+        trackElement,
+        startX: e.clientX,
+        startTime: regionData.startTime,
+        duration: regionData.duration,
+        startOffset: regionData.startOffset,
+        endOffset: regionData.endOffset
+    };
+}
+
+function handleRegionResize(e) {
+    if (!isResizingRegion || !resizeState) return;
+
+    const { direction, regionData } = resizeState;
+    const duration = audioEngine.duration || 60;
+    const totalWidth = duration * pixelsPerSecond * zoomLevel;
+    const deltaX = e.clientX - resizeState.startX;
+    const deltaTime = (deltaX / totalWidth) * duration;
+    const minDuration = 0.05;
+
+    if (direction === 'left') {
+        let newStartTime = resizeState.startTime + deltaTime;
+        let newStartOffset = resizeState.startOffset + deltaTime;
+        let newDuration = resizeState.duration - deltaTime;
+
+        if (newStartTime < 0) {
+            newDuration += newStartTime;
+            newStartOffset += newStartTime;
+            newStartTime = 0;
+        }
+
+        if (newStartOffset < 0) {
+            newDuration += newStartOffset;
+            newStartTime += newStartOffset;
+            newStartOffset = 0;
+        }
+
+        if (newDuration < minDuration) {
+            newDuration = minDuration;
+            newStartTime = resizeState.startTime + (resizeState.duration - minDuration);
+            newStartOffset = resizeState.startOffset + (resizeState.duration - minDuration);
+        }
+
+        regionData.startTime = newStartTime;
+        regionData.startOffset = newStartOffset;
+        regionData.duration = newDuration;
+        regionData.endOffset = newStartOffset + newDuration;
+    } else {
+        let newDuration = resizeState.duration + deltaTime;
+        let newEndOffset = resizeState.endOffset + deltaTime;
+
+        if (newEndOffset > regionData.buffer.duration) {
+            const over = newEndOffset - regionData.buffer.duration;
+            newDuration -= over;
+            newEndOffset = regionData.buffer.duration;
+        }
+
+        if (newDuration < minDuration) {
+            newDuration = minDuration;
+            newEndOffset = resizeState.startOffset + minDuration;
+        }
+
+        regionData.duration = newDuration;
+        regionData.endOffset = newEndOffset;
+    }
+
+    const left = (regionData.startTime / duration) * totalWidth;
+    const width = (regionData.duration / duration) * totalWidth;
+    regionData.element.style.left = `${left}px`;
+    regionData.element.style.width = `${Math.max(1, width)}px`;
+    regionData.element.dataset.startOffset = regionData.startOffset.toString();
+    regionData.element.dataset.endOffset = regionData.endOffset.toString();
+
+    const canvas = regionData.element.querySelector('canvas');
+    if (canvas) {
+        drawRegionWaveform(canvas, regionData.buffer, regionData.startOffset, regionData.endOffset);
+    }
+}
+
+function handleRegionResizeEnd() {
+    if (!isResizingRegion || !resizeState) return;
+
+    const { direction, regionData } = resizeState;
+    const minDuration = 0.05;
+
+    if (snapEnabled) {
+        if (direction === 'left') {
+            const originalEnd = regionData.startTime + regionData.duration;
+            const snappedStart = snapToGrid(regionData.startTime);
+            let newDuration = Math.max(minDuration, originalEnd - snappedStart);
+            const delta = snappedStart - regionData.startTime;
+            regionData.startTime = snappedStart;
+            regionData.startOffset = Math.max(0, regionData.startOffset + delta);
+            regionData.duration = newDuration;
+            regionData.endOffset = regionData.startOffset + newDuration;
+        } else {
+            const endTime = regionData.startTime + regionData.duration;
+            const snappedEnd = snapToGrid(endTime);
+            let newDuration = Math.max(minDuration, snappedEnd - regionData.startTime);
+            const maxDuration = regionData.buffer.duration - regionData.startOffset;
+            newDuration = Math.min(newDuration, maxDuration);
+            regionData.duration = newDuration;
+            regionData.endOffset = regionData.startOffset + newDuration;
+        }
+    }
+
+    audioEngine.updateDuration();
+    updateTimelineZoom();
+    updateTimeDisplay();
+
+    isResizingRegion = false;
+    resizeState = null;
 }
 
 function splitRegionAtPosition(region, regionData, track, trackElement, e) {
@@ -795,6 +1821,10 @@ function splitRegionAtPosition(region, regionData, track, trackElement, e) {
     };
     
     createRegionFromData(secondRegionData, track, trackElement);
+
+    audioEngine.updateDuration();
+    updateTimelineZoom();
+    updateTimeDisplay();
 }
 
 function createRegionFromData(regionData, track, trackElement) {
@@ -882,6 +1912,112 @@ function drawRegionWaveform(canvas, buffer, startOffset = 0, endOffset = null) {
         
         ctx.fillRect(i, yMin, 1, Math.max(1, yMax - yMin));
     }
+}
+
+// Duplicate a region
+function duplicateRegion(regionData, track, trackElement) {
+    const newRegionData = {
+        element: null,
+        buffer: regionData.buffer,
+        startTime: regionData.startTime + 0.01, // Slight offset so it's visible
+        duration: regionData.duration,
+        startOffset: regionData.startOffset,
+        endOffset: regionData.endOffset
+    };
+    createRegionFromData(newRegionData, track, trackElement);
+    audioEngine.updateDuration();
+    return newRegionData;
+}
+
+// Region-specific context menu
+function showRegionContextMenu(e, regionData, track, trackElement) {
+    const existingMenu = document.querySelector('.context-menu');
+    if (existingMenu) existingMenu.remove();
+    
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+    
+    const items = [
+        { label: 'Split at Click', action: () => splitRegionAtPosition(regionData.element, regionData, track, trackElement, e) },
+        { label: 'Duplicate', shortcut: 'Alt+Drag', action: () => duplicateRegion(regionData, track, trackElement) },
+        { separator: true },
+        { label: 'Delete', shortcut: 'Del', action: () => {
+            const regionIndex = track.regions.indexOf(regionData);
+            if (regionIndex !== -1) {
+                track.regions.splice(regionIndex, 1);
+                regionData.element.remove();
+                selectedRegion = null;
+                audioEngine.updateDuration();
+                updateTimelineZoom();
+            }
+        }},
+        { separator: true },
+        { label: 'Set Color...', submenu: [
+            { label: '🔵 Blue', color: 'rgba(0, 120, 212, 0.6)' },
+            { label: '🟢 Green', color: 'rgba(34, 197, 94, 0.6)' },
+            { label: '🟠 Orange', color: 'rgba(249, 115, 22, 0.6)' },
+            { label: '🟣 Purple', color: 'rgba(168, 85, 247, 0.6)' },
+            { label: '🔴 Red', color: 'rgba(239, 68, 68, 0.6)' },
+        ]}
+    ];
+    
+    items.forEach(item => {
+        if (item.separator) {
+            const sep = document.createElement('div');
+            sep.className = 'context-menu-separator';
+            menu.appendChild(sep);
+        } else if (item.submenu) {
+            const submenuItem = document.createElement('div');
+            submenuItem.className = 'context-menu-item has-submenu';
+            submenuItem.innerHTML = `${item.label} <span class="submenu-arrow">▶</span>`;
+            
+            const submenu = document.createElement('div');
+            submenu.className = 'context-submenu';
+            item.submenu.forEach(sub => {
+                const subItem = document.createElement('div');
+                subItem.className = 'context-menu-item';
+                subItem.textContent = sub.label;
+                subItem.addEventListener('click', () => {
+                    regionData.element.style.background = `linear-gradient(180deg, ${sub.color} 0%, ${sub.color.replace('0.6', '0.3')} 100%)`;
+                    menu.remove();
+                });
+                submenu.appendChild(subItem);
+            });
+            submenuItem.appendChild(submenu);
+            menu.appendChild(submenuItem);
+        } else {
+            const menuItem = document.createElement('div');
+            menuItem.className = 'context-menu-item';
+            menuItem.innerHTML = item.shortcut 
+                ? `${item.label} <span class="shortcut">${item.shortcut}</span>`
+                : item.label;
+            menuItem.addEventListener('click', () => {
+                item.action();
+                menu.remove();
+            });
+            menu.appendChild(menuItem);
+        }
+    });
+    
+    document.body.appendChild(menu);
+    
+    // Position adjustment if off-screen
+    const menuRect = menu.getBoundingClientRect();
+    if (menuRect.right > window.innerWidth) {
+        menu.style.left = `${window.innerWidth - menuRect.width - 10}px`;
+    }
+    if (menuRect.bottom > window.innerHeight) {
+        menu.style.top = `${window.innerHeight - menuRect.height - 10}px`;
+    }
+    
+    setTimeout(() => {
+        document.addEventListener('click', function closeMenu() {
+            menu.remove();
+            document.removeEventListener('click', closeMenu);
+        });
+    }, 10);
 }
 
 function showContextMenu(e, track, trackElement) {
@@ -1058,6 +2194,10 @@ function splitRegionAtTime(regionData, splitTime, track, trackElement) {
     };
     
     createRegionFromData(secondRegionData, track, trackElement);
+
+    audioEngine.updateDuration();
+    updateTimelineZoom();
+    updateTimeDisplay();
 }
 
 // Track Settings Modal
@@ -1065,6 +2205,7 @@ function openTrackSettings(track, trackElement) {
     currentTrack = track;
     const modal = document.getElementById('trackSettingsModal');
     modal.classList.add('active');
+    modal.dataset.trackId = trackElement.dataset.trackId;
     
     // Store reference to track element for updating indicators
     modal.dataset.trackElement = trackElement.dataset.trackId;
@@ -1073,14 +2214,18 @@ function openTrackSettings(track, trackElement) {
     loadTrackSettingsValues(track);
     
     // Setup control listeners
-    setupSettingsControls(track, trackElement);
+    setupSettingsControls();
 }
 
 function loadTrackSettingsValues(track) {
-    // EQ
+    // EQ - 4 bands
     document.querySelector('.eq-freq[data-band="low"]').value = track.eqLow.frequency.value;
     document.querySelector('.eq-gain[data-band="low"]').value = track.eqLow.gain.value;
     document.querySelector('.eq-q[data-band="low"]').value = track.eqLow.Q.value;
+    
+    document.querySelector('.eq-freq[data-band="lowMid"]').value = track.eqLowMid.frequency.value;
+    document.querySelector('.eq-gain[data-band="lowMid"]').value = track.eqLowMid.gain.value;
+    document.querySelector('.eq-q[data-band="lowMid"]').value = track.eqLowMid.Q.value;
     
     document.querySelector('.eq-freq[data-band="mid"]').value = track.eqMid.frequency.value;
     document.querySelector('.eq-gain[data-band="mid"]').value = track.eqMid.gain.value;
@@ -1105,109 +2250,384 @@ function loadTrackSettingsValues(track) {
     
     // Update displays
     updateAllSettingsDisplays();
+    
+    // Update knob visuals
+    updateKnobVisuals();
+    
+    // Draw EQ curve (with slight delay to ensure canvas is ready)
+    setTimeout(() => drawEQCurve(), 50);
 }
 
-function setupSettingsControls(track, trackElement) {
-    // Remove old listeners by cloning and replacing
+function setupSettingsControls() {
     const modal = document.getElementById('trackSettingsModal');
-    const newModal = modal.cloneNode(true);
-    modal.parentNode.replaceChild(newModal, modal);
-    
-    // Re-setup close button
-    const closeBtn = newModal.querySelector('.close');
-    closeBtn.addEventListener('click', () => {
-        newModal.classList.remove('active');
-    });
-    
-    // Re-setup tabs
-    const tabBtns = newModal.querySelectorAll('.tab-btn');
-    tabBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tabName = btn.dataset.tab;
-            switchTab(tabName);
-        });
-    });
+    if (settingsInitialized) {
+        updateEffectIndicators(currentTrack, getCurrentTrackElement());
+        updateKnobVisuals();
+        return;
+    }
+    settingsInitialized = true;
     
     // EQ Controls
-    setupEQControls(track, newModal, trackElement);
+    setupEQControls(modal);
     
-    // Compression Controls
-    setupCompressionControls(track, newModal, trackElement);
+    // Compression Controls (with knobs)
+    setupCompressionControls(modal);
     
     // Effects Controls
-    setupEffectsControls(track, newModal, trackElement);
-    
-    // Automation Controls
-    setupAutomationControls(track, newModal);
+    setupEffectsControls(modal);
     
     // Update indicators initially
-    updateEffectIndicators(track, trackElement);
+    updateEffectIndicators(currentTrack, getCurrentTrackElement());
+    updateKnobVisuals();
 }
 
-function setupEQControls(track, modal, trackElement) {
-    const bands = ['low', 'mid', 'high'];
-    const nodes = { low: track.eqLow, mid: track.eqMid, high: track.eqHigh };
+// Update all knob visual rotations
+function updateKnobVisuals() {
+    const modal = document.getElementById('trackSettingsModal');
+    if (!modal) return;
+    
+    modal.querySelectorAll('.knob-wrapper').forEach(wrapper => {
+        const input = wrapper.querySelector('.knob-input');
+        const visual = wrapper.querySelector('.knob-visual');
+        if (input && visual) {
+            const min = parseFloat(input.min);
+            const max = parseFloat(input.max);
+            const value = parseFloat(input.value);
+            const percent = (value - min) / (max - min);
+            // Rotate from -135deg to 135deg (270 degree range)
+            const rotation = -135 + (percent * 270);
+            visual.style.setProperty('--knob-rotation', `${rotation}deg`);
+        }
+    });
+}
+
+function setupEQControls(modal) {
+    const bands = ['low', 'lowMid', 'mid', 'high'];
+    const nodeKeys = { low: 'eqLow', lowMid: 'eqLowMid', mid: 'eqMid', high: 'eqHigh' };
     
     bands.forEach(band => {
         const freqSlider = modal.querySelector(`.eq-freq[data-band="${band}"]`);
         const gainSlider = modal.querySelector(`.eq-gain[data-band="${band}"]`);
         const qSlider = modal.querySelector(`.eq-q[data-band="${band}"]`);
         
+        if (!freqSlider || !gainSlider || !qSlider) return;
+        
         freqSlider.addEventListener('input', (e) => {
-            nodes[band].frequency.value = parseFloat(e.target.value);
-            e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(0) + ' Hz';
-            updateEffectIndicators(track, trackElement);
+            if (!currentTrack) return;
+            currentTrack[nodeKeys[band]].frequency.value = parseFloat(e.target.value);
+            const freqValue = modal.querySelector(`.eq-band[data-band="${band}"] .eq-freq-value`);
+            if (freqValue) {
+                const freq = parseFloat(e.target.value);
+                freqValue.textContent = freq >= 1000 ? (freq/1000).toFixed(1) + ' kHz' : freq.toFixed(0) + ' Hz';
+            }
+            updateEffectIndicators(currentTrack, getCurrentTrackElement());
+            drawEQCurve();
         });
         
         gainSlider.addEventListener('input', (e) => {
-            nodes[band].gain.value = parseFloat(e.target.value);
-            e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(1) + ' dB';
-            updateEffectIndicators(track, trackElement);
+            if (!currentTrack) return;
+            currentTrack[nodeKeys[band]].gain.value = parseFloat(e.target.value);
+            const gainValue = modal.querySelector(`.eq-band[data-band="${band}"] .eq-gain-value`);
+            if (gainValue) {
+                gainValue.textContent = parseFloat(e.target.value).toFixed(1) + ' dB';
+            }
+            updateEffectIndicators(currentTrack, getCurrentTrackElement());
+            drawEQCurve();
         });
         
         qSlider.addEventListener('input', (e) => {
-            nodes[band].Q.value = parseFloat(e.target.value);
-            e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(1);
+            if (!currentTrack) return;
+            currentTrack[nodeKeys[band]].Q.value = parseFloat(e.target.value);
+            const qValue = modal.querySelector(`.eq-band[data-band="${band}"] .eq-q-value`);
+            if (qValue) {
+                qValue.textContent = parseFloat(e.target.value).toFixed(1);
+            }
+            drawEQCurve();
         });
     });
 }
 
-function setupCompressionControls(track, modal, trackElement) {
+// Draw EQ frequency response curve
+function drawEQCurve() {
+    const canvas = document.getElementById('eqCanvas');
+    if (!canvas || !currentTrack) return;
+    
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width || 600;
+    canvas.height = rect.height || 200;
+    
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    // Clear
+    ctx.clearRect(0, 0, width, height);
+    
+    // Draw background grid
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.lineWidth = 1;
+    
+    // Vertical grid lines (frequency markers)
+    const freqMarkers = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+    freqMarkers.forEach(freq => {
+        const x = freqToX(freq, width);
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+    });
+    
+    // Horizontal grid lines (dB markers)
+    const dbMarkers = [-24, -18, -12, -6, 0, 6, 12, 18, 24];
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.font = '10px sans-serif';
+    dbMarkers.forEach(db => {
+        const y = dbToY(db, height);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+        if (db === 0) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(width, y);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        }
+    });
+    
+    // Calculate combined frequency response
+    const numPoints = width;
+    const response = new Array(numPoints);
+    
+    for (let i = 0; i < numPoints; i++) {
+        const freq = xToFreq(i, width);
+        let totalGain = 0;
+        
+        // Add contribution from each EQ band
+        totalGain += calculateBandResponse(currentTrack.eqLow, freq);
+        totalGain += calculateBandResponse(currentTrack.eqLowMid, freq);
+        totalGain += calculateBandResponse(currentTrack.eqMid, freq);
+        totalGain += calculateBandResponse(currentTrack.eqHigh, freq);
+        
+        response[i] = totalGain;
+    }
+    
+    // Draw filled area under curve
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, 'rgba(0, 212, 255, 0.3)');
+    gradient.addColorStop(0.5, 'rgba(0, 212, 255, 0.1)');
+    gradient.addColorStop(1, 'rgba(0, 212, 255, 0.05)');
+    
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(0, dbToY(0, height));
+    
+    for (let i = 0; i < numPoints; i++) {
+        const y = dbToY(response[i], height);
+        if (i === 0) {
+            ctx.lineTo(i, y);
+        } else {
+            ctx.lineTo(i, y);
+        }
+    }
+    
+    ctx.lineTo(width, dbToY(0, height));
+    ctx.closePath();
+    ctx.fill();
+    
+    // Draw curve line
+    ctx.strokeStyle = '#00d4ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    
+    for (let i = 0; i < numPoints; i++) {
+        const y = dbToY(response[i], height);
+        if (i === 0) {
+            ctx.moveTo(i, y);
+        } else {
+            ctx.lineTo(i, y);
+        }
+    }
+    ctx.stroke();
+    
+    // Draw band points
+    const bandColors = {
+        low: '#ff6b6b',
+        lowMid: '#4ecdc4',
+        mid: '#ffa726',
+        high: '#ab47bc'
+    };
+    
+    const bands = [
+        { node: currentTrack.eqLow, name: 'low' },
+        { node: currentTrack.eqLowMid, name: 'lowMid' },
+        { node: currentTrack.eqMid, name: 'mid' },
+        { node: currentTrack.eqHigh, name: 'high' }
+    ];
+    
+    bands.forEach(({ node, name }) => {
+        const freq = node.frequency.value;
+        const gain = node.gain.value;
+        const x = freqToX(freq, width);
+        const y = dbToY(gain, height);
+        
+        // Draw point
+        ctx.fillStyle = bandColors[name];
+        ctx.beginPath();
+        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw outer ring
+        ctx.strokeStyle = bandColors[name];
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, 12, 0, Math.PI * 2);
+        ctx.stroke();
+    });
+}
+
+// Helper functions for EQ visualization
+function freqToX(freq, width) {
+    const minFreq = 20;
+    const maxFreq = 20000;
+    return (Math.log10(freq / minFreq) / Math.log10(maxFreq / minFreq)) * width;
+}
+
+function xToFreq(x, width) {
+    const minFreq = 20;
+    const maxFreq = 20000;
+    return minFreq * Math.pow(maxFreq / minFreq, x / width);
+}
+
+function dbToY(db, height) {
+    const maxDb = 24;
+    const minDb = -24;
+    return ((maxDb - db) / (maxDb - minDb)) * height;
+}
+
+function calculateBandResponse(filter, freq) {
+    const centerFreq = filter.frequency.value;
+    const gain = filter.gain.value;
+    const Q = filter.Q.value;
+    const type = filter.type;
+    
+    if (gain === 0) return 0;
+    
+    const ratio = freq / centerFreq;
+    
+    if (type === 'lowshelf') {
+        // Low shelf: full gain below frequency, tapers off above
+        if (freq <= centerFreq) {
+            return gain;
+        } else {
+            // Smooth rolloff above the shelf frequency
+            const octaves = Math.log2(freq / centerFreq);
+            return gain * Math.exp(-octaves * octaves * 2);
+        }
+    } else if (type === 'highshelf') {
+        // High shelf: full gain above frequency, tapers off below
+        if (freq >= centerFreq) {
+            return gain;
+        } else {
+            // Smooth rolloff below the shelf frequency
+            const octaves = Math.log2(centerFreq / freq);
+            return gain * Math.exp(-octaves * octaves * 2);
+        }
+    } else {
+        // Peaking filter - bell curve
+        const bandwidth = 1 / Q;
+        const logRatio = Math.log2(ratio);
+        return gain * Math.exp(-Math.pow(logRatio / bandwidth, 2) * 2);
+    }
+}
+
+function setupCompressionControls(modal) {
     const thresholdSlider = modal.querySelector('.comp-threshold');
     const kneeSlider = modal.querySelector('.comp-knee');
     const ratioSlider = modal.querySelector('.comp-ratio');
     const attackSlider = modal.querySelector('.comp-attack');
     const releaseSlider = modal.querySelector('.comp-release');
+    const makeupSlider = modal.querySelector('.comp-makeup');
     
-    thresholdSlider.addEventListener('input', (e) => {
-        track.compressor.threshold.value = parseFloat(e.target.value);
-        e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(0) + ' dB';
-        updateEffectIndicators(track, trackElement);
-    });
+    // Helper to update knob visual
+    const updateKnob = (input) => {
+        const wrapper = input.closest('.knob-wrapper');
+        if (!wrapper) return;
+        const visual = wrapper.querySelector('.knob-visual');
+        if (!visual) return;
+        const min = parseFloat(input.min);
+        const max = parseFloat(input.max);
+        const value = parseFloat(input.value);
+        const percent = (value - min) / (max - min);
+        const rotation = -135 + (percent * 270);
+        visual.style.setProperty('--knob-rotation', `${rotation}deg`);
+    };
     
-    kneeSlider.addEventListener('input', (e) => {
-        track.compressor.knee.value = parseFloat(e.target.value);
-        e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(0) + ' dB';
-    });
+    if (thresholdSlider) {
+        thresholdSlider.addEventListener('input', (e) => {
+            if (!currentTrack) return;
+            currentTrack.compressor.threshold.value = parseFloat(e.target.value);
+            const valueSpan = modal.querySelector('.comp-threshold-value');
+            if (valueSpan) valueSpan.textContent = parseFloat(e.target.value).toFixed(0) + ' dB';
+            updateKnob(e.target);
+            updateEffectIndicators(currentTrack, getCurrentTrackElement());
+        });
+    }
     
-    ratioSlider.addEventListener('input', (e) => {
-        track.compressor.ratio.value = parseFloat(e.target.value);
-        e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(1) + ':1';
-        updateEffectIndicators(track, trackElement);
-    });
+    if (kneeSlider) {
+        kneeSlider.addEventListener('input', (e) => {
+            if (!currentTrack) return;
+            currentTrack.compressor.knee.value = parseFloat(e.target.value);
+            const valueSpan = modal.querySelector('.comp-knee-value');
+            if (valueSpan) valueSpan.textContent = parseFloat(e.target.value).toFixed(0) + ' dB';
+            updateKnob(e.target);
+        });
+    }
     
-    attackSlider.addEventListener('input', (e) => {
-        track.compressor.attack.value = parseFloat(e.target.value);
-        e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 1000).toFixed(0) + ' ms';
-    });
+    if (ratioSlider) {
+        ratioSlider.addEventListener('input', (e) => {
+            if (!currentTrack) return;
+            currentTrack.compressor.ratio.value = parseFloat(e.target.value);
+            const valueSpan = modal.querySelector('.comp-ratio-value');
+            if (valueSpan) valueSpan.textContent = parseFloat(e.target.value).toFixed(1) + ':1';
+            updateKnob(e.target);
+            updateEffectIndicators(currentTrack, getCurrentTrackElement());
+        });
+    }
     
-    releaseSlider.addEventListener('input', (e) => {
-        track.compressor.release.value = parseFloat(e.target.value);
-        e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 1000).toFixed(0) + ' ms';
-    });
+    if (attackSlider) {
+        attackSlider.addEventListener('input', (e) => {
+            if (!currentTrack) return;
+            currentTrack.compressor.attack.value = parseFloat(e.target.value);
+            const valueSpan = modal.querySelector('.comp-attack-value');
+            if (valueSpan) valueSpan.textContent = (parseFloat(e.target.value) * 1000).toFixed(0) + ' ms';
+            updateKnob(e.target);
+        });
+    }
+    
+    if (releaseSlider) {
+        releaseSlider.addEventListener('input', (e) => {
+            if (!currentTrack) return;
+            currentTrack.compressor.release.value = parseFloat(e.target.value);
+            const valueSpan = modal.querySelector('.comp-release-value');
+            if (valueSpan) valueSpan.textContent = (parseFloat(e.target.value) * 1000).toFixed(0) + ' ms';
+            updateKnob(e.target);
+        });
+    }
+    
+    if (makeupSlider) {
+        makeupSlider.addEventListener('input', (e) => {
+            // Note: DynamicsCompressor doesn't have makeup gain, we'd need to add a post-compressor gain node
+            const valueSpan = modal.querySelector('.comp-makeup-value');
+            if (valueSpan) valueSpan.textContent = parseFloat(e.target.value).toFixed(1) + ' dB';
+            updateKnob(e.target);
+        });
+    }
 }
 
-function setupEffectsControls(track, modal, trackElement) {
+function setupEffectsControls(modal) {
     const delayTimeSlider = modal.querySelector('.delay-time');
     const delayFeedbackSlider = modal.querySelector('.delay-feedback');
     const delayMixSlider = modal.querySelector('.delay-mix');
@@ -1215,60 +2635,70 @@ function setupEffectsControls(track, modal, trackElement) {
     const reverbMixSlider = modal.querySelector('.reverb-mix');
     
     delayTimeSlider.addEventListener('input', (e) => {
-        track.delayNode.delayTime.value = parseFloat(e.target.value);
+        if (!currentTrack) return;
+        currentTrack.delayNode.delayTime.value = parseFloat(e.target.value);
         e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 1000).toFixed(0) + ' ms';
     });
     
     delayFeedbackSlider.addEventListener('input', (e) => {
-        track.delayFeedback.gain.value = parseFloat(e.target.value);
+        if (!currentTrack) return;
+        currentTrack.delayFeedback.gain.value = parseFloat(e.target.value);
         e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 100).toFixed(0) + '%';
     });
     
     delayMixSlider.addEventListener('input', (e) => {
-        track.delayWet.gain.value = parseFloat(e.target.value);
+        if (!currentTrack) return;
+        currentTrack.delayWet.gain.value = parseFloat(e.target.value);
         e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 100).toFixed(0) + '%';
-        updateEffectIndicators(track, trackElement);
+        updateEffectIndicators(currentTrack, getCurrentTrackElement());
     });
     
     reverbDecaySlider.addEventListener('input', (e) => {
         const decay = parseFloat(e.target.value);
-        track.createReverbImpulse(decay);
+        if (!currentTrack) return;
+        currentTrack.createReverbImpulse(decay);
         e.target.nextElementSibling.textContent = decay.toFixed(1) + ' s';
     });
     
     reverbMixSlider.addEventListener('input', (e) => {
-        track.reverbWet.gain.value = parseFloat(e.target.value);
+        if (!currentTrack) return;
+        currentTrack.reverbWet.gain.value = parseFloat(e.target.value);
         e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 100).toFixed(0) + '%';
-        updateEffectIndicators(track, trackElement);
+        updateEffectIndicators(currentTrack, getCurrentTrackElement());
     });
 }
 
-function setupAutomationControls(track, modal) {
+function setupAutomationControls(modal) {
     const addPointBtn = modal.querySelector('.add-automation-point');
     const paramSelect = modal.querySelector('.automation-param');
     
     addPointBtn.addEventListener('click', () => {
+        if (!currentTrack) return;
         const param = paramSelect.value;
         const time = audioEngine.getCurrentTime();
         let value;
         
         switch (param) {
             case 'volume':
-                value = track.gainNode.gain.value;
+                value = currentTrack.gainNode.gain.value;
                 break;
             case 'delay':
-                value = track.delayWet.gain.value;
+                value = currentTrack.delayWet.gain.value;
                 break;
             case 'reverb':
-                value = track.reverbWet.gain.value;
+                value = currentTrack.reverbWet.gain.value;
                 break;
         }
         
-        track.addAutomationPoint(param, time, value);
-        updateAutomationList(track, modal);
+        currentTrack.addAutomationPoint(param, time, value);
+        updateAutomationList(currentTrack, modal);
     });
     
-    updateAutomationList(track, modal);
+    paramSelect.addEventListener('change', () => {
+        updateAutomationList(currentTrack, modal);
+    });
+    
+    updateAutomationList(currentTrack, modal);
 }
 
 function updateAutomationList(track, modal) {
@@ -1278,7 +2708,7 @@ function updateAutomationList(track, modal) {
     
     list.innerHTML = '';
     
-    if (track.automation[param]) {
+    if (track && track.automation[param]) {
         track.automation[param].forEach((point, index) => {
             const div = document.createElement('div');
             div.className = 'automation-point';
@@ -1362,6 +2792,7 @@ function switchTab(tabName) {
 }
 
 function updateEffectIndicators(track, trackElement) {
+    if (!track || !trackElement) return;
     const indicatorsContainer = trackElement.querySelector('.effect-indicators');
     const settingsBtn = trackElement.querySelector('.settings-btn');
     indicatorsContainer.innerHTML = '';
@@ -1413,31 +2844,110 @@ function updateEffectIndicators(track, trackElement) {
     }
 }
 
+function getCurrentTrackElement() {
+    const modal = document.getElementById('trackSettingsModal');
+    const trackId = modal.dataset.trackId;
+    if (!trackId) return null;
+    return document.querySelector(`.track[data-track-id="${trackId}"]`);
+}
+
+function updateTrackControlsWidthVar() {
+    const width = getTrackControlsWidth();
+    document.documentElement.style.setProperty('--track-controls-width', `${width}px`);
+}
+
+// Track Selection
+function selectTrack(trackElement) {
+    // Deselect previous
+    if (selectedTrack) {
+        selectedTrack.classList.remove('track-selected');
+    }
+    selectedTrack = trackElement;
+    trackElement.classList.add('track-selected');
+}
+
 // Metering
 function startMetering() {
     const meterL = document.getElementById('masterMeterL');
     const meterR = document.getElementById('masterMeterR');
     const dataArray = new Uint8Array(audioEngine.analyser.frequencyBinCount);
     
+    let clipTimeoutL = null;
+    let clipTimeoutR = null;
+    
     function updateMeters() {
         audioEngine.analyser.getByteTimeDomainData(dataArray);
         
-        let sumL = 0;
-        let sumR = 0;
+        let maxL = 0;
+        let maxR = 0;
         const halfLength = dataArray.length / 2;
         
+        // Use peak detection instead of average for more accurate metering
         for (let i = 0; i < halfLength; i++) {
-            sumL += Math.abs((dataArray[i] - 128) / 128);
+            const sample = Math.abs((dataArray[i] - 128) / 128);
+            if (sample > maxL) maxL = sample;
         }
         for (let i = halfLength; i < dataArray.length; i++) {
-            sumR += Math.abs((dataArray[i] - 128) / 128);
+            const sample = Math.abs((dataArray[i] - 128) / 128);
+            if (sample > maxR) maxR = sample;
         }
         
-        const avgL = sumL / halfLength;
-        const avgR = sumR / halfLength;
+        // Clipping detection (above 95%)
+        const meterContainerL = meterL.parentElement;
+        const meterContainerR = meterR.parentElement;
         
-        meterL.style.height = `${Math.min(avgL * 100, 100)}%`;
-        meterR.style.height = `${Math.min(avgR * 100, 100)}%`;
+        if (maxL > 0.95) {
+            meterL.classList.add('clipping');
+            meterContainerL.classList.add('clipping');
+            clearTimeout(clipTimeoutL);
+            clipTimeoutL = setTimeout(() => {
+                meterL.classList.remove('clipping');
+                meterContainerL.classList.remove('clipping');
+            }, 1000);
+        }
+        
+        if (maxR > 0.95) {
+            meterR.classList.add('clipping');
+            meterContainerR.classList.add('clipping');
+            clearTimeout(clipTimeoutR);
+            clipTimeoutR = setTimeout(() => {
+                meterR.classList.remove('clipping');
+                meterContainerR.classList.remove('clipping');
+            }, 1000);
+        }
+        
+        // Smooth meter falloff
+        const currentHeightL = parseFloat(meterL.style.height) || 0;
+        const currentHeightR = parseFloat(meterR.style.height) || 0;
+        const targetL = Math.min(maxL * 100, 100);
+        const targetR = Math.min(maxR * 100, 100);
+        
+        // Fast attack, slow release
+        const newHeightL = targetL > currentHeightL ? targetL : currentHeightL * 0.92;
+        const newHeightR = targetR > currentHeightR ? targetR : currentHeightR * 0.92;
+        
+        meterL.style.height = `${newHeightL}%`;
+        meterR.style.height = `${newHeightR}%`;
+        
+        // Update play button state
+        updatePlayPauseButton();
+        
+        // Handle loop playback
+        if (loopEnabled && audioEngine.isPlaying) {
+            const currentTime = audioEngine.getCurrentTime();
+            if (currentTime >= loopEnd) {
+                audioEngine.seek(loopStart);
+            }
+        }
+        
+        // Update per-track meters (simplified - uses master signal divided by track count)
+        const avgLevel = (maxL + maxR) / 2;
+        document.querySelectorAll('.track-meter-bar').forEach(meterBar => {
+            const currentWidth = parseFloat(meterBar.style.width) || 0;
+            const targetWidth = audioEngine.isPlaying ? Math.min(avgLevel * 100, 100) : 0;
+            const newWidth = targetWidth > currentWidth ? targetWidth : currentWidth * 0.9;
+            meterBar.style.width = `${newWidth}%`;
+        });
         
         requestAnimationFrame(updateMeters);
     }
@@ -1452,6 +2962,7 @@ async function exportProject() {
     exportBtn.textContent = 'Exporting...';
     
     try {
+        audioEngine.updateDuration();
         const blob = await audioEngine.exportAudio();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
