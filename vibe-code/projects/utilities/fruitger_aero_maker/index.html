@@ -1,822 +1,314 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Frutiger Aero Beat Maker</title>
-<style>
-  :root{
-    --bg1:#9fe3ff; /* airy aqua */
-    --bg2:#bfffcf; /* mint */
-    --bg3:#e6f7ff; /* light */
-    --glass:#ffffff99; /* frosted */
-    --text:#0a2540;
-    --accent:#25d0ff;
-    --accent2:#9fff82;
-    --shadow: 0 10px 30px rgba(0,0,0,.18);
-    --radius: 18px;
-    --cell-off:#ffffff33;
-    --cell-on:#25d0ffcc;
-    --cell-on-strong:#14a8ff;
-  }
-  *{box-sizing:border-box}
-  html,body{height:100%}
-  body{
-    margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
-    color:var(--text);
-    background: radial-gradient(1200px 800px at 20% 10%, var(--bg3), transparent),
-                radial-gradient(1000px 800px at 80% 0%, #ffffffaa, transparent),
-                linear-gradient(135deg, var(--bg1), var(--bg2));
-    overflow-x:hidden;
-  }
-  /* floating bubbles - frutiger aero vibes */
-  .bubbles{position:fixed; inset:0; pointer-events:none; overflow:hidden;}
-  .bubble{position:absolute; border-radius:50%; backdrop-filter: blur(6px);
-          background: radial-gradient(circle at 30% 30%, #fff, #ffffff55 45%, #ffffff22 60%, transparent 70%),
-                      linear-gradient(145deg, #ffffff88, #ffffff22);
-          box-shadow: 0 20px 50px rgba(0,0,0,.08) inset; opacity:.7; animation: float 18s ease-in-out infinite;}
-  .bubble:nth-child(1){ width:180px; height:180px; left:5%; top:70%; animation-delay:-2s}
-  .bubble:nth-child(2){ width:240px; height:240px; left:70%; top:10%; animation-delay:-6s}
-  .bubble:nth-child(3){ width:120px; height:120px; left:80%; top:65%; animation-delay:-9s}
-  .bubble:nth-child(4){ width:300px; height:300px; left:25%; top:5%; animation-delay:-12s}
-  @keyframes float{ 0%,100%{ transform: translateY(0) translateX(0)} 50%{ transform: translateY(-30px) translateX(10px)} }
-
-  header{
-    padding: 22px 16px 10px; text-align:center; position:relative; z-index:2;
-  }
-  .title{
-    display:inline-block; padding: 10px 18px; border-radius: 999px; color:#08364d;
-    background: linear-gradient(180deg, #ffffffcc, #ffffff88);
-    box-shadow: var(--shadow), 0 1px 0 #fff inset;
-    font-weight:700; letter-spacing:.3px;
-  }
-  .sub{ display:block; font-weight:500; opacity:.8; margin-top:8px}
-
-  .wrap{ max-width: 1200px; margin: 12px auto 60px; padding: 16px; }
-
-  .panel{ background: linear-gradient(180deg, #ffffff8a, #ffffff55); border:1px solid #ffffffaa; border-right-color:#ffffff88; border-bottom-color:#ffffff88;
-          border-radius: var(--radius); box-shadow: var(--shadow); backdrop-filter: blur(12px);
-          padding: 14px; margin-bottom:18px; }
-
-  .controls{ display:grid; gap:12px; grid-template-columns: repeat(12, 1fr); align-items:center; }
-  .controls .group{ grid-column: span 3; }
-  .controls .group.wide{ grid-column: span 6; }
-  .controls label{ font-size:12px; display:block; opacity:.75; margin-bottom:4px }
-  .controls input[type="range"]{ width:100% }
-  .controls select, .controls input[type="text"]{ width:100%; padding:8px 10px; border-radius:12px; border:1px solid #ffffffaa; background:#ffffffd0; }
-
-  .transport{ display:flex; gap:12px; align-items:center; }
-  .btn{
-    border:none; border-radius:16px; padding:10px 14px; font-weight:700; cursor:pointer; color:#05334a;
-    background: linear-gradient(180deg, #ffffff, #deffff);
-    box-shadow: inset 0 1px 0 #fff, 0 10px 20px rgba(0,0,0,.12);
-    transition: transform .06s ease, box-shadow .2s ease;
-  }
-  .btn:hover{ transform: translateY(-1px)}
-  .btn:active{ transform: translateY(0); box-shadow: inset 0 1px 0 #fff, 0 5px 12px rgba(0,0,0,.16)}
-  .btn.play{ background: linear-gradient(180deg, #eaffff, #b7fff1); }
-  .btn.stop{ background: linear-gradient(180deg, #fff3f3, #ffd3d3); }
-
-  /* grid */
-  .gridWrap{ position:relative; }
-  .barHeader{ display:grid; grid-template-columns: 160px repeat(var(--cols), 1fr); gap:4px; margin-bottom:6px; }
-  .barHeader .label{ font-size:12px; text-align:center; opacity:.8 }
-  .grid{ display:grid; grid-template-columns: 160px repeat(var(--cols), 1fr); gap:4px; }
-  .trackName{ position:sticky; left:0; z-index:3; padding:8px 10px; border-radius:12px; background:#ffffffc7; border:1px solid #ffffffcc; backdrop-filter: blur(6px); font-weight:700; display:flex; gap:8px; align-items:center; }
-  .muteSolo{ display:flex; gap:6px }
-  .chip{ font-size:10px; padding:4px 7px; border-radius:10px; border:1px solid #ffffffaa; background:#fff; cursor:pointer; }
-  .chip.on{ background: #d1fff0 }
-  .vol{ width:90px }
-
-  .cell{ height:28px; border-radius:8px; background: var(--cell-off); border:1px solid #ffffff66; cursor:pointer; position:relative; overflow:hidden;}
-  .cell.active{ background: var(--cell-on); border-color:#b5f0ff }
-  .cell.active::after{ content:""; position:absolute; inset:0; background: linear-gradient(180deg, #ffffff66, transparent 45%); mix-blend-mode: screen; }
-  .cell.now{ outline: 2px solid var(--accent); outline-offset: -2px }
-
-  .barGuide{ position:absolute; left:160px; right:0; top:0; bottom:0; pointer-events:none; display:grid; grid-template-columns: repeat(var(--bars), 1fr); gap:calc(4px * 16 + 3px); /* approximate visual separator */ }
-  .barGuide div{ border-right:2px dashed #ffffff66 }
-
-  .blocks{ display:grid; grid-template-columns: repeat(12, 1fr); gap:12px; align-items:end }
-  .blocks .group{ grid-column: span 3 }
-  .blocks .group.wide{ grid-column: span 6 }
-
-  .saveArea{ display:grid; grid-template-columns: repeat(12, 1fr); gap:12px; align-items:end }
-  .saveArea .group{ grid-column: span 3 }
-  .saveArea .group.wide{ grid-column: span 6 }
-
-  footer{ text-align:center; padding:20px; opacity:.8 }
-
-  @media (max-width: 980px){
-    .controls .group, .blocks .group, .saveArea .group{ grid-column: span 6 }
-    .controls .group.wide, .blocks .group.wide, .saveArea .group.wide{ grid-column: span 12 }
-    .barHeader{ grid-template-columns: 120px repeat(var(--cols), 1fr) }
-    .grid{ grid-template-columns: 120px repeat(var(--cols), 1fr) }
-    .trackName{ padding:6px 8px }
-    .cell{ height:24px }
-  }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frutiger Aero Beat Maker</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="bubbles">
-    <div class="bubble"></div>
-    <div class="bubble"></div>
-    <div class="bubble"></div>
-    <div class="bubble"></div>
+  <!-- Frutiger Aero Background Elements -->
+  <div class="aero-bg">
+    <div class="bubbles">
+      <div class="bubble"></div>
+      <div class="bubble"></div>
+      <div class="bubble"></div>
+      <div class="bubble"></div>
+      <div class="bubble"></div>
+      <div class="bubble"></div>
+    </div>
+    <div class="clouds">
+      <div class="cloud cloud-1"></div>
+      <div class="cloud cloud-2"></div>
+      <div class="cloud cloud-3"></div>
+    </div>
+    <div class="grass"></div>
   </div>
-  <header>
-    <div class="title">Frutiger Aero Beat Maker</div>
-    <span class="sub">Wii / DS‑inspired scales & syncopation • Client‑side • Save to your browser</span>
-  </header>
 
-  <div class="wrap">
-    <section class="panel">
-      <div class="controls" id="controls">
-        <div class="group wide">
-          <label>Transport</label>
-          <div class="transport">
-            <button class="btn play" id="playBtn">▶ Play</button>
-            <button class="btn stop" id="stopBtn">■ Stop</button>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo">
+        <span class="logo-icon">🎵</span>
+        <div class="logo-text">
+          <h1>Frutiger Aero Beat Maker</h1>
+          <span class="tagline">Wii / DS‑inspired scales & syncopation</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-icon" id="undo-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+          <span>↩</span>
+        </button>
+        <button class="btn btn-icon" id="redo-btn" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>
+          <span>↪</span>
+        </button>
+        <button class="btn btn-icon" id="help-btn" title="Help & Shortcuts" aria-label="Help">
+          <span>?</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Transport & Primary Controls -->
+      <section class="panel transport-panel">
+        <div class="transport-controls">
+          <div class="transport-buttons">
+            <button class="btn btn-transport btn-play" id="play-btn" aria-label="Play">
+              <span class="icon">▶</span>
+              <span class="label">Play</span>
+            </button>
+            <button class="btn btn-transport btn-stop" id="stop-btn" aria-label="Stop">
+              <span class="icon">■</span>
+              <span class="label">Stop</span>
+            </button>
+          </div>
+          
+          <div class="tempo-display">
+            <div class="tempo-value" id="tempo-display">85</div>
+            <div class="tempo-label">BPM</div>
+          </div>
+          
+          <div class="control-group slider-group">
+            <label for="tempo">Tempo</label>
+            <input type="range" id="tempo" min="60" max="180" value="85" class="slider">
+          </div>
+          
+          <div class="control-group slider-group">
+            <label for="volume">Volume</label>
+            <input type="range" id="volume" min="0" max="100" value="75" class="slider">
+            <span class="value-display" id="volume-value">75%</span>
+          </div>
+          
+          <div class="control-group slider-group">
+            <label for="swing">Swing</label>
+            <input type="range" id="swing" min="0" max="50" value="15" class="slider">
+            <span class="value-display" id="swing-value">15%</span>
           </div>
         </div>
-        <div class="group">
-          <label>BPM</label>
-          <input type="range" min="60" max="180" value="98" id="bpm" />
-          <div id="bpmVal" style="font-size:12px;opacity:.7">98</div>
-        </div>
-        <div class="group">
-          <label>Master Volume</label>
-          <input type="range" min="0" max="100" value="85" id="masterVol" />
-          <div id="volVal" style="font-size:12px;opacity:.7">85%</div>
-        </div>
-        <div class="group">
-          <label>Swing</label>
-          <input type="range" min="0" max="60" value="12" id="swing" />
-          <div id="swingVal" style="font-size:12px;opacity:.7">12%</div>
-        </div>
-        <div class="group">
-          <label>Bars</label>
-          <select id="bars">
-            <option value="4">4</option>
-            <option value="8">8</option>
-          </select>
-        </div>
-        <div class="group">
-          <label>Key</label>
-          <select id="keyRoot"></select>
-        </div>
-        <div class="group">
-          <label>Scale</label>
-          <select id="scaleMode">
-            <option value="major">Major</option>
-            <option value="lydian">Lydian</option>
-            <option value="mixolydian">Mixolydian</option>
-            <option value="majpent">Pentatonic (Major)</option>
-          </select>
-        </div>
-        <div class="group wide">
-          <label>Chord Progression Preset</label>
-          <select id="progression">
-            <option value="wiiLounge">Wii Lounge — I–vi–IV–V</option>
-            <option value="dsPlaza">DS Plaza — I–IV–V–I</option>
-            <option value="lydianChill">Lydian Chill — I–II–V–I</option>
-          </select>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="panel">
-      <div class="gridWrap">
-        <div class="barHeader" id="barHeader"></div>
-        <div class="grid" id="grid"></div>
-        <div class="barGuide" id="barGuide"></div>
-      </div>
-    </section>
+      <!-- Arrangement Grid -->
+      <section class="panel arrangement-panel">
+        <div class="panel-header">
+          <h2>🎹 Arrangement</h2>
+          <div class="panel-actions">
+            <div class="control-group compact inline">
+              <label for="bars">Bars:</label>
+              <select id="bars" class="select-sm">
+                <option value="4">4</option>
+                <option value="8" selected>8</option>
+                <option value="12">12</option>
+                <option value="16">16</option>
+              </select>
+            </div>
+            <div class="control-group compact inline">
+              <label for="key-root">Key:</label>
+              <select id="key-root" class="select-sm">
+                <option value="C">C</option>
+                <option value="C#">C#</option>
+                <option value="D">D</option>
+                <option value="D#">D#</option>
+                <option value="E">E</option>
+                <option value="F">F</option>
+                <option value="F#">F#</option>
+                <option value="G">G</option>
+                <option value="G#">G#</option>
+                <option value="A">A</option>
+                <option value="A#">A#</option>
+                <option value="B">B</option>
+              </select>
+            </div>
+            <div class="control-group compact inline">
+              <label for="scale">Scale:</label>
+              <select id="scale" class="select-sm">
+                <option value="major">Major</option>
+                <option value="minor">Minor</option>
+                <option value="pentatonic">Pentatonic</option>
+                <option value="lydian" selected>Lydian</option>
+                <option value="mixolydian">Mixolydian</option>
+                <option value="dorian">Dorian</option>
+              </select>
+            </div>
+            <label class="checkbox-label">
+              <input type="checkbox" id="metronome">
+              <span>🔔 Metronome</span>
+            </label>
+            <button class="btn btn-accent" id="randomize-btn" title="Generate random arrangement">
+              <span>✨</span> Randomize
+            </button>
+            <button class="btn btn-danger" id="clear-btn" title="Clear all patterns">
+              <span>🗑</span> Clear
+            </button>
+          </div>
+        </div>
 
-    <section class="panel">
-      <div class="blocks">
-        <div class="group">
-          <label>Track for Rhythm Block</label>
-          <select id="blockTrack"></select>
+        <div class="arrangement-grid" id="arrangement-grid" role="grid" aria-label="Pattern arrangement grid">
+          <!-- Bar numbers header -->
+          <div class="grid-header" id="grid-header">
+            <div class="track-label-spacer"></div>
+            <!-- Bar numbers inserted by JS -->
+          </div>
+          
+          <!-- Playback indicator -->
+          <div class="playhead" id="playhead"></div>
+          
+          <!-- Track rows will be inserted here -->
+          <div class="tracks-container" id="tracks-container"></div>
         </div>
-        <div class="group">
-          <label>Pattern</label>
-          <select id="blockPattern"></select>
-        </div>
-        <div class="group">
-          <label>Bar</label>
-          <select id="blockBar"></select>
-        </div>
-        <div class="group">
-          <button class="btn" id="applyBlock">Apply Block</button>
-        </div>
-        <div class="group wide">
-          <label>Chord Rhythm (per bar)</label>
-          <div id="chordRhythmPerBar"></div>
-        </div>
-        <div class="group wide">
-          <label>Melody Block (per bar)</label>
-          <div id="melodyPerBar"></div>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="panel">
-      <div class="saveArea">
-        <div class="group wide">
-          <label>Song Name</label>
-          <input type="text" id="songName" placeholder="My aero jingle" />
-        </div>
-        <div class="group">
-          <button class="btn" id="saveSong">💾 Save</button>
-        </div>
-        <div class="group">
-          <label>Load Saved</label>
-          <select id="savedSongs"></select>
-        </div>
-        <div class="group">
-          <button class="btn" id="loadSong">⏎ Load</button>
-        </div>
-        <div class="group">
-          <button class="btn" id="deleteSong">🗑 Delete</button>
-        </div>
-      </div>
-    </section>
+      <!-- Bottom Panels -->
+      <div class="panels-row">
+        <!-- Song Management -->
+        <section class="panel save-panel">
+          <div class="panel-header">
+            <h2>💾 Save & Load</h2>
+          </div>
+          <div class="panel-content">
+            <div class="save-load-row">
+              <input type="text" id="song-name" placeholder="Song name..." class="input">
+              <button class="btn btn-primary" id="save-btn">
+                <span>💾</span> Save
+              </button>
+              <select id="load-song" class="select">
+                <option value="">Load saved...</option>
+              </select>
+              <button class="btn btn-ghost" id="delete-btn" title="Delete selected song">
+                🗑
+              </button>
+            </div>
+            <div class="export-row">
+              <button class="btn btn-secondary" id="export-json-btn">
+                📤 JSON
+              </button>
+              <button class="btn btn-secondary" id="import-json-btn">
+                📥 Import
+              </button>
+              <input type="file" id="import-file" accept=".json" hidden>
+              <button class="btn btn-primary" id="export-wav-btn">
+                🎧 Export WAV
+              </button>
+            </div>
+          </div>
+        </section>
 
-    <footer>
-      Built with the Web Audio API • All data stays in your browser (localStorage)
+        <!-- Per-Track Effects (Collapsible) -->
+        <section class="panel effects-panel collapsible" data-collapsed="true">
+          <div class="panel-header clickable" data-toggle="collapse">
+            <h2>🎛️ Track Mixer</h2>
+            <span class="collapse-icon">▶</span>
+          </div>
+          <div class="panel-content" style="display: none;">
+            <div class="effects-grid" id="effects-grid">
+              <!-- Generated by JS -->
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Built with Web Audio API • All data stays in your browser</p>
+      <p class="shortcuts-hint"><kbd>Space</kbd> Play/Pause • <kbd>Ctrl+Z</kbd> Undo • <kbd>?</kbd> Help</p>
     </footer>
   </div>
 
-<script>
-(() => {
-  /* ==========================
-     BASIC MUSICAL CONSTANTS
-  ========================== */
-  const STEPS_PER_BAR = 16;
-  const TRACKS = [
-    { id:'kick',   name:'Kick',   type:'drum', color:'#48e6b0' },
-    { id:'snare',  name:'Snare',  type:'drum', color:'#ffa9c6' },
-    { id:'hihat',  name:'Hi‑hat', type:'drum', color:'#fff082' },
-    { id:'bass',   name:'Bass',   type:'synth',color:'#93d9ff' },
-    { id:'chords', name:'Chords', type:'auto', color:'#b6ffa1' },
-    { id:'lead',   name:'Lead',   type:'auto', color:'#a1c4ff' }
-  ];
-  
-  const SCALES = {
-    major:      [0,2,4,5,7,9,11],
-    lydian:     [0,2,4,6,7,9,11],
-    mixolydian: [0,2,4,5,7,9,10],
-    majpent:    [0,2,4,7,9]
-  };
-
-  const PROGRESSIONS = {
-    wiiLounge:   ['I','vi','IV','V'],
-    dsPlaza:     ['I','IV','V','I'],
-    lydianChill: ['I','II','V','I']
-  };
-
-  const DEGREE_TO_SEMITONES = {
-    'I':0,'II':2,'iii':4,'III':4,'IV':5,'V':7,'vi':9,'VI':9,'vii':11
-  };
-
-  /* ==========================
-     RHYTHM & MELODY BLOCK LIBRARY
-  ========================== */
-  // 16‑step boolean arrays for drums, etc.
-  const BLOCKS = {
-    kick: {
-      "Wii Bounce":     [1,0,0,0, 0,1,0,0, 1,0,0,1, 0,0,1,0],
-      "Four on Floor":  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
-      "Syncopate":      [1,0,0,1, 0,0,1,0, 1,0,0,0, 0,1,0,0]
-    },
-    snare: {
-      "Backbeat":       [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
-      "Plaza Pop":      [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0],
-      "Ghosty":         [0,0,0,0, 1,0,0,0, 0,1,0,0, 1,0,0,0]
-    },
-    hihat: {
-      "Offbeats":       [0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1],
-      "Sixteenths":     [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],
-      "Soft Shuffle":   [1,0,1,0, 1,1,0,1, 1,0,1,0, 1,1,0,1]
-    },
-    bass: {
-      "Root Groove":    [1,0,0,0, 0,1,0,0, 1,0,0,0, 0,1,0,0],
-      "Walk":           [1,0,1,0, 0,1,0,1, 1,0,1,0, 0,1,0,1],
-      "Sparse":         [1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0]
-    }
-  };
-
-  // 16‑step arrays of scale degrees for melodies (‑1 = rest)
-  const MELODY_BLOCKS = {
-    "Pentatonic Arp":   [0,-1,2,-1, 4,-1,2,-1, 0,-1,2,-1, 4,-1,7,-1],
-    "Lydian Float":     [0,-1,4,6, -1,4,-1,2, 0,-1,6,4, -1,2,-1,-1],
-    "Mii Step‑Up":      [0,2,4,-1, 2,4,6,-1, 4,6,7,-1, 6,7,9,-1],
-    "Call & Response":  [0,-1,2,-1, -1,-1,4,-1, 0,-1,-1,-1, 2,-1,0,-1]
-  };
-
-  // 16‑step chord hit patterns (1 = play chord texture)
-  const CHORD_RHYTHMS = {
-    "Sustain":     [1,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
-    "On‑beats":    [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
-    "Off‑beats":   [0,1,0,0, 0,1,0,0, 0,1,0,0, 0,1,0,0],
-    "Syncopated":  [1,0,0,1, 0,1,0,0, 1,0,0,1, 0,1,0,0]
-  };
-
-  /* ==========================
-     STATE
-  ========================== */
-  const state = {
-    audio:null, masterGain:null, reverb:null, reverbGain:null,
-    lookahead: 0.025, scheduleAhead: 0.12,
-    timer:null, isPlaying:false, nextTime:0, step:0,
-    bpm: 98, swing: 0.12, bars: 4,
-    keyRoot: 60, // C4 midi
-    scale: 'lydian',
-    progression: 'wiiLounge',
-    tracks: [],
-    melodyPerBar: [],
-    chordRhythmPerBar: [],
-  };
-
-  function initState(){
-    state.tracks = TRACKS.map(t=>({
-      ...t,
-      volume: t.id==='hihat'?0.65:(t.id==='snare'?0.7:(t.id==='kick'?0.9:0.75)),
-      mute:false, solo:false,
-      pattern: new Array(state.bars*STEPS_PER_BAR).fill(0)
-    }));
-    state.melodyPerBar = new Array(state.bars).fill(Object.keys(MELODY_BLOCKS)[0]);
-    state.chordRhythmPerBar = new Array(state.bars).fill(Object.keys(CHORD_RHYTHMS)[0]);
-  }
-
-  /* ==========================
-     AUDIO ENGINE
-  ========================== */
-  function ensureAudio(){
-    if(state.audio) return;
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const master = ctx.createGain();
-    master.gain.value = 0.85;
-    master.connect(ctx.destination);
-
-    // simple reverb via generated impulse
-    const convolver = ctx.createConvolver();
-    convolver.buffer = makeImpulseResponse(ctx, 2.2, 2.5);
-    const revGain = ctx.createGain();
-    revGain.gain.value = 0.18;
-    convolver.connect(revGain).connect(master);
-
-    state.audio = ctx; state.masterGain = master; state.reverb = convolver; state.reverbGain = revGain;
-  }
-
-  function makeImpulseResponse(ctx, seconds=2, decay=2){
-    const rate = ctx.sampleRate; const len = rate*seconds; const impulse = ctx.createBuffer(2,len,rate);
-    for(let c=0;c<2;c++){
-      const ch = impulse.getChannelData(c);
-      for(let i=0;i<len;i++){
-        ch[i] = (Math.random()*2-1) * Math.pow(1-i/len, decay);
-      }
-    }
-    return impulse;
-  }
-
-  function now(){ return state.audio.currentTime; }
-
-  function midiToFreq(m){ return 440 * Math.pow(2,(m-69)/12); }
-
-  function noteOn(time, freq, {type='sine', attack=0.005, decay=0.2, sustain=0.0, release=0.15, gain=0.4, pan=0, toRev=0.12}={}){
-    const ctx = state.audio;
-    const osc = ctx.createOscillator(); osc.type = type; osc.frequency.setValueAtTime(freq, time);
-    const g = ctx.createGain(); g.gain.setValueAtTime(0, time);
-    const p = ctx.createStereoPanner(); p.pan.value = pan;
-    const revSend = ctx.createGain(); revSend.gain.value = toRev;
-
-    // envelope
-    g.gain.linearRampToValueAtTime(gain, time+attack);
-    g.gain.linearRampToValueAtTime(gain*sustain, time+attack+decay);
-
-    osc.connect(g).connect(p).connect(state.masterGain);
-    g.connect(revSend).connect(state.reverb);
-
-    osc.start(time);
-    const stopTime = time+attack+decay+release+0.02;
-    g.gain.linearRampToValueAtTime(0.0001, stopTime);
-    osc.stop(stopTime+0.01);
-  }
-
-  function drumKick(time, vol=1){
-    const ctx = state.audio;
-    const osc = ctx.createOscillator(); osc.type='sine';
-    const g = ctx.createGain();
-    osc.frequency.setValueAtTime(150, time);
-    osc.frequency.exponentialRampToValueAtTime(45, time+0.12);
-    g.gain.setValueAtTime(0.0001, time);
-    g.gain.exponentialRampToValueAtTime(1*vol, time+0.005);
-    g.gain.exponentialRampToValueAtTime(0.001, time+0.25);
-    const comp = ctx.createDynamicsCompressor();
-    osc.connect(g).connect(comp).connect(state.masterGain);
-    g.connect(state.reverb);
-    osc.start(time); osc.stop(time+0.5);
-  }
-  function whiteNoiseBuffer(){
-    const ctx = state.audio; const len = ctx.sampleRate*1.5; const buf = ctx.createBuffer(1,len,ctx.sampleRate);
-    const data = buf.getChannelData(0); for(let i=0;i<len;i++) data[i] = Math.random()*2-1; return buf;
-  }
-  let _noiseBuf=null; function getNoise(){ if(!_noiseBuf) _noiseBuf = whiteNoiseBuffer(); return _noiseBuf; }
-
-  function drumSnare(time, vol=1){
-    const ctx = state.audio;
-    const src = ctx.createBufferSource(); src.buffer = getNoise();
-    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1800; bp.Q.value=0.7;
-    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=700;
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, time);
-    g.gain.exponentialRampToValueAtTime(0.9*vol, time+0.004);
-    g.gain.exponentialRampToValueAtTime(0.001, time+0.18);
-    src.connect(bp).connect(hp).connect(g).connect(state.masterGain);
-    g.connect(state.reverb);
-    src.start(time); src.stop(time+0.3);
-  }
-  function drumHihat(time, vol=1){
-    const ctx = state.audio;
-    const src = ctx.createBufferSource(); src.buffer = getNoise();
-    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=6000;
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, time);
-    g.gain.exponentialRampToValueAtTime(0.6*vol, time+0.002);
-    g.gain.exponentialRampToValueAtTime(0.001, time+0.08);
-    src.connect(hp).connect(g).connect(state.masterGain);
-    src.start(time); src.stop(time+0.12);
-  }
-
-  function bassNote(time, midi, vol=0.9){
-    const freq = midiToFreq(midi);
-    noteOn(time, freq, {type:'triangle', attack:0.004, decay:0.12, sustain:0.0, release:0.12, gain:0.55*vol, toRev:0.06, pan:-0.05});
-  }
-  function chordTexture(time, midiChord, vol=0.8){
-    const detune = [0,-4,3];
-    midiChord.forEach((m,i)=>{
-      noteOn(time, midiToFreq(m), {type:'sine', attack:0.01, decay:0.6, sustain:0.15, release:0.4, gain:0.25*vol, toRev:0.18, pan:i===0?-0.1:(i===2?0.1:0)});
-      noteOn(time+0.002, midiToFreq(m+detune[i]), {type:'triangle', attack:0.02, decay:0.5, sustain:0.1, release:0.4, gain:0.18*vol, toRev:0.2, pan:i===0?-0.05:(i===2?0.05:0)});
-    });
-  }
-  function leadNote(time, midi, vol=0.8){
-    noteOn(time, midiToFreq(midi), {type:'triangle', attack:0.004, decay:0.16, sustain:0.0, release:0.12, gain:0.42*vol, toRev:0.22, pan:0.1});
-  }
-
-  /* ==========================
-     MUSIC THEORY HELPERS
-  ========================== */
-  function scaleMidi(rootMidi, scaleName){
-    const intervals = SCALES[scaleName] || SCALES.major;
-    return idx => rootMidi + intervals[idx % intervals.length] + 12*Math.floor(idx/intervals.length);
-  }
-
-  function degreeToRoot(rootMidi, degree){
-    const s = DEGREE_TO_SEMITONES[degree]; if(s===undefined) return rootMidi;
-    return rootMidi + s;
-  }
-
-  function chordForDegree(rootMidi, scaleName, degree){
-    // simple triad based on scale steps (1-3-5)
-    const intervals = SCALES[scaleName] || SCALES.major;
-    const scaleLen = intervals.length;
-    const idx = Object.keys(DEGREE_TO_SEMITONES).indexOf(degree); // not ideal, but we map via semis
-    // build from semitone: take root at degreeToRoot
-    const chordRoot = degreeToRoot(rootMidi, degree);
-    // approximate triad using scale steps from nearest scale root index
-    const triad = [0,2,4].map(step => chordRoot + (intervals[(step)%scaleLen] - intervals[0]) + 12*Math.floor((step)/scaleLen));
-    return triad;
-  }
-
-  function progressionForBars(preset, bars){
-    const seq = PROGRESSIONS[preset] || PROGRESSIONS.wiiLounge;
-    const out = []; for(let b=0;b<bars;b++){ out.push(seq[b % seq.length]); }
-    return out;
-  }
-
-  /* ==========================
-     SCHEDULER
-  ========================== */
-  function stepDuration(){ return 60/state.bpm/4; }
-  function schedule(){
-    const ctx = state.audio; if(!ctx) return;
-    const ahead = state.scheduleAhead; const stepDur = stepDuration();
-    while(state.nextTime < ctx.currentTime + ahead){
-      scheduleStep(state.step, state.nextTime);
-      // swing: delay off‑beats (odd steps) by fraction of step
-      const swingOffset = (state.step % 2 === 1) ? state.swing * stepDur : 0;
-      state.nextTime += stepDur + swingOffset;
-      state.step = (state.step + 1) % (state.bars*STEPS_PER_BAR);
-      drawPlayhead(state.step);
-    }
-  }
-  function schedulerTick(){ schedule(); state.timer = setTimeout(schedulerTick, state.lookahead*1000); }
-
-  function start(){
-    ensureAudio();
-    state.audio.resume();
-    state.isPlaying = true;
-    state.step = 0; state.nextTime = now() + 0.06;
-    schedulerTick();
-  }
-  function stop(){ state.isPlaying=false; if(state.timer){ clearTimeout(state.timer); state.timer=null } drawPlayhead(-1); }
-
-  function scheduleStep(step, time){
-    const bar = Math.floor(step/STEPS_PER_BAR);
-
-    // Percussion & bass from grid
-    for(const tr of state.tracks){
-      const v = tr.pattern[step]; if(!v) continue;
-      if(tr.mute || (state.tracks.some(t=>t.solo) && !tr.solo)) continue;
-      const vol = tr.volume;
-      if(tr.id==='kick') drumKick(time, vol);
-      else if(tr.id==='snare') drumSnare(time, vol);
-      else if(tr.id==='hihat') drumHihat(time, vol);
-      else if(tr.id==='bass'){ // follow chord root
-        const prog = progressionForBars(state.progression, state.bars);
-        const deg = prog[bar];
-        const root = degreeToRoot(state.keyRoot-24, deg); // bass down two octaves
-        bassNote(time, root, vol);
-      }
-    }
-
-    // Auto chords
-    const chordRhythmName = state.chordRhythmPerBar[bar] || Object.keys(CHORD_RHYTHMS)[0];
-    const hit = CHORD_RHYTHMS[chordRhythmName][step % STEPS_PER_BAR];
-    if(hit){
-      const prog = progressionForBars(state.progression, state.bars);
-      const deg = prog[bar];
-      const triad = chordForDegree(state.keyRoot, state.scale, deg).map(n=>n);
-      chordTexture(time, triad, getTrack('chords').mute?0: getTrack('chords').volume);
-    }
-
-    // Auto lead
-    const melName = state.melodyPerBar[bar] || Object.keys(MELODY_BLOCKS)[0];
-    const degree = MELODY_BLOCKS[melName][step % STEPS_PER_BAR];
-    if(degree >= 0){
-      const mapper = scaleMidi(state.keyRoot+12, state.scale); // lead up an octave
-      const midi = mapper(degree);
-      const trLead = getTrack('lead');
-      if(!(trLead.mute || (state.tracks.some(t=>t.solo) && !trLead.solo)))
-        leadNote(time, midi, trLead.volume);
-    }
-  }
-
-  function getTrack(id){ return state.tracks.find(t=>t.id===id); }
-
-  /* ==========================
-     UI BUILD
-  ========================== */
-  const gridEl = document.getElementById('grid');
-  const barHeaderEl = document.getElementById('barHeader');
-  const barGuideEl = document.getElementById('barGuide');
-
-  function buildKeyDropdown(){
-    const sel = document.getElementById('keyRoot');
-    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-    for(let i=48;i<=72;i++){ // C3..C5
-      const o = document.createElement('option');
-      const n = names[i%12]; const oct = Math.floor(i/12)-1;
-      o.value = i; o.textContent = `${n}${oct}`; if(i===60) o.selected=true; sel.appendChild(o);
-    }
-  }
-
-  function buildGrid(){
-    gridEl.innerHTML = ''; barHeaderEl.innerHTML='';
-    gridEl.style.setProperty('--cols', state.bars*STEPS_PER_BAR);
-    barHeaderEl.style.setProperty('--cols', state.bars*STEPS_PER_BAR);
-    barGuideEl.style.setProperty('--bars', state.bars);
-
-    // header
-    const blank = document.createElement('div'); blank.className='label'; blank.textContent='Track'; barHeaderEl.appendChild(blank);
-    for(let s=0;s<state.bars*STEPS_PER_BAR;s++){
-      const lab = document.createElement('div'); lab.className='label';
-      lab.textContent = (s%4===0) ? (Math.floor(s/4)+1) : '·';
-      barHeaderEl.appendChild(lab);
-    }
-
-    // guide bars
-    barGuideEl.innerHTML = '';
-    for(let b=0;b<state.bars;b++){ const d=document.createElement('div'); barGuideEl.appendChild(d); }
-
-    // rows
-    state.tracks.forEach((tr, r)=>{
-      // left controls
-      const tn = document.createElement('div'); tn.className='trackName'; tn.style.borderLeft = `8px solid ${tr.color}`;
-      tn.innerHTML = `<span>${tr.name}</span>
-        <div class="muteSolo">
-          <span class="chip ${tr.mute?'on':''}" data-act="mute">Mute</span>
-          <span class="chip ${tr.solo?'on':''}" data-act="solo">Solo</span>
-          <input class="vol" type="range" min="0" max="100" value="${Math.round(tr.volume*100)}" title="Volume"/>
-        </div>`;
-      gridEl.appendChild(tn);
-
-      tn.addEventListener('click', e=>{
-        const act = e.target.dataset.act; if(!act) return;
-        if(act==='mute'){ tr.mute = !tr.mute; e.target.classList.toggle('on', tr.mute); }
-        if(act==='solo'){ tr.solo = !tr.solo; e.target.classList.toggle('on', tr.solo); }
-      });
-      tn.querySelector('.vol').addEventListener('input', e=>{ tr.volume = Number(e.target.value)/100; });
-
-      // cells
-      for(let c=0;c<state.bars*STEPS_PER_BAR;c++){
-        const cell = document.createElement('div'); cell.className='cell';
-        if(tr.pattern[c]) cell.classList.add('active');
-        cell.addEventListener('click', ()=>{
-          // Only drums & bass are editable by grid; chords/lead are auto
-          if(tr.id==='chords' || tr.id==='lead') return;
-          tr.pattern[c] = tr.pattern[c]?0:1; cell.classList.toggle('active');
-        });
-        gridEl.appendChild(cell);
-      }
-    });
-  }
-
-  function drawPlayhead(step){
-    const cells = gridEl.querySelectorAll('.cell');
-    cells.forEach(el=>el.classList.remove('now'));
-    if(step<0) return;
-    const cols = state.bars*STEPS_PER_BAR;
-    // add highlight to the column (skip left control col)
-    state.tracks.forEach((tr, r)=>{
-      const idx = r*(cols+1) + 1 + step; // +1 for name col
-      const el = gridEl.children[idx]; if(el) el.classList.add('now');
-    });
-  }
-
-  /* ==========================
-     BLOCKS UI
-  ========================== */
-  function buildBlocksUI(){
-    const trackSel = document.getElementById('blockTrack'); trackSel.innerHTML='';
-    TRACKS.forEach(t=>{ if(t.id==='chords'||t.id==='lead') return; const o=document.createElement('option'); o.value=t.id; o.textContent=t.name; trackSel.appendChild(o); });
-
-    const patSel = document.getElementById('blockPattern'); patSel.innerHTML='';
-    fillPatternOptions();
-
-    const barSel = document.getElementById('blockBar'); barSel.innerHTML='';
-    for(let b=1;b<=state.bars;b++){ const o=document.createElement('option'); o.value=b; o.textContent='Bar '+b; barSel.appendChild(o); }
-
-    document.getElementById('applyBlock').onclick = ()=>{
-      const trId = trackSel.value; const pat = patSel.value; const bar = Number(barSel.value)-1;
-      applyBlock(trId, pat, bar);
-    };
-
-    // build per‑bar chord rhythm & melody selectors
-    const chordWrap = document.getElementById('chordRhythmPerBar'); chordWrap.innerHTML='';
-    const melWrap = document.getElementById('melodyPerBar'); melWrap.innerHTML='';
-    for(let b=0;b<state.bars;b++){
-      const csel = document.createElement('select'); for(const k of Object.keys(CHORD_RHYTHMS)){ const o=document.createElement('option'); o.value=k; o.textContent=`Bar ${b+1}: ${k}`; csel.appendChild(o); }
-      csel.value = state.chordRhythmPerBar[b]; csel.onchange = e=>{ state.chordRhythmPerBar[b] = e.target.value; };
-      chordWrap.appendChild(csel);
-
-      const msel = document.createElement('select'); for(const k of Object.keys(MELODY_BLOCKS)){ const o=document.createElement('option'); o.value=k; o.textContent=`Bar ${b+1}: ${k}`; msel.appendChild(o); }
-      msel.value = state.melodyPerBar[b]; msel.onchange = e=>{ state.melodyPerBar[b] = e.target.value; };
-      melWrap.appendChild(msel);
-    }
-
-    trackSel.onchange = fillPatternOptions;
-    function fillPatternOptions(){
-      const trId = trackSel.value || 'kick'; const opts = BLOCKS[trId]; patSel.innerHTML='';
-      Object.keys(opts).forEach(name=>{ const o=document.createElement('option'); o.value=name; o.textContent=name; patSel.appendChild(o); });
-    }
-  }
-
-  function applyBlock(trId, patternName, barIdx){
-    const tr = getTrack(trId); if(!tr) return;
-    const arr = BLOCKS[trId][patternName]; if(!arr) return;
-    const start = barIdx*STEPS_PER_BAR;
-    for(let i=0;i<STEPS_PER_BAR;i++){ tr.pattern[start+i] = arr[i] ? 1 : 0; }
-    buildGrid();
-  }
-
-  /* ==========================
-     SAVE / LOAD (localStorage)
-  ========================== */
-  const LS_KEY = 'faeroSongs';
-
-  function readAllSongs(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||'[]'); }catch(e){ return [] } }
-  function writeAllSongs(arr){ localStorage.setItem(LS_KEY, JSON.stringify(arr)); }
-  function refreshSavedDropdown(){
-    const sel = document.getElementById('savedSongs'); sel.innerHTML='';
-    const all = readAllSongs(); if(all.length===0){ const o=document.createElement('option'); o.textContent='— none —'; sel.appendChild(o); return; }
-    all.forEach((s,i)=>{ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name; sel.appendChild(o); });
-  }
-
-  function serialize(){
-    return {
-      id: 'id_'+Date.now(),
-      name: document.getElementById('songName').value || 'Untitled',
-      bpm: state.bpm, swing: Math.round(state.swing*100), bars: state.bars,
-      keyRoot: state.keyRoot, scale: state.scale, progression: state.progression,
-      tracks: state.tracks.map(t=>({id:t.id, volume:t.volume, mute:t.mute, solo:t.solo, pattern:[...t.pattern]})),
-      melodyPerBar: [...state.melodyPerBar], chordRhythmPerBar: [...state.chordRhythmPerBar]
-    };
-  }
-
-  function hydrate(save){
-    state.bpm = save.bpm; state.swing = (save.swing||12)/100; state.bars = save.bars || 4;
-    state.keyRoot = save.keyRoot; state.scale = save.scale; state.progression = save.progression || 'wiiLounge';
-    state.tracks = TRACKS.map(t=>{
-      const s = save.tracks.find(x=>x.id===t.id);
-      return { ...t, volume: s? s.volume : 0.8, mute: s? s.mute:false, solo: s? s.solo:false, pattern: s? s.pattern : new Array(state.bars*STEPS_PER_BAR).fill(0) };
-    });
-    state.melodyPerBar = save.melodyPerBar && save.melodyPerBar.length? save.melodyPerBar : new Array(state.bars).fill(Object.keys(MELODY_BLOCKS)[0]);
-    state.chordRhythmPerBar = save.chordRhythmPerBar && save.chordRhythmPerBar.length? save.chordRhythmPerBar : new Array(state.bars).fill(Object.keys(CHORD_RHYTHMS)[0]);
-  }
-
-  function saveSong(){
-    const all = readAllSongs();
-    const obj = serialize();
-    all.push(obj); writeAllSongs(all); refreshSavedDropdown();
-    alert('Saved to your browser as "'+obj.name+'"');
-  }
-  function loadSong(){
-    const id = document.getElementById('savedSongs').value; const all = readAllSongs(); const s = all.find(x=>x.id===id);
-    if(!s){ alert('No saved song selected'); return; }
-    hydrate(s); updateControlsFromState(); rebuildAll();
-  }
-  function deleteSong(){
-    const sel = document.getElementById('savedSongs'); const id = sel.value; if(!id) return;
-    let all = readAllSongs(); all = all.filter(x=>x.id!==id); writeAllSongs(all); refreshSavedDropdown();
-  }
-
-  /* ==========================
-     CONTROL WIRING
-  ========================== */
-  function updateControlsFromState(){
-    document.getElementById('bpm').value = state.bpm; document.getElementById('bpmVal').textContent = state.bpm;
-    document.getElementById('masterVol').value = Math.round(state.masterGain?state.masterGain.gain.value*100:85);
-    document.getElementById('swing').value = Math.round(state.swing*100); document.getElementById('swingVal').textContent = Math.round(state.swing*100)+'%';
-    document.getElementById('bars').value = String(state.bars);
-    document.getElementById('keyRoot').value = String(state.keyRoot);
-    document.getElementById('scaleMode').value = state.scale;
-    document.getElementById('progression').value = state.progression;
-  }
-
-  function wireControls(){
-    document.getElementById('playBtn').onclick = ()=>{ if(!state.isPlaying) start(); };
-    document.getElementById('stopBtn').onclick = ()=>{ stop(); };
-
-    document.getElementById('bpm').oninput = e=>{ state.bpm = Number(e.target.value); document.getElementById('bpmVal').textContent = state.bpm; };
-    document.getElementById('masterVol').oninput = e=>{ ensureAudio(); state.masterGain.gain.value = Number(e.target.value)/100; document.getElementById('volVal').textContent = e.target.value+'%'; };
-    document.getElementById('swing').oninput = e=>{ state.swing = Number(e.target.value)/100; document.getElementById('swingVal').textContent = Math.round(state.swing*100)+'%'; };
-    document.getElementById('bars').onchange = e=>{ state.bars = Number(e.target.value); resizeSong(); };
-    document.getElementById('keyRoot').onchange = e=>{ state.keyRoot = Number(e.target.value); };
-    document.getElementById('scaleMode').onchange = e=>{ state.scale = e.target.value; };
-    document.getElementById('progression').onchange = e=>{ state.progression = e.target.value; };
-
-    document.getElementById('saveSong').onclick = saveSong;
-    document.getElementById('loadSong').onclick = loadSong;
-    document.getElementById('deleteSong').onclick = deleteSong;
-  }
-
-  function resizeSong(){
-    // preserve existing first N bars when changing bar count
-    state.tracks.forEach(tr=>{
-      const newLen = state.bars*STEPS_PER_BAR; const old = tr.pattern;
-      const next = new Array(newLen).fill(0);
-      for(let i=0;i<Math.min(old.length,newLen);i++) next[i] = old[i];
-      tr.pattern = next;
-    });
-    // update per‑bar arrays
-    const fillM = state.melodyPerBar[0] || Object.keys(MELODY_BLOCKS)[0];
-    const fillC = state.chordRhythmPerBar[0] || Object.keys(CHORD_RHYTHMS)[0];
-    state.melodyPerBar.length = state.bars; state.melodyPerBar.fill(fillM, state.melodyPerBar.length, state.bars);
-    state.chordRhythmPerBar.length = state.bars; state.chordRhythmPerBar.fill(fillC, state.chordRhythmPerBar.length, state.bars);
-
-    rebuildAll();
-  }
-
-  function rebuildAll(){ buildGrid(); buildBlocksUI(); buildBlockBarSelect(); }
-  function buildBlockBarSelect(){
-    const barSel = document.getElementById('blockBar'); barSel.innerHTML='';
-    for(let b=1;b<=state.bars;b++){ const o=document.createElement('option'); o.value=b; o.textContent='Bar '+b; barSel.appendChild(o); }
-  }
-
-  /* ==========================
-     BOOT
-  ========================== */
-  function boot(){
-    initState(); buildKeyDropdown(); wireControls(); updateControlsFromState(); buildGrid(); buildBlocksUI(); refreshSavedDropdown();
-
-    // Starter vibe: pre‑fill a tiny groove
-    applyBlock('kick','Wii Bounce',0);
-    applyBlock('snare','Backbeat',0);
-    applyBlock('hihat','Offbeats',0);
-    // spread to bar 2..
-    applyBlock('kick','Syncopate',1);
-    applyBlock('snare','Plaza Pop',1);
-    applyBlock('hihat','Sixteenths',1);
-    // bars 3-4
-    applyBlock('kick','Wii Bounce',2);
-    applyBlock('snare','Backbeat',2);
-    applyBlock('hihat','Soft Shuffle',2);
-
-    document.getElementById('songName').value = 'Aero Starter';
-  }
-
-  boot();
-})();
-</script>
+  <!-- Pattern Selection Modal -->
+  <div class="modal" id="pattern-modal" role="dialog" aria-labelledby="modal-title" aria-modal="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title">Select Pattern</h3>
+        <button class="modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="pattern-search">
+          <input type="text" id="pattern-search" placeholder="Search patterns..." class="input">
+        </div>
+        <div class="pattern-grid" id="pattern-grid" role="listbox"></div>
+      </div>
+      <div class="modal-footer">
+        <label class="checkbox-label">
+          <input type="checkbox" id="preview-enabled" checked>
+          <span>🔊 Preview on hover</span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Help Modal -->
+  <div class="modal" id="help-modal" role="dialog" aria-labelledby="help-title" aria-modal="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h3 id="help-title">Help & Keyboard Shortcuts</h3>
+        <button class="modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body help-body">
+        <div class="help-section">
+          <h4>🎹 Getting Started</h4>
+          <p>Click on any cell in the arrangement grid to assign a pattern. Each row represents a different instrument track. Build your song by filling in patterns across the bars.</p>
+        </div>
+        <div class="help-section">
+          <h4>⌨️ Keyboard Shortcuts</h4>
+          <div class="shortcuts-grid">
+            <div><kbd>Space</kbd></div><div>Play / Pause</div>
+            <div><kbd>Ctrl</kbd>+<kbd>Z</kbd></div><div>Undo</div>
+            <div><kbd>Ctrl</kbd>+<kbd>Y</kbd></div><div>Redo</div>
+            <div><kbd>Ctrl</kbd>+<kbd>S</kbd></div><div>Save song</div>
+            <div><kbd>Delete</kbd></div><div>Clear selected cell</div>
+            <div><kbd>←</kbd> <kbd>→</kbd></div><div>Navigate bars</div>
+            <div><kbd>↑</kbd> <kbd>↓</kbd></div><div>Navigate tracks</div>
+          </div>
+        </div>
+        <div class="help-section">
+          <h4>🎵 Pattern Tiers</h4>
+          <p>Patterns come in three complexity tiers:</p>
+          <ul>
+            <li><strong>Tier 1</strong>: Simple, sparse patterns – great for intros</li>
+            <li><strong>Tier 2</strong>: Medium complexity with embellishments</li>
+            <li><strong>Tier 3</strong>: Complex, busy patterns – perfect for climaxes</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>💡 Tips</h4>
+          <ul>
+            <li>Use <strong>Randomize</strong> to quickly generate arrangements</li>
+            <li><strong>Right-click</strong> a cell to quickly clear it</li>
+            <li><strong>Double-click</strong> to cycle through patterns</li>
+            <li>Hover over patterns in the selector to preview them</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WAV Export Progress Modal -->
+  <div class="modal" id="export-modal" role="dialog" aria-labelledby="export-title" aria-modal="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <h3 id="export-title">🎧 Exporting WAV</h3>
+      </div>
+      <div class="modal-body">
+        <div class="export-progress">
+          <div class="progress-bar">
+            <div class="progress-fill" id="export-progress"></div>
+          </div>
+          <p class="progress-text" id="export-status">Rendering audio...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notifications -->
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+  <script src="app.js"></script>
 </body>
 </html>

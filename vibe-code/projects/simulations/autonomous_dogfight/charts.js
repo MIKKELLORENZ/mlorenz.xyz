@@ -3,75 +3,49 @@ class TrainingVisualizer {
         this.container = containerElement;
         this.charts = {};
         this.initialized = false;
-        this.maxStabilityPoints = 50; // Reduced from 100 to 50
+        this.maxStabilityPoints = 50;
         this.lastEpisode = -1;
-        this.chartContainers = {}; // Store references to chart containers
+        this.chartContainers = {};
         
-        // Chart update frequency control
         this.updateFrequency = {
-            reward: 3,       // Update every 3 episodes
-            steps: 3,        // Update every 3 episodes
-            exploration: 5,  // Update every 5 episodes
-            stability: 5,    // Update stability with reduced frequency
-            stage: 1         // Always update training stage changes
+            reward: 1, steps: 1, exploration: 2, stability: 2, kills: 1, weightDrift: 1
         };
-        this.updateCounters = {
-            reward: 0,
-            steps: 0,
-            exploration: 0,
-            stability: 0
-        };
-        this.stabilityUpdateRatio = 5; // Only update stability chart every N points
+        this.updateCounters = { reward: 0, steps: 0, exploration: 0, stability: 0 };
+        this.stabilityUpdateRatio = 5;
         
         this.setupCharts();
     }
     
     setupCharts() {
-        // Prevent multiple initializations
         if (this.initialized) return;
         this.initialized = true;
         
-        // Create chart container if not exists
         if (!this.container) {
-            this.container = document.createElement('div');
-            this.container.id = 'chart-container';
-            this.container.style.position = 'absolute';
-            this.container.style.right = '10px';
-            this.container.style.top = '10px';
-            this.container.style.width = '300px';
-            this.container.style.height = '750px'; // Fixed height for container
-            this.container.style.overflowY = 'auto'; // Add scrollbar if content exceeds height
-            this.container.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-            this.container.style.borderRadius = '5px';
-            this.container.style.padding = '10px';
-            document.body.appendChild(this.container);
+            this.container = document.getElementById('chart-container');
+            if (!this.container) {
+                this.container = document.createElement('div');
+                this.container.id = 'chart-container';
+                document.body.appendChild(this.container);
+            }
         }
         
-        // Create canvas elements for each chart
-        const chartTypes = ['reward', 'steps', 'exploration', 'stability', 'stage'];
+        const chartTypes = ['reward', 'steps', 'exploration', 'stability', 'kills', 'weightDrift'];
         
         chartTypes.forEach(type => {
             const container = document.createElement('div');
-            container.style.marginBottom = '15px';
-            container.style.maxHeight = type === 'stability' ? '100px' : '150px'; // Limit height
+            container.className = 'chart-wrap';
             
             const title = document.createElement('h3');
             title.textContent = this.getChartTitle(type);
-            title.style.color = 'white';
-            title.style.fontSize = '14px';
-            title.style.marginBottom = '5px';
             
             const canvas = document.createElement('canvas');
             canvas.id = `chart-${type}`;
-            canvas.style.width = '100%';
-            canvas.style.height = type === 'stability' ? '80px' : '120px';
             
             container.appendChild(title);
             container.appendChild(canvas);
             this.container.appendChild(container);
             this.chartContainers[type] = container;
             
-            // Create the chart
             this.charts[type] = this.createChart(`chart-${type}`, type);
         });
     }
@@ -79,10 +53,11 @@ class TrainingVisualizer {
     getChartTitle(type) {
         switch(type) {
             case 'reward': return 'Episode Reward';
-            case 'steps': return 'Episode Duration (steps)';
-            case 'exploration': return 'Exploration / Noise Scale';
+            case 'steps': return 'Episode Duration';
+            case 'exploration': return 'Exploration Rate';
             case 'stability': return 'Stability Score';
-            case 'stage': return 'Training Stage';
+            case 'kills': return 'Kills / Deaths';
+            case 'weightDrift': return 'NN Weight Drift';
             default: return type;
         }
     }
@@ -90,58 +65,31 @@ class TrainingVisualizer {
     createChart(canvasId, type) {
         const ctx = document.getElementById(canvasId).getContext('2d');
         
-        // Configuration for different chart types
-        let config;
-        
-        // Common performance options to apply to all charts
         const performanceOptions = {
-            animation: {
-                duration: 0 // Disable all animations for better performance
-            },
+            animation: { duration: 0 },
             responsive: true,
             maintainAspectRatio: false,
             elements: {
-                line: {
-                    tension: 0 // Disable bezier curves for faster rendering
-                },
-                point: {
-                    radius: 0, // No points except for hover
-                    hoverRadius: 3 // Small hover radius
-                }
+                line: { tension: 0.3, borderWidth: 1.5 },
+                point: { radius: 0, hoverRadius: 2 }
             },
             scales: {
                 y: {
-                    grid: {
-                        color: 'rgba(255, 255, 255, 0.1)'
-                    },
-                    ticks: {
-                        color: 'rgba(255, 255, 255, 0.7)',
-                        maxTicksLimit: 5 // Limit number of ticks for performance
-                    }
+                    grid: { color: 'rgba(255,255,255,0.04)' },
+                    ticks: { color: 'rgba(255,255,255,0.3)', maxTicksLimit: 4, font: { size: 9 } }
                 },
                 x: {
-                    grid: {
-                        color: 'rgba(255, 255, 255, 0.1)'
-                    },
-                    ticks: {
-                        color: 'rgba(255, 255, 255, 0.7)',
-                        maxTicksLimit: 8, // Limit number of ticks for performance
-                        autoSkip: true // Skip labels that would overlap
-                    }
+                    grid: { color: 'rgba(255,255,255,0.04)' },
+                    ticks: { color: 'rgba(255,255,255,0.3)', maxTicksLimit: 6, autoSkip: true, font: { size: 9 } }
                 }
             },
             plugins: {
-                legend: {
-                    labels: {
-                        color: 'rgba(255, 255, 255, 0.7)',
-                        boxWidth: 10 // Smaller legend boxes
-                    }
-                },
-                tooltip: {
-                    enabled: false // Disable tooltips for performance
-                }
+                legend: { labels: { color: 'rgba(255,255,255,0.4)', boxWidth: 8, font: { size: 9 } } },
+                tooltip: { enabled: false }
             }
         };
+        
+        let config;
         
         switch(type) {
             case 'reward':
@@ -149,150 +97,71 @@ class TrainingVisualizer {
                     type: 'line',
                     data: {
                         labels: [],
-                        datasets: [{
-                            label: 'Reward',
-                            data: [],
-                            borderColor: 'rgba(75, 192, 192, 1)',
-                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                            tension: 0,
-                            borderWidth: 1.5
-                        },
-                        {
-                            label: 'Running Avg',
-                            data: [],
-                            borderColor: 'rgba(255, 159, 64, 1)',
-                            backgroundColor: 'rgba(255, 159, 64, 0.2)',
-                            tension: 0,
-                            borderWidth: 1.5
-                        }]
+                        datasets: [
+                            { label: 'Reward', data: [], borderColor: '#00c8ff', backgroundColor: 'rgba(0,200,255,0.05)', fill: true },
+                            { label: 'Avg', data: [], borderColor: '#ff3366', backgroundColor: 'transparent' }
+                        ]
                     },
-                    options: {
-                        ...performanceOptions,
-                        scales: {
-                            ...performanceOptions.scales,
-                            y: {
-                                ...performanceOptions.scales.y,
-                                beginAtZero: false
-                            }
-                        }
-                    }
+                    options: { ...performanceOptions, scales: { ...performanceOptions.scales, y: { ...performanceOptions.scales.y, beginAtZero: false } } }
                 };
                 break;
-                
             case 'steps':
                 config = {
                     type: 'bar',
                     data: {
                         labels: [],
-                        datasets: [{
-                            label: 'Steps',
-                            data: [],
-                            backgroundColor: 'rgba(54, 162, 235, 0.5)',
-                            borderColor: 'rgba(54, 162, 235, 1)',
-                            borderWidth: 1
-                        }]
+                        datasets: [{ label: 'Steps', data: [], backgroundColor: 'rgba(0,200,255,0.2)', borderColor: '#00c8ff', borderWidth: 1 }]
                     },
-                    options: {
-                        ...performanceOptions,
-                        scales: {
-                            ...performanceOptions.scales,
-                            y: {
-                                ...performanceOptions.scales.y,
-                                beginAtZero: true
-                            }
-                        }
-                    }
+                    options: { ...performanceOptions, scales: { ...performanceOptions.scales, y: { ...performanceOptions.scales.y, beginAtZero: true } } }
                 };
                 break;
-                
             case 'exploration':
                 config = {
                     type: 'line',
                     data: {
                         labels: [],
-                        datasets: [{
-                            label: 'Exploration Rate',
-                            data: [],
-                            borderColor: 'rgba(255, 99, 132, 1)',
-                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                            tension: 0,
-                            borderWidth: 1.5
-                        }]
+                        datasets: [{ label: 'ε', data: [], borderColor: '#ff9f43', backgroundColor: 'rgba(255,159,67,0.05)', fill: true }]
                     },
-                    options: {
-                        ...performanceOptions,
-                        scales: {
-                            ...performanceOptions.scales,
-                            y: {
-                                ...performanceOptions.scales.y,
-                                beginAtZero: true,
-                                max: 1
-                            }
-                        }
-                    }
+                    options: { ...performanceOptions, scales: { ...performanceOptions.scales, y: { ...performanceOptions.scales.y, beginAtZero: true, max: 1 } } }
                 };
                 break;
-                
             case 'stability':
                 config = {
                     type: 'line',
                     data: {
                         labels: [],
-                        datasets: [{
-                            label: 'Stability',
-                            data: [],
-                            borderColor: 'rgba(153, 102, 255, 1)',
-                            backgroundColor: 'rgba(153, 102, 255, 0.2)',
-                            borderWidth: 1.5,
-                            pointRadius: 0
-                        }]
+                        datasets: [{ label: 'Stability', data: [], borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,0.05)', fill: true, pointRadius: 0 }]
                     },
-                    options: {
-                        ...performanceOptions,
-                        scales: {
-                            ...performanceOptions.scales,
-                            y: {
-                                ...performanceOptions.scales.y,
-                                beginAtZero: true,
-                                max: 1
-                            }
-                        }
-                    }
+                    options: { ...performanceOptions, scales: { ...performanceOptions.scales, y: { ...performanceOptions.scales.y, beginAtZero: true, max: 1 } } }
                 };
                 break;
-                
-            case 'stage':
+            case 'kills':
                 config = {
                     type: 'line',
                     data: {
                         labels: [],
-                        datasets: [{
-                            label: 'Training Stage',
-                            data: [],
-                            borderColor: 'rgba(255, 206, 86, 1)',
-                            backgroundColor: 'rgba(255, 206, 86, 0.2)',
-                            borderWidth: 1.5,
-                            steppedLine: true
-                        }]
+                        datasets: [
+                            { label: 'Kills', data: [], borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.05)', fill: true },
+                            { label: 'Deaths', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.05)', fill: true }
+                        ]
                     },
                     options: {
                         ...performanceOptions,
                         scales: {
                             ...performanceOptions.scales,
-                            y: {
-                                ...performanceOptions.scales.y,
-                                beginAtZero: true,
-                                max: 4,
-                                ticks: {
-                                    ...performanceOptions.scales.y.ticks,
-                                    callback: function(value) {
-                                        const stages = ['Basic Flight', 'Stability', 'Tracking', 'Combat'];
-                                        return stages[value] || value;
-                                    }
-                                }
-                            }
+                            y: { ...performanceOptions.scales.y, beginAtZero: true }
                         }
                     }
+                };
+                break;
+            case 'weightDrift':
+                config = {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{ label: 'Avg Weight Drift', data: [], borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.08)', fill: true }]
+                    },
+                    options: { ...performanceOptions, scales: { ...performanceOptions.scales, y: { ...performanceOptions.scales.y, beginAtZero: true } } }
                 };
                 break;
         }
@@ -301,227 +170,143 @@ class TrainingVisualizer {
     }
     
     updateCharts(stats) {
-        // Check if we need to update at reduced frequency
         const isNewEpisode = stats.episode !== this.lastEpisode;
         this.lastEpisode = stats.episode;
         
-        // Update reward chart
         if (stats.totalRewards.length > 0 && isNewEpisode) {
-            this.updateCounters.reward++;
-            if (this.updateCounters.reward >= this.updateFrequency.reward) {
+            if (++this.updateCounters.reward >= this.updateFrequency.reward) {
                 this.updateCounters.reward = 0;
                 this.updateRewardChart(stats);
             }
         }
         
-        // Update steps chart
         if (stats.episodeLengths.length > 0 && isNewEpisode) {
-            this.updateCounters.steps++;
-            if (this.updateCounters.steps >= this.updateFrequency.steps) {
+            if (++this.updateCounters.steps >= this.updateFrequency.steps) {
                 this.updateCounters.steps = 0;
                 this.updateStepsChart(stats);
             }
         }
         
-        // Update exploration rate chart
         if (isNewEpisode) {
-            this.updateCounters.exploration++;
-            if (this.updateCounters.exploration >= this.updateFrequency.exploration) {
+            if (++this.updateCounters.exploration >= this.updateFrequency.exploration) {
                 this.updateCounters.exploration = 0;
                 this.updateExplorationChart(stats);
             }
         }
         
-        // Update stability chart with both reduced frequency and sampling
         if (stats.stabilityScores && stats.stabilityScores.length > 0) {
-            this.updateCounters.stability++;
-            if (this.updateCounters.stability >= this.updateFrequency.stability) {
+            if (++this.updateCounters.stability >= this.updateFrequency.stability) {
                 this.updateCounters.stability = 0;
                 this.updateStabilityChart(stats);
             }
         }
         
-        // Update training stage chart - always update for stage changes
-        if (isNewEpisode || stats.trainingStage !== undefined) {
-            this.updateStageChart(stats);
+        if (isNewEpisode && stats.kills !== undefined) {
+            this.updateKillsChart(stats);
+        }
+
+        if (isNewEpisode && stats.weightDrift && stats.weightDrift.length > 0) {
+            this.updateWeightDriftChart(stats);
         }
     }
     
-    // Split chart updates into separate methods for better organization
     updateRewardChart(stats) {
-        const chartId = 'chart-reward';
-        const canvas = document.getElementById(chartId);
-        
-        if (canvas && this.charts['reward']) {
-            const chart = this.charts['reward'];
-            
-            // Only keep the last 20 episodes for clarity
-            const lastN = 20;
-            
-            // Add the new reward data point
-            if (stats.totalRewards.length > 0) {
-                const newReward = stats.totalRewards[stats.totalRewards.length - 1];
-                
-                // Add new data point
-                chart.data.labels.push(stats.episode.toString());
-                chart.data.datasets[0].data.push(newReward);
-                chart.data.datasets[1].data.push(stats.runningAvgReward);
-                
-                // Trim to keep only the last N points
-                if (chart.data.labels.length > lastN) {
-                    chart.data.labels = chart.data.labels.slice(-lastN);
-                    chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-lastN);
-                    chart.data.datasets[1].data = chart.data.datasets[1].data.slice(-lastN);
-                }
-                
-                this.batchUpdateChart(chart);
+        const chart = this.charts['reward'];
+        if (!chart) return;
+        const lastN = 20;
+        if (stats.totalRewards.length > 0) {
+            chart.data.labels.push(stats.episode.toString());
+            chart.data.datasets[0].data.push(stats.totalRewards[stats.totalRewards.length - 1]);
+            chart.data.datasets[1].data.push(stats.runningAvgReward);
+            if (chart.data.labels.length > lastN) {
+                chart.data.labels = chart.data.labels.slice(-lastN);
+                chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-lastN);
+                chart.data.datasets[1].data = chart.data.datasets[1].data.slice(-lastN);
             }
+            this._update(chart);
         }
     }
     
     updateStepsChart(stats) {
-        const chartId = 'chart-steps';
-        const canvas = document.getElementById(chartId);
-        
-        if (canvas && this.charts['steps']) {
-            const chart = this.charts['steps'];
-            
-            // Only keep the last 20 episodes
-            const lastN = 20;
-            
-            // Add the new steps data point
-            if (stats.episodeLengths.length > 0) {
-                const newSteps = stats.episodeLengths[stats.episodeLengths.length - 1];
-                
-                // Add new data point
-                chart.data.labels.push(stats.episode.toString());
-                chart.data.datasets[0].data.push(newSteps);
-                
-                // Trim to keep only the last N points
-                if (chart.data.labels.length > lastN) {
-                    chart.data.labels = chart.data.labels.slice(-lastN);
-                    chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-lastN);
-                }
-                
-                this.batchUpdateChart(chart);
+        const chart = this.charts['steps'];
+        if (!chart) return;
+        const lastN = 20;
+        if (stats.episodeLengths.length > 0) {
+            chart.data.labels.push(stats.episode.toString());
+            chart.data.datasets[0].data.push(stats.episodeLengths[stats.episodeLengths.length - 1]);
+            if (chart.data.labels.length > lastN) {
+                chart.data.labels = chart.data.labels.slice(-lastN);
+                chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-lastN);
             }
+            this._update(chart);
         }
     }
     
     updateExplorationChart(stats) {
-        const chartId = 'chart-exploration';
-        const canvas = document.getElementById(chartId);
-        
-        if (canvas && this.charts['exploration']) {
-            const chart = this.charts['exploration'];
-            
-            // Keep a very limited history for exploration rate
-            const maxPoints = 15;
-            
-            // Add the new exploration rate point
-            chart.data.labels.push(stats.episode.toString());
-            chart.data.datasets[0].data.push(stats.explorationRate);
-            
-            // Trim to keep only the most recent points
-            if (chart.data.labels.length > maxPoints) {
-                chart.data.labels = chart.data.labels.slice(-maxPoints);
-                chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-maxPoints);
-            }
-            
-            this.batchUpdateChart(chart);
+        const chart = this.charts['exploration'];
+        if (!chart) return;
+        chart.data.labels.push(stats.episode.toString());
+        chart.data.datasets[0].data.push(stats.explorationRate);
+        if (chart.data.labels.length > 15) {
+            chart.data.labels = chart.data.labels.slice(-15);
+            chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-15);
         }
+        this._update(chart);
     }
     
     updateStabilityChart(stats) {
-        const chartId = 'chart-stability';
-        const canvas = document.getElementById(chartId);
+        const chart = this.charts['stability'];
+        if (!chart) return;
+        const scores = stats.stabilityScores;
+        const latest = scores.slice(Math.max(0, scores.length - this.stabilityUpdateRatio));
+        if (latest.length === 0) return;
+        const avg = latest.reduce((s, v) => s + v, 0) / latest.length;
         
-        if (canvas && this.charts['stability']) {
-            const chart = this.charts['stability'];
-            
-            // Limit the number of points to prevent browser crash
-            const maxPoints = this.maxStabilityPoints;
-            
-            // Clear existing data if we're starting a new episode
-            if (stats.stabilityScores.length === 1) {
-                chart.data.labels = [];
-                chart.data.datasets[0].data = [];
-            }
-            
-            // Only sample a subset of points for better performance
-            const scores = stats.stabilityScores;
-            const latestScores = scores.slice(Math.max(0, scores.length - this.stabilityUpdateRatio));
-            
-            if (latestScores.length === 0) return;
-            
-            // Average the latest scores for a smoother chart
-            const averageScore = latestScores.reduce((sum, score) => sum + score, 0) / latestScores.length;
-            
-            // Add new data point - use fixed width labels
-            const currentLength = chart.data.datasets[0].data.length;
-            
-            // Use sparse labeling
-            if (currentLength < maxPoints) {
-                chart.data.labels.push((currentLength % maxPoints).toString());
-            }
-            chart.data.datasets[0].data.push(averageScore);
-            
-            // Trim to keep only the most recent points
-            if (chart.data.datasets[0].data.length > maxPoints) {
-                // Shift data instead of slice to maintain continuous scrolling effect
-                chart.data.datasets[0].data.shift();
-                
-                // Keep the same number of labels
-                if (chart.data.labels.length > maxPoints) {
-                    chart.data.labels.shift();
-                }
-            }
-            
-            // Use a more efficient update approach
-            this.batchUpdateChart(chart, 'none'); // 'none' disables animations
+        if (scores.length === 1) {
+            chart.data.labels = [];
+            chart.data.datasets[0].data = [];
         }
+        
+        const len = chart.data.datasets[0].data.length;
+        if (len < this.maxStabilityPoints) chart.data.labels.push((len % this.maxStabilityPoints).toString());
+        chart.data.datasets[0].data.push(avg);
+        
+        if (chart.data.datasets[0].data.length > this.maxStabilityPoints) {
+            chart.data.datasets[0].data.shift();
+            if (chart.data.labels.length > this.maxStabilityPoints) chart.data.labels.shift();
+        }
+        this._update(chart);
     }
     
-    updateStageChart(stats) {
-        const chartId = 'chart-stage';
-        const canvas = document.getElementById(chartId);
-        
-        if (canvas && this.charts['stage']) {
-            const chart = this.charts['stage'];
-            const trainingStage = stats.trainingStage !== undefined ? stats.trainingStage : 0;
-            
-            // Only keep track of stage changes
-            if (chart.data.datasets[0].data.length === 0 || 
-                chart.data.datasets[0].data[chart.data.datasets[0].data.length - 1] !== trainingStage) {
-                
-                // Add new data point
-                chart.data.labels.push(stats.episode.toString());
-                chart.data.datasets[0].data.push(trainingStage);
-                
-                // Keep a reasonable history (last 50 episodes)
-                const maxPoints = 50;
-                if (chart.data.labels.length > maxPoints) {
-                    chart.data.labels = chart.data.labels.slice(-maxPoints);
-                    chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-maxPoints);
-                }
-                
-                this.batchUpdateChart(chart);
-            }
+    updateKillsChart(stats) {
+        const chart = this.charts['kills'];
+        if (!chart) return;
+        chart.data.labels.push(stats.episode.toString());
+        chart.data.datasets[0].data.push(stats.kills || 0);
+        chart.data.datasets[1].data.push(stats.deaths || 0);
+        if (chart.data.labels.length > 30) {
+            chart.data.labels = chart.data.labels.slice(-30);
+            chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-30);
+            chart.data.datasets[1].data = chart.data.datasets[1].data.slice(-30);
         }
+        this._update(chart);
     }
     
-    // Add these properties to match the RL class
-    get explorationMin() { return 0.01; }
-    get explorationDecay() { return 0.995; }
-    
-    // Helper for batch updating chart
-    batchUpdateChart(chart, animationMode = 'none') {
-        try {
-            if (chart) {
-                chart.update(animationMode);
-            }
-        } catch (error) {
-            console.warn('Error updating chart:', error);
+    updateWeightDriftChart(stats) {
+        const chart = this.charts['weightDrift'];
+        if (!chart) return;
+        const drift = stats.weightDrift;
+        const lastN = 50;
+        chart.data.labels.push(stats.episode.toString());
+        chart.data.datasets[0].data.push(drift[drift.length - 1]);
+        if (chart.data.labels.length > lastN) {
+            chart.data.labels = chart.data.labels.slice(-lastN);
+            chart.data.datasets[0].data = chart.data.datasets[0].data.slice(-lastN);
         }
+        this._update(chart);
+    }
+    
+    _update(chart) {
+        try { if (chart) chart.update('none'); } catch (e) { /* ignore */ }
     }
 }

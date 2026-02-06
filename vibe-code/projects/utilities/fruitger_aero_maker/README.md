@@ -1,53 +1,70 @@
 # Frutiger Aero Beat Maker
 
-Lightweight browser beat & pattern arranger inspired by playful Nintendo-era UI aesthetics.
+A whimsical browser-based beat maker inspired by Nintendo Wii/DS-era aesthetics. Features floating bubbles, drifting clouds, and that signature Frutiger Aero glass morphism look.
 
 ## Features
-- 5 tracks: Drums, Bass, Chords, Lead 1, Lead 2
-- Progressive pattern library (1/2/3 evolution tiers) + legacy set
-- 32-step internal resolution with automatic pattern expansion
-- Per-track: volume, reverb send, delay send, mute & solo
-- Global: tempo, swing, bars (4–16), scale root selector, metronome
-- Randomize generator (weighted early simple / late advanced)
-- Save songs to localStorage, load & delete
-- Export / Import JSON for sharing
-- Click timeline area to jump during playback
-- Spacebar shortcut for Play / Pause
-- Inline quick pattern picker + full modal with descriptions
-- Help modal summarizing shortcuts
+
+### Audio Engine
+- **5 tracks**: Drums, Bass, Chords, Lead 1, Lead 2
+- **Web Audio API** synthesis with proper envelopes
+- **Effects**: Global reverb (convolver) and delay with feedback
+- **Per-track controls**: Volume, reverb send, delay send, mute & solo
+
+### Pattern System
+- **Progressive pattern library**: Tier 1/2/3 patterns that evolve in complexity
+- **Pattern preview**: Hover over patterns to preview before selecting
+- **32-step resolution** with automatic pattern expansion
+- **Pattern descriptions**: Each pattern includes a description and tier indicator
+
+### Arrangement
+- **4-16 bars** configurable arrangement
+- **Tempo, swing, key, and scale** controls
+- **Smart randomizer**: Weighted to use simpler patterns early, complex later
+- **Visual playhead** with playing cell highlighting
+
+### Save/Export
+- **LocalStorage** song save/load/delete
+- **JSON export/import** for sharing
+- **WAV export** for rendered audio files
+
+### UI/UX
+- **Frutiger Aero aesthetic**: Glass panels, floating bubbles, drifting clouds
+- **Collapsible panels** for a cleaner workspace
+- **Undo/redo** with history (Ctrl+Z / Ctrl+Y)
+- **Keyboard shortcuts** (Space: play/pause, Ctrl+S: save, ?: help)
+- **Toast notifications** for user feedback
+- **Responsive design** for different screen sizes
+
+## Keyboard Shortcuts
+| Key | Action |
+|-----|--------|
+| Space | Play / Pause |
+| Ctrl+Z | Undo |
+| Ctrl+Y | Redo |
+| Ctrl+S | Save song |
+| ? | Show help |
 
 ## Usage
-1. Select tempo, swing and number of bars.
-2. Click cells in any track to assign a pattern (right-click to clear).
-3. Use Randomize to auto-populate an arrangement.
-4. Adjust per‑track effect sends & volume; Mute / Solo as needed.
-5. Press Play (or Spacebar). Click within the track area ruler to reposition.
-6. Save songs locally or Export as JSON. Import later to restore.
+1. Set tempo, swing, and number of bars in the transport panel
+2. Click cells in the arrangement grid to assign patterns
+3. Use "Randomize" for instant arrangements
+4. Adjust per-track effects in the collapsible Effects panel
+5. Save songs locally or export as JSON/WAV
 
 ## File Structure
-- index.html: UI layout
-- styles.css: Frutiger Aero themed styling
-- app.js: Core logic (audio synthesis via Web Audio API, sequencing, pattern management)
-
-## Export Format
-```json
-{
-  "tempo": 120,
-  "volume": 0.7,
-  "swing": 0.12,
-  "bars": 8,
-  "scale": "major",
-  "metronome": true,
-  "patterns": { "drums_0": "Mii Beat - 1", "bass_0": "eShop - 1" }
-}
+```
+fruitger_aero_maker/
+├── index.html   # Main app structure
+├── styles.css   # Frutiger Aero styling
+├── app.js       # Audio engine & UI logic
+└── README.md    # Documentation
 ```
 
-## Notes
-- Audio uses simple synthesized osc / noise sources for minimal footprint.
-- Swing offsets every 2nd 32nd step (audio only; visuals stay grid-aligned).
-- Pattern expansion doubles rhythmic density while preserving musical intent.
-
-## Roadmap Ideas (Post Release)
+## Technical Notes
+- Audio uses synthesized oscillators and noise for a small footprint
+- WAV export uses OfflineAudioContext for offline rendering
+- Patterns auto-expand from 16→32 steps preserving musical intent
+- Swing offsets every other 32nd step (audio only, visuals stay grid-aligned)
 - Pattern editing (custom user patterns)
 - Multiple pattern lanes per track
 - Export to WAV / stem rendering

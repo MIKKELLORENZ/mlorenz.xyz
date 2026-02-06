@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bayesian Optimization Playground</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Core palette */
+  --bg-deep: #0b0e1a;
+  --bg-mid: #111630;
+  --bg-card: rgba(20, 26, 55, 0.75);
+  --bg-card-hover: rgba(30, 38, 75, 0.85);
+  --border: rgba(100, 140, 255, 0.15);
+  --border-hover: rgba(100, 180, 255, 0.3);
+
+  /* Accents */
+  --cyan: #22d3ee;
+  --cyan-glow: rgba(34, 211, 238, 0.35);
+  --purple: #a78bfa;
+  --purple-glow: rgba(167, 139, 250, 0.25);
+  --green: #34d399;
+  --green-glow: rgba(52, 211, 153, 0.25);
+  --amber: #fbbf24;
+  --amber-glow: rgba(251, 191, 36, 0.3);
+  --rose: #fb7185;
+  --rose-glow: rgba(251, 113, 133, 0.3);
+  --blue: #60a5fa;
+
+  /* Text */
+  --text: #e2e8f0;
+  --text-dim: #94a3b8;
+  --text-muted: #64748b;
+
+  /* Spacing */
+  --sp-xs: 4px;
+  --sp-sm: 8px;
+  --sp-md: 16px;
+  --sp-lg: 24px;
+  --sp-xl: 32px;
+
+  /* Radii */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+
+  /* Transitions */
+  --fast: 0.15s ease;
+  --med: 0.25s ease;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: var(--bg-deep);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+}
+
+/* ============ BACKGROUND ============ */
+.bg-effects {
+  position: fixed; inset: 0; z-index: -1; overflow: hidden;
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 20%, rgba(34,211,238,0.08), transparent),
+    radial-gradient(ellipse 60% 50% at 85% 80%, rgba(167,139,250,0.06), transparent),
+    radial-gradient(ellipse 90% 70% at 50% 50%, rgba(20,26,55,0.9), transparent),
+    linear-gradient(160deg, #0b0e1a 0%, #111630 50%, #0f1225 100%);
+}
+.bg-effects .orb {
+  position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.4;
+  animation: orb-drift 25s ease-in-out infinite alternate;
+}
+.bg-effects .orb:nth-child(1) { width: 500px; height: 500px; left: -10%; top: -10%; background: rgba(34,211,238,0.12); animation-duration: 30s; }
+.bg-effects .orb:nth-child(2) { width: 400px; height: 400px; right: -5%; bottom: 10%; background: rgba(167,139,250,0.1); animation-duration: 22s; animation-delay: -8s; }
+.bg-effects .orb:nth-child(3) { width: 300px; height: 300px; left: 40%; top: 60%; background: rgba(52,211,153,0.08); animation-duration: 28s; animation-delay: -15s; }
+
+@keyframes orb-drift {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(30px, -20px) scale(1.05); }
+  100% { transform: translate(-20px, 15px) scale(0.97); }
+}
+
+/* Grid lines background effect */
+.bg-effects::after {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(100,140,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(100,140,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse 60% 60% at 50% 50%, black 20%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse 60% 60% at 50% 50%, black 20%, transparent 70%);
+}
+
+/* ============ LAYOUT ============ */
+.app {
+  display: flex; flex-direction: column;
+  max-width: 1440px; margin: 0 auto;
+  padding: var(--sp-md); min-height: 100vh;
+  gap: var(--sp-md);
+}
+
+/* Header */
+.header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: var(--sp-md) var(--sp-lg);
+  background: var(--bg-card);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+}
+.header-left { display: flex; align-items: center; gap: var(--sp-md); }
+.logo-icon {
+  width: 42px; height: 42px; border-radius: var(--r-md);
+  background: linear-gradient(135deg, var(--cyan), var(--purple));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem; box-shadow: 0 4px 15px var(--cyan-glow);
+}
+.header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
+.header .tagline { font-size: 0.8rem; color: var(--text-dim); }
+.header-actions { display: flex; gap: var(--sp-sm); align-items: center; }
+
+/* Main grid: chart + sidebar */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: var(--sp-md);
+  flex: 1;
+  min-height: 0;
+}
+
+/* ============ PANELS (glass cards) ============ */
+.panel {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  transition: border-color var(--med), box-shadow var(--med);
+}
+.panel:hover { border-color: var(--border-hover); }
+.panel-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: var(--sp-md) var(--sp-lg);
+  border-bottom: 1px solid var(--border);
+}
+.panel-head h2 { font-size: 0.95rem; font-weight: 600; display: flex; align-items: center; gap: var(--sp-sm); }
+.panel-body { padding: var(--sp-lg); }
+
+/* ============ CHART AREA ============ */
+.chart-col { display: flex; flex-direction: column; gap: var(--sp-md); min-height: 0; }
+
+.chart-panel { flex: 1; display: flex; flex-direction: column; min-height: 400px; }
+.chart-panel .panel-body { flex: 1; padding: var(--sp-sm); position: relative; display: flex; flex-direction: column; }
+
+.canvas-wrap {
+  flex: 1; position: relative; border-radius: var(--r-sm);
+  overflow: hidden; min-height: 0;
+}
+.canvas-wrap canvas { width: 100%; height: 100%; display: block; }
+
+/* Chart legend */
+.chart-legend {
+  display: flex; flex-wrap: wrap; gap: var(--sp-md);
+  padding: var(--sp-sm) var(--sp-md) 0;
+  font-size: 0.75rem; color: var(--text-dim);
+}
+.legend-item { display: flex; align-items: center; gap: 6px; cursor: pointer; transition: opacity var(--fast); }
+.legend-item:hover { opacity: 0.8; }
+.legend-swatch {
+  width: 16px; height: 3px; border-radius: 2px;
+}
+.legend-swatch.dashed { border-top: 2px dashed; height: 0; background: none; }
+.legend-swatch.dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* Stats bar below chart */
+.stats-bar {
+  display: flex; flex-wrap: wrap; gap: var(--sp-sm);
+  padding: var(--sp-md) var(--sp-lg);
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+.stat {
+  display: flex; align-items: center; gap: var(--sp-xs);
+  padding: var(--sp-xs) var(--sp-md);
+  background: rgba(255,255,255,0.04);
+  border-radius: 20px; border: 1px solid var(--border);
+}
+.stat-label { color: var(--text-muted); }
+.stat-value { font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; }
+
+/* ============ CONTROLS PANEL ============ */
+.controls-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-md);
+}
+.controls-bar .panel-body { padding: var(--sp-md) var(--sp-lg); }
+
+/* Transport buttons */
+.transport {
+  display: flex; gap: var(--sp-sm); align-items: center;
+  padding-bottom: var(--sp-md);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-md);
+}
+
+/* ============ SIDEBAR ============ */
+.sidebar { display: flex; flex-direction: column; gap: var(--sp-md); min-height: 0; overflow-y: auto; }
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* Education panel */
+.edu-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.edu-panel .panel-body { flex: 1; overflow-y: auto; padding: var(--sp-md); }
+.edu-panel .panel-body::-webkit-scrollbar { width: 4px; }
+.edu-panel .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.edu-step {
+  padding: var(--sp-md);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-bottom: var(--sp-md);
+  transition: border-color var(--med), background var(--med);
+}
+.edu-step.active { border-color: var(--cyan); background: rgba(34,211,238,0.05); }
+.edu-step-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(34,211,238,0.15); color: var(--cyan);
+  font-size: 0.7rem; font-weight: 700; margin-bottom: var(--sp-sm);
+}
+.edu-step.active .edu-step-num { background: var(--cyan); color: var(--bg-deep); }
+.edu-step h4 { font-size: 0.85rem; font-weight: 600; margin-bottom: var(--sp-xs); }
+.edu-step p { font-size: 0.8rem; color: var(--text-dim); line-height: 1.6; }
+.edu-step .highlight { color: var(--cyan); font-weight: 500; }
+.edu-step .math { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--purple); }
+
+/* Concept cards */
+.concept-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-sm);
+  margin-top: var(--sp-sm);
+}
+.concept-card {
+  padding: var(--sp-sm) var(--sp-md);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all var(--fast);
+}
+.concept-card:hover { border-color: var(--border-hover); background: rgba(255,255,255,0.04); }
+.concept-card .cc-label { font-weight: 600; margin-bottom: 2px; }
+.concept-card .cc-val { color: var(--text-dim); font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; }
+
+/* ============ BUTTONS ============ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--sp-xs); padding: var(--sp-sm) var(--sp-md);
+  font-size: 0.85rem; font-weight: 600; font-family: inherit;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: rgba(255,255,255,0.05); color: var(--text);
+  cursor: pointer; transition: all var(--fast); white-space: nowrap;
+}
+.btn:hover { background: rgba(255,255,255,0.1); border-color: var(--border-hover); }
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn .icon { font-size: 1rem; }
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--cyan), #06b6d4);
+  border-color: transparent; color: var(--bg-deep);
+  box-shadow: 0 4px 15px var(--cyan-glow);
+}
+.btn-primary:hover { box-shadow: 0 6px 20px var(--cyan-glow); filter: brightness(1.1); }
+
+.btn-success {
+  background: linear-gradient(135deg, var(--green), #10b981);
+  border-color: transparent; color: var(--bg-deep);
+  box-shadow: 0 4px 15px var(--green-glow);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, var(--rose), #e11d48);
+  border-color: transparent; color: white;
+}
+
+.btn-icon-only { width: 36px; height: 36px; padding: 0; border-radius: 50%; }
+.btn-sm { padding: var(--sp-xs) var(--sp-sm); font-size: 0.8rem; }
+.btn-lg { padding: var(--sp-md) var(--sp-xl); font-size: 1rem; }
+
+/* ============ FORM CONTROLS ============ */
+.form-group { display: flex; flex-direction: column; gap: var(--sp-xs); }
+.form-group label {
+  font-size: 0.75rem; font-weight: 500; color: var(--text-dim);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.form-group label .val {
+  font-family: 'JetBrains Mono', monospace; color: var(--cyan); font-size: 0.7rem;
+}
+
+.select-wrap select, .form-group select {
+  width: 100%; padding: var(--sp-sm) var(--sp-md);
+  font-size: 0.85rem; font-family: inherit;
+  background: rgba(255,255,255,0.05); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  outline: none; cursor: pointer; transition: all var(--fast);
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+}
+.select-wrap select:focus, .form-group select:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--cyan-glow); }
+select option { background: var(--bg-mid); color: var(--text); }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.1); outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--cyan), #06b6d4);
+  box-shadow: 0 2px 8px var(--cyan-glow); cursor: pointer;
+  transition: transform var(--fast);
+}
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+input[type="range"]::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%; border: none;
+  background: linear-gradient(135deg, var(--cyan), #06b6d4);
+  box-shadow: 0 2px 8px var(--cyan-glow); cursor: pointer;
+}
+
+/* Checkbox toggle */
+.toggle-wrap {
+  display: flex; align-items: center; gap: var(--sp-sm);
+  font-size: 0.8rem; color: var(--text-dim); cursor: pointer;
+}
+.toggle-wrap input { display: none; }
+.toggle-track {
+  width: 36px; height: 20px; border-radius: 10px;
+  background: rgba(255,255,255,0.1); position: relative;
+  transition: background var(--fast); flex-shrink: 0;
+}
+.toggle-track::after {
+  content: ''; position: absolute; left: 2px; top: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--text-dim); transition: all var(--fast);
+}
+.toggle-wrap input:checked + .toggle-track { background: var(--cyan); }
+.toggle-wrap input:checked + .toggle-track::after { left: 18px; background: var(--bg-deep); }
+
+/* ============ TOOLTIP ============ */
+.tooltip-container { position: relative; }
+.chart-tooltip {
+  position: absolute; pointer-events: none;
+  padding: var(--sp-sm) var(--sp-md);
+  background: rgba(15, 18, 37, 0.95);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: 0.75rem; color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap; z-index: 100;
+  box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+  display: none;
+}
+.chart-tooltip.visible { display: block; }
+
+/* ============ MOBILE TAB BAR ============ */
+.mobile-tabs {
+  display: none;
+  border-bottom: 1px solid var(--border);
+}
+.mobile-tab {
+  flex: 1; padding: var(--sp-md);
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-dim); font-family: inherit; font-size: 0.85rem;
+  font-weight: 500; cursor: pointer; transition: all var(--fast);
+}
+.mobile-tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+
+/* ============ ONBOARDING OVERLAY ============ */
+.onboarding {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--sp-lg);
+}
+.onboarding.hidden { display: none; }
+.onboarding-card {
+  max-width: 480px; width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: var(--sp-xl);
+  text-align: center;
+}
+.onboarding-card h2 { font-size: 1.5rem; margin-bottom: var(--sp-sm); }
+.onboarding-card p { color: var(--text-dim); margin-bottom: var(--sp-lg); font-size: 0.9rem; line-height: 1.7; }
+.onboarding-card .feature-pills {
+  display: flex; flex-wrap: wrap; gap: var(--sp-sm); justify-content: center;
+  margin-bottom: var(--sp-lg);
+}
+.feature-pill {
+  padding: var(--sp-xs) var(--sp-md); border-radius: 20px;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+  font-size: 0.8rem; color: var(--text-dim);
+}
+
+/* ============ TOAST ============ */
+.toast-container { position: fixed; bottom: var(--sp-lg); right: var(--sp-lg); z-index: 2000; display: flex; flex-direction: column; gap: var(--sp-sm); }
+.toast {
+  padding: var(--sp-md) var(--sp-lg); border-radius: var(--r-md);
+  background: var(--bg-card); border: 1px solid var(--border);
+  backdrop-filter: blur(20px); font-size: 0.85rem;
+  animation: toast-in 0.3s ease;
+  box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+}
+.toast.success { border-left: 3px solid var(--green); }
+.toast.info { border-left: 3px solid var(--cyan); }
+
+@keyframes toast-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ============ RESPONSIVE ============ */
+@media (max-width: 1024px) {
+  .main-grid { grid-template-columns: 1fr; }
+  .sidebar {
+    max-height: none; overflow: visible;
+  }
+  .mobile-tabs { display: flex; }
+  .sidebar-section { display: none; }
+  .sidebar-section.active { display: block; }
+}
+
+@media (max-width: 680px) {
+  .app { padding: var(--sp-sm); gap: var(--sp-sm); }
+  .header { padding: var(--sp-sm) var(--sp-md); border-radius: var(--r-lg); flex-wrap: wrap; gap: var(--sp-sm); }
+  .header h1 { font-size: 1.05rem; }
+  .header .tagline { display: none; }
+  .controls-bar { grid-template-columns: 1fr; }
+  .chart-panel { min-height: 320px; }
+  .stats-bar { font-size: 0.75rem; }
+  .stat { padding: 2px var(--sp-sm); }
+  .transport { flex-wrap: wrap; }
+  .btn { padding: 6px var(--sp-sm); font-size: 0.8rem; }
+  .btn-lg { padding: var(--sp-sm) var(--sp-md); font-size: 0.9rem; }
+  .concept-grid { grid-template-columns: 1fr; }
+  .panel-head { padding: var(--sp-sm) var(--sp-md); }
+  .panel-body { padding: var(--sp-md); }
+  .form-group { gap: 2px; }
+  .toast-container { left: var(--sp-sm); right: var(--sp-sm); bottom: var(--sp-sm); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ============ SCROLLBAR ============ */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Focus */
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<div class="bg-effects">
+  <div class="orb"></div>
+  <div class="orb"></div>
+  <div class="orb"></div>
+</div>
+
+<div class="app">
+  <!-- ====== HEADER ====== -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo-icon">📊</div>
+      <div>
+        <h1>Bayesian Optimization Playground</h1>
+        <span class="tagline">Interactive Gaussian Process exploration</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <label class="toggle-wrap" title="Show true function">
+        <input type="checkbox" id="toggle-true-fn" checked>
+        <span class="toggle-track"></span>
+        <span>Truth</span>
+      </label>
+      <label class="toggle-wrap" title="Show acquisition function">
+        <input type="checkbox" id="toggle-acq" checked>
+        <span class="toggle-track"></span>
+        <span>Acq.</span>
+      </label>
+      <button class="btn btn-icon-only" id="btn-help" title="Help" aria-label="Help">?</button>
+    </div>
+  </header>
+
+  <!-- ====== CONTROLS BAR ====== -->
+  <section class="panel controls-bar">
+    <div class="panel-body">
+      <div class="transport">
+        <button class="btn btn-primary btn-lg" id="btn-step">
+          <span class="icon">▶</span> Step
+        </button>
+        <button class="btn btn-success" id="btn-auto">
+          <span class="icon">⟳</span> Auto-Run
+        </button>
+        <button class="btn btn-danger btn-sm" id="btn-reset">
+          <span class="icon">↺</span> Reset
+        </button>
+        <div class="stat" style="margin-left:auto">
+          <span class="stat-label">Iteration</span>
+          <span class="stat-value" id="stat-iter">0</span>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap:var(--sp-md);">
+        <div class="form-group">
+          <label>Objective Function</label>
+          <select id="sel-objective">
+            <option value="sineMix" selected>Sine Mixture</option>
+            <option value="doublePeak">Double Peaks</option>
+            <option value="rastrigin1d">Rastrigin 1D</option>
+            <option value="noisyQuad">Noisy Quadratic</option>
+            <option value="cliff">Cliff Edge</option>
+            <option value="multiModal">Multi-Modal</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Kernel</label>
+          <select id="sel-kernel">
+            <option value="rbf" selected>RBF (Squared Exp.)</option>
+            <option value="matern32">Matérn 3/2</option>
+            <option value="matern52">Matérn 5/2</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Acquisition <span class="val" id="lbl-acq-name">EI</span></label>
+          <select id="sel-acquisition">
+            <option value="ei" selected>Expected Improvement</option>
+            <option value="ucb">Upper Confidence Bound</option>
+            <option value="poi">Probability of Improvement</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Length Scale <span class="val" id="lbl-ls">0.15</span></label>
+          <input type="range" id="rng-ls" min="0.03" max="0.6" step="0.01" value="0.15">
+        </div>
+        <div class="form-group">
+          <label>Noise σ <span class="val" id="lbl-noise">0.05</span></label>
+          <input type="range" id="rng-noise" min="0" max="0.3" step="0.01" value="0.05">
+        </div>
+        <div class="form-group">
+          <label>Exploration ξ/κ <span class="val" id="lbl-explore">0.01</span></label>
+          <input type="range" id="rng-explore" min="0" max="2" step="0.01" value="0.01">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== MAIN GRID ====== -->
+  <div class="main-grid">
+    <!-- Chart Column -->
+    <div class="chart-col">
+      <div class="panel chart-panel">
+        <div class="panel-head">
+          <h2><span style="color:var(--cyan)">●</span> Gaussian Process Surrogate</h2>
+          <div style="display:flex;gap:var(--sp-sm);align-items:center;">
+            <div class="form-group" style="flex-direction:row;align-items:center;gap:var(--sp-sm);">
+              <label style="white-space:nowrap;margin:0;">Init Samples</label>
+              <select id="sel-init-samples" style="width:60px;padding:4px 8px;font-size:0.8rem;">
+                <option value="2">2</option>
+                <option value="3" selected>3</option>
+                <option value="5">5</option>
+                <option value="8">8</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="canvas-wrap tooltip-container">
+            <canvas id="canvas-main"></canvas>
+            <div class="chart-tooltip" id="tooltip"></div>
+          </div>
+          <div class="chart-legend" id="chart-legend">
+            <div class="legend-item" data-key="truth">
+              <span class="legend-swatch dashed" style="border-color:#94a3b8"></span> True f(x)
+            </div>
+            <div class="legend-item" data-key="mean">
+              <span class="legend-swatch" style="background:var(--cyan)"></span> GP Mean
+            </div>
+            <div class="legend-item" data-key="ci">
+              <span class="legend-swatch" style="background:rgba(34,211,238,0.2);height:8px;"></span> 95% CI
+            </div>
+            <div class="legend-item" data-key="samples">
+              <span class="legend-swatch dot" style="background:var(--amber)"></span> Samples
+            </div>
+            <div class="legend-item" data-key="next">
+              <span class="legend-swatch dot" style="background:var(--rose)"></span> Next point
+            </div>
+            <div class="legend-item" data-key="acq">
+              <span class="legend-swatch" style="background:var(--green)"></span> Acquisition
+            </div>
+          </div>
+        </div>
+        <div class="stats-bar">
+          <div class="stat">
+            <span class="stat-label">Best y</span>
+            <span class="stat-value" id="stat-best-y">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Best x</span>
+            <span class="stat-value" id="stat-best-x">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Next x</span>
+            <span class="stat-value" id="stat-next-x">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Kernel</span>
+            <span class="stat-value" id="stat-kernel">RBF</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Acq. Max</span>
+            <span class="stat-value" id="stat-acq-max">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <!-- Mobile tab bar -->
+      <div class="mobile-tabs">
+        <button class="mobile-tab active" data-section="edu">📚 Learn</button>
+        <button class="mobile-tab" data-section="params">⚙️ Details</button>
+      </div>
+
+      <!-- Education Panel -->
+      <div class="panel edu-panel sidebar-section active" data-section="edu" id="edu-panel">
+        <div class="panel-head">
+          <h2>📚 How It Works</h2>
+          <button class="btn btn-sm" id="btn-edu-reset">Reset</button>
+        </div>
+        <div class="panel-body" id="edu-content">
+          <!-- Populated by bayesian-education.js -->
+        </div>
+      </div>
+
+      <!-- Parameter Details Panel -->
+      <div class="panel sidebar-section" data-section="params" id="params-panel" style="display:none;">
+        <div class="panel-head">
+          <h2>⚙️ Parameter Details</h2>
+        </div>
+        <div class="panel-body">
+          <div class="concept-grid" id="concept-grid">
+            <!-- Populated by JS -->
+          </div>
+          <div style="margin-top:var(--sp-md);">
+            <h4 style="font-size:0.85rem;margin-bottom:var(--sp-sm);">📈 Convergence</h4>
+            <div class="canvas-wrap" style="height:120px;">
+              <canvas id="canvas-convergence"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ====== FOOTER ====== -->
+  <footer style="text-align:center;padding:var(--sp-md);color:var(--text-muted);font-size:0.8rem;">
+    Built with Canvas & vanilla JS · No external dependencies · All computation runs in your browser
+  </footer>
+</div>
+
+<!-- ====== ONBOARDING ====== -->
+<div class="onboarding hidden" id="onboarding">
+  <div class="onboarding-card">
+    <div style="font-size:2.5rem;margin-bottom:var(--sp-md);">📊</div>
+    <h2>Welcome to the Bayesian Optimization Playground</h2>
+    <p>Explore how Gaussian Processes guide intelligent search for the optimum of unknown functions. Watch the surrogate model update in real-time as new samples arrive.</p>
+    <div class="feature-pills">
+      <span class="feature-pill">🔬 Gaussian Processes</span>
+      <span class="feature-pill">📈 Acquisition Functions</span>
+      <span class="feature-pill">🎯 Optimization</span>
+      <span class="feature-pill">🧠 Interactive Learning</span>
+    </div>
+    <button class="btn btn-primary btn-lg" id="btn-start" style="width:100%;">
+      <span class="icon">▶</span> Start Exploring
+    </button>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="bayesian-education.js"></script>
+<script src="script.js"></script>
+</body>
+</html>

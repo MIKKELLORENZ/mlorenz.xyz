@@ -3,14 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Data Engineer & Developer Portfolio</title>
+    <title>Mikkel Lorenz — Biology × Code</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body class="dark-mode">
+
+    <!-- Grain overlay -->
+    <div class="grain-overlay" aria-hidden="true"></div>
+
     <nav class="navbar">
         <div class="container">
-            <div class="logo">MLORENZ.XYZ</div>
+            <div class="logo">MLORENZ<span class="logo-dot">.</span>XYZ</div>
             <div class="nav-items">
                 <a href="index.html" class="active">Home</a>
                 <a href="vibe-code/index.html">Vibe Code</a>
@@ -22,20 +29,193 @@
         </div>
     </nav>
 
-    <main class="container">
-        <section class="intro">
-            <h2>Welcome</h2>
-            <p>I'm Mikkel Lorenz - a solutions architect, with a background in Biology, Bioinformatics and Engineering. I also do 3D printing.</p>
-            <br>
+    <!-- ═══════════════ HERO ═══════════════ -->
+    <section class="hero-split">
+        <div class="hero-content">
+            <p class="hero-kicker"><span class="status-dot"></span> Building BioPilot</p>
+            <h1 class="hero-headline">
+                Biotech labs deserve<br>
+                <span class="gradient-text">better&nbsp;software</span>.
+                <span class="hero-period">So I'm building it.</span>
+            </h1>
+            <p class="hero-sub">
+                I'm Mikkel — trained in biology and bioinformatics, former solutions architect,
+                now founder. I got tired of watching brilliant scientists fight spreadsheets,
+                so I started building the tools they actually need. Currently that means
+                <strong>BioPilot</strong>: a single system replacing the mess of ELNs, LIMS,
+                and disconnected platforms that slow down cell therapy research.
+            </p>
+            <div class="hero-cta-group">
+                <a href="https://biopilot.net" target="_blank" rel="noopener" class="cta-button"><i class="fas fa-dna"></i> See BioPilot</a>
+                <a href="consultancy/index.html" class="cta-button cta-outline"><i class="fas fa-flask"></i> Work with Me</a>
+            </div>
+        </div>
+        <div class="hero-portrait">
+            <div class="portrait-frame">
+                <video autoplay loop muted playsinline poster="assets/profile.jpg">
+                    <source src="assets/profile-video.mp4" type="video/mp4">
+                    <img src="assets/profile.jpg" alt="Mikkel Lorenz">
+                </video>
+            </div>
+            <div class="portrait-glow"></div>
+        </div>
+    </section>
 
-            <h2>Fields of interest</h2>
-            <p>Additive Manufacturing • Artificial Intelligence • Automation • Closed loop optimization • Large language models (LLMs) • Material Science • Oncolytic Vira • Robotics • Sound Design • Space Travel • Teleportation Technologies • Time Travel</p>
+    <!-- ═══════════════ MARQUEE ═══════════════ -->
+    <div class="marquee-strip" aria-hidden="true">
+        <div class="marquee-track">
+            <span>CELL THERAPY</span><span class="marquee-sep">◆</span>
+            <span>BAYESIAN OPTIMIZATION</span><span class="marquee-sep">◆</span>
+            <span>REINFORCEMENT LEARNING</span><span class="marquee-sep">◆</span>
+            <span>BIOINFORMATICS</span><span class="marquee-sep">◆</span>
+            <span>DATA ENGINEERING</span><span class="marquee-sep">◆</span>
+            <span>SOUND DESIGN</span><span class="marquee-sep">◆</span>
+            <span>3D PRINTING</span><span class="marquee-sep">◆</span>
+            <span>ONCOLYTIC VIROTHERAPY</span><span class="marquee-sep">◆</span>
+            <span>ROBOTICS</span><span class="marquee-sep">◆</span>
+            <span>LLMs & AI</span><span class="marquee-sep">◆</span>
+            <span>CLOSED-LOOP SYSTEMS</span><span class="marquee-sep">◆</span>
+            <span>SPACE TRAVEL</span><span class="marquee-sep">◆</span>
+            <!-- duplicate for seamless loop -->
+            <span>CELL THERAPY</span><span class="marquee-sep">◆</span>
+            <span>BAYESIAN OPTIMIZATION</span><span class="marquee-sep">◆</span>
+            <span>REINFORCEMENT LEARNING</span><span class="marquee-sep">◆</span>
+            <span>BIOINFORMATICS</span><span class="marquee-sep">◆</span>
+            <span>DATA ENGINEERING</span><span class="marquee-sep">◆</span>
+            <span>SOUND DESIGN</span><span class="marquee-sep">◆</span>
+            <span>3D PRINTING</span><span class="marquee-sep">◆</span>
+            <span>ONCOLYTIC VIROTHERAPY</span><span class="marquee-sep">◆</span>
+            <span>ROBOTICS</span><span class="marquee-sep">◆</span>
+            <span>LLMs & AI</span><span class="marquee-sep">◆</span>
+            <span>CLOSED-LOOP SYSTEMS</span><span class="marquee-sep">◆</span>
+            <span>SPACE TRAVEL</span><span class="marquee-sep">◆</span>
+        </div>
+    </div>
+
+    <main class="container">
+
+        <!-- ═══════════════ ABOUT ═══════════════ -->
+        <section class="section">
+            <h2 class="section-title">The Short Version</h2>
+            <div class="about-grid">
+                <div class="about-text">
+                    <p>
+                        I studied biology and bioinformatics. Somewhere along the way
+                        I realized the biggest bottleneck in the lab wasn't the science — it was the
+                        software. Researchers losing hours to copy-paste between five different platforms.
+                        Data locked in silos nobody could query. Compliance checklists on paper in 2025.
+                    </p>
+                    <p>
+                        So I crossed over. I design and build the systems that connect the dots —
+                        data pipelines, AI integrations, lab platforms, and the deep ontology models
+                        that make them actually understand biology. Not just "biotech software," but
+                        <em>software that thinks in cell lines, passages, and CQAs</em>.
+                    </p>
+                    <p>
+                        When I'm not doing that, I'm vibe-coding physics simulations at 2 AM,
+                        teaching myself reinforcement learning by making agents balance sticks,
+                        or 3D-printing something that probably won't work on the first try.
+                    </p>
+                </div>
+                <div class="about-sidebar">
+                    <div class="now-card">
+                        <h3><span class="status-dot"></span> Now</h3>
+                        <ul>
+                            <li>Building <strong>BioPilot</strong> — the CTR engine</li>
+                            <li>Consulting on data infra for biotech</li>
+                            <li>Vibe-coding too many side projects</li>
+                            <li>Copenhagen, Denmark 🇩🇰</li>
+                        </ul>
+                    </div>
+                    <div class="about-links">
+                        <a href="mailto:mikkelvind@gmail.com" class="about-link-card">
+                            <i class="fas fa-envelope"></i>
+                            <span>mikkelvind@gmail.com</span>
+                        </a>
+                        <a href="https://github.com/MIKKELLORENZ" class="about-link-card" target="_blank" rel="noopener">
+                            <i class="fab fa-github"></i>
+                            <span>GitHub</span>
+                        </a>
+                        <a href="https://www.linkedin.com/in/mikkel-lorenz-67b0a636/" class="about-link-card" target="_blank" rel="noopener">
+                            <i class="fab fa-linkedin"></i>
+                            <span>LinkedIn</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
         </section>
+
+        <!-- ═══════════════ BELIEFS ═══════════════ -->
+        <section class="section beliefs-section">
+            <h2 class="section-title">Things I Believe</h2>
+            <div class="beliefs-grid">
+                <blockquote class="belief-card">
+                    <p>The best tools disappear into the workflow. If you're thinking about the software, the software has failed.</p>
+                </blockquote>
+                <blockquote class="belief-card">
+                    <p>Biology is messy. Your data model shouldn't be. Deep ontologies beat shallow schemas every time.</p>
+                </blockquote>
+                <blockquote class="belief-card">
+                    <p>If you can't run a DOE inside the same tool you track your cells in, you're going to lose data. It's not a question of if.</p>
+                </blockquote>
+                <blockquote class="belief-card">
+                    <p>The gap between "research-grade" and "GMP-ready" is mostly just traceability. Build it in from day one.</p>
+                </blockquote>
+            </div>
+        </section>
+
+        <!-- ═══════════════ VIBE CODE PREVIEW ═══════════════ -->
+        <section class="section">
+            <h2 class="section-title">Vibe Code</h2>
+            <p class="section-subtitle">
+                The stuff I build for fun. Weekend experiments, interactive simulations,
+                and things that probably didn't need to exist — but I'm glad they do.
+            </p>
+            <div class="grid" style="margin-top: 25px;">
+                <a href="vibe-code/index.html?project=bayesian_optimization" class="card vibe-preview-card">
+                    <div class="card-content">
+                        <span class="card-emoji">☕</span>
+                        <h3 class="card-title">Bayesian Optimization</h3>
+                        <p class="card-description">Learn BO by brewing the perfect cup of coffee. Turns out acquisition functions are surprisingly fun.</p>
+                        <div class="card-tags">
+                            <span class="tag">Machine Learning</span>
+                            <span class="tag">Interactive</span>
+                        </div>
+                    </div>
+                </a>
+                <a href="vibe-code/index.html?project=cosmo_lab" class="card vibe-preview-card">
+                    <div class="card-content">
+                        <span class="card-emoji">🌌</span>
+                        <h3 class="card-title">Cosmo Lab</h3>
+                        <p class="card-description">Particle physics sandbox — spawn photons, tweak gravity, crash planets into each other.</p>
+                        <div class="card-tags">
+                            <span class="tag">Physics</span>
+                            <span class="tag">Simulation</span>
+                        </div>
+                    </div>
+                </a>
+                <a href="vibe-code/index.html?project=stick_balance" class="card vibe-preview-card">
+                    <div class="card-content">
+                        <span class="card-emoji">🤖</span>
+                        <h3 class="card-title">Stick Balance</h3>
+                        <p class="card-description">An RL agent learns to balance a stick in real time. Fails hilariously, then figures it out.</p>
+                        <div class="card-tags">
+                            <span class="tag">RL</span>
+                            <span class="tag">Physics</span>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div style="text-align: center; margin-top: 30px;">
+                <a href="vibe-code/index.html" class="cta-button cta-outline"><i class="fas fa-th"></i> Browse All Projects</a>
+            </div>
+        </section>
+
     </main>
 
     <footer>
         <div class="container">
-            <p>&copy; 2025 - Data Engineer & Developer Portfolio</p>
+            <p>&copy; 2026 — Mikkel Lorenz · Built with caffeine and questionable time management</p>
         </div>
     </footer>
 

@@ -1,0 +1,59 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+#info {
+    position: absolute;
+    top: 10px;
+    width: 100%;
+    text-align: center;
+    color: white;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    z-index: 100;
+    background-color: rgba(0, 0, 0, 0.5);
+    padding: 5px;
+    border-radius: 5px;
+}
+
+#control-panel button {
+    background-color: #4CAF50;
+    border: none;
+    color: white;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 14px;
+    margin: 4px 2px;
+    transition-duration: 0.4s;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+#control-panel button:hover {
+    background-color: #45a049;
+}
+
+#info-display {
+    font-size: 12px;
+    line-height: 1.6;
+    margin-top: 5px;
+}
+
+#chart-container canvas {
+    margin-bottom: 10px;
+}

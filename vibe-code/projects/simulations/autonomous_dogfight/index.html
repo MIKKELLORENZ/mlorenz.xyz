@@ -2,16 +2,70 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <title>Autonomous Dogfight Simulation</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div id="info">
-        <p>WASD/Arrow Keys: Move | Mouse: Look around | Space/Shift: Up/Down</p>
+    <!-- Loading overlay -->
+    <div id="loading-overlay">
+        <div class="loader-content">
+            <div class="loader-icon">
+                <svg viewBox="0 0 80 80" width="80" height="80">
+                    <circle cx="40" cy="40" r="32" stroke="rgba(0,200,255,0.3)" stroke-width="4" fill="none"/>
+                    <circle cx="40" cy="40" r="32" stroke="url(#grad)" stroke-width="4" fill="none" stroke-dasharray="60 140" stroke-linecap="round">
+                        <animateTransform attributeName="transform" type="rotate" from="0 40 40" to="360 40 40" dur="1s" repeatCount="indefinite"/>
+                    </circle>
+                    <defs><linearGradient id="grad"><stop offset="0%" stop-color="#00c8ff"/><stop offset="100%" stop-color="#ff3366"/></linearGradient></defs>
+                </svg>
+            </div>
+            <h1 class="loader-title">AUTONOMOUS DOGFIGHT</h1>
+            <p class="loader-subtitle">Initializing Neural Networks...</p>
+            <div class="loader-bar"><div class="loader-bar-fill" id="load-progress"></div></div>
+        </div>
     </div>
+
+    <!-- HUD info bar -->
+    <div id="info">
+        <span class="desktop-controls">WASD: Move · Mouse: Look · Space/Shift: Up/Down · Click to lock</span>
+        <span class="mobile-controls">Touch joysticks to control camera</span>
+    </div>
+
+    <!-- Scoreboard HUD -->
+    <div id="scoreboard">
+        <div class="score-drone score-blue">
+            <div class="score-name">🔵 BLUE</div>
+            <div class="score-health-bar"><div class="score-health-fill blue-health" style="width:100%"></div></div>
+            <div class="score-stats">
+                <span class="score-kills">K: <b id="blue-kills">0</b></span>
+                <span class="score-deaths">D: <b id="blue-deaths">0</b></span>
+            </div>
+        </div>
+        <div class="score-vs">VS</div>
+        <div class="score-drone score-red">
+            <div class="score-name">RED 🔴</div>
+            <div class="score-health-bar"><div class="score-health-fill red-health" style="width:100%"></div></div>
+            <div class="score-stats">
+                <span class="score-kills">K: <b id="red-kills">0</b></span>
+                <span class="score-deaths">D: <b id="red-deaths">0</b></span>
+            </div>
+        </div>
+    </div>
+
     <canvas id="canvas"></canvas>
     
+    <!-- Mobile virtual joysticks -->
+    <div id="joystick-left" class="joystick-zone">
+        <div class="joystick-base"><div class="joystick-thumb"></div></div>
+    </div>
+    <div id="joystick-right" class="joystick-zone">
+        <div class="joystick-base"><div class="joystick-thumb"></div></div>
+    </div>
+
     <!-- External Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
@@ -19,91 +73,78 @@
 
     <!-- TensorFlow Backend Initialization -->
     <script>
-        // Ensure TensorFlow.js is fully initialized before any model operations
         const initTensorFlow = async () => {
             try {
-                // Wait for the TensorFlow.js script to fully load first
+                const prog = document.getElementById('load-progress');
+                const subtitle = document.querySelector('.loader-subtitle');
+                
                 await new Promise(resolve => {
-                    if (tf && tf.getBackend) {
-                        resolve();
-                    } else {
-                        // If not immediately available, add a small delay and check again
-                        setTimeout(() => {
-                            if (tf) resolve();
-                            else console.error("TensorFlow.js failed to load properly");
-                        }, 500);
-                    }
+                    if (tf && tf.getBackend) resolve();
+                    else setTimeout(() => { if (tf) resolve(); }, 500);
                 });
                 
-                // Force a sync initialization of the backend before we do anything else
+                subtitle.textContent = 'Setting up compute backend...';
+                prog.style.width = '20%';
                 await tf.ready();
                 
-                // Explicitly set the backend to WebGL with fallback to CPU if needed
                 try {
                     await tf.setBackend('webgl');
                     console.log('Using WebGL backend');
-                    
-                    // Set WebGL configuration for better stability
-                    const gl = await tf.backend().getGPGPUContext().gl;
-                    if (gl) {
-                        // Increase WebGL memory for larger models
-                        gl.getExtension('WEBGL_lose_context'); // Handle context loss
-                        gl.disable(gl.DEPTH_TEST); // Disable depth testing for 2D tensors
-                    }
                 } catch (err) {
-                    console.warn('WebGL backend failed, falling back to CPU', err);
+                    console.warn('WebGL failed, falling back to CPU', err);
                     await tf.setBackend('cpu');
-                    console.log('Using CPU backend');
                 }
                 
-                // Memory management settings
-                tf.ENV.set('WEBGL_FORCE_F16_TEXTURES', false); // Use 32-bit for better stability
-                tf.ENV.set('WEBGL_FLUSH_THRESHOLD', 1); // Flush operations more aggressively
-                tf.ENV.set('WEBGL_CPU_FORWARD', false); // Only fallback to CPU when necessary
+                prog.style.width = '40%';
+                subtitle.textContent = 'Warming up tensors...';
                 
-                // Make sure the backend is initialized by running a small operation
+                tf.ENV.set('WEBGL_FORCE_F16_TEXTURES', false);
+                tf.ENV.set('WEBGL_FLUSH_THRESHOLD', 1);
+                
                 const temp = tf.tensor([1, 2, 3]);
-                temp.print();
                 temp.dispose();
                 
-                console.log('TensorFlow.js initialized with backend:', tf.getBackend());
+                prog.style.width = '60%';
+                subtitle.textContent = 'Loading simulation...';
+                console.log('TensorFlow.js initialized:', tf.getBackend());
                 
-                // Now that TF is ready, load our application scripts
                 loadApplicationScripts();
             } catch (err) {
                 console.error('Failed to initialize TensorFlow.js:', err);
-                // Show error to user
-                document.getElementById('info').innerHTML = 
-                    '<p style="color:red">Error initializing TensorFlow.js. Please try a different browser.</p>';
+                document.getElementById('loading-overlay').innerHTML = 
+                    '<div class="loader-content"><h1 style="color:#ff3366">Error</h1><p style="color:#aaa">TensorFlow.js failed to load. Try a different browser.</p></div>';
             }
         };
         
-        // Function to load our application scripts after TF is ready
         function loadApplicationScripts() {
-            const scripts = [
-                'drone.js',
-                'charts.js',
-                'reinforcement.js',
-                'centralizedTraining.js', // Add the centralized training script
-                'script.js'
-            ];
+            const prog = document.getElementById('load-progress');
+            const subtitle = document.querySelector('.loader-subtitle');
+            const scripts = ['drone.js', 'charts.js', 'reinforcement.js', 'centralizedTraining.js', 'script.js'];
             
             let loaded = 0;
             scripts.forEach(src => {
                 const script = document.createElement('script');
                 script.src = src;
-                script.async = false; // Keep script execution order
+                script.async = false;
                 script.onload = () => {
                     loaded++;
+                    const pct = 60 + (loaded / scripts.length) * 40;
+                    prog.style.width = pct + '%';
+                    subtitle.textContent = `Loaded ${src}...`;
                     if (loaded === scripts.length) {
-                        console.log('All application scripts loaded');
+                        subtitle.textContent = 'Ready!';
+                        setTimeout(() => {
+                            document.getElementById('loading-overlay').classList.add('fade-out');
+                            setTimeout(() => {
+                                document.getElementById('loading-overlay').style.display = 'none';
+                            }, 600);
+                        }, 400);
                     }
                 };
                 document.body.appendChild(script);
             });
         }
         
-        // Start TensorFlow.js initialization
         window.addEventListener('load', initTensorFlow);
     </script>
 </body>

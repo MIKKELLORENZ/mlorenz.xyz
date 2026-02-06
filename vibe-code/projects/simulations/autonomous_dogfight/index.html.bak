@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autonomous Dogfight Simulation</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="info">
+        <p>WASD/Arrow Keys: Move | Mouse: Look around | Space/Shift: Up/Down</p>
+    </div>
+    <canvas id="canvas"></canvas>
+    
+    <!-- External Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
+
+    <!-- TensorFlow Backend Initialization -->
+    <script>
+        // Ensure TensorFlow.js is fully initialized before any model operations
+        const initTensorFlow = async () => {
+            try {
+                // Wait for the TensorFlow.js script to fully load first
+                await new Promise(resolve => {
+                    if (tf && tf.getBackend) {
+                        resolve();
+                    } else {
+                        // If not immediately available, add a small delay and check again
+                        setTimeout(() => {
+                            if (tf) resolve();
+                            else console.error("TensorFlow.js failed to load properly");
+                        }, 500);
+                    }
+                });
+                
+                // Force a sync initialization of the backend before we do anything else
+                await tf.ready();
+                
+                // Explicitly set the backend to WebGL with fallback to CPU if needed
+                try {
+                    await tf.setBackend('webgl');
+                    console.log('Using WebGL backend');
+                    
+                    // Set WebGL configuration for better stability
+                    const gl = await tf.backend().getGPGPUContext().gl;
+                    if (gl) {
+                        // Increase WebGL memory for larger models
+                        gl.getExtension('WEBGL_lose_context'); // Handle context loss
+                        gl.disable(gl.DEPTH_TEST); // Disable depth testing for 2D tensors
+                    }
+                } catch (err) {
+                    console.warn('WebGL backend failed, falling back to CPU', err);
+                    await tf.setBackend('cpu');
+                    console.log('Using CPU backend');
+                }
+                
+                // Memory management settings
+                tf.ENV.set('WEBGL_FORCE_F16_TEXTURES', false); // Use 32-bit for better stability
+                tf.ENV.set('WEBGL_FLUSH_THRESHOLD', 1); // Flush operations more aggressively
+                tf.ENV.set('WEBGL_CPU_FORWARD', false); // Only fallback to CPU when necessary
+                
+                // Make sure the backend is initialized by running a small operation
+                const temp = tf.tensor([1, 2, 3]);
+                temp.print();
+                temp.dispose();
+                
+                console.log('TensorFlow.js initialized with backend:', tf.getBackend());
+                
+                // Now that TF is ready, load our application scripts
+                loadApplicationScripts();
+            } catch (err) {
+                console.error('Failed to initialize TensorFlow.js:', err);
+                // Show error to user
+                document.getElementById('info').innerHTML = 
+                    '<p style="color:red">Error initializing TensorFlow.js. Please try a different browser.</p>';
+            }
+        };
+        
+        // Function to load our application scripts after TF is ready
+        function loadApplicationScripts() {
+            const scripts = [
+                'drone.js',
+                'charts.js',
+                'reinforcement.js',
+                'centralizedTraining.js', // Add the centralized training script
+                'script.js'
+            ];
+            
+            let loaded = 0;
+            scripts.forEach(src => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.async = false; // Keep script execution order
+                script.onload = () => {
+                    loaded++;
+                    if (loaded === scripts.length) {
+                        console.log('All application scripts loaded');
+                    }
+                };
+                document.body.appendChild(script);
+            });
+        }
+        
+        // Start TensorFlow.js initialization
+        window.addEventListener('load', initTensorFlow);
+    </script>
+</body>
+</html>

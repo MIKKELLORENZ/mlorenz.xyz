@@ -3,14 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Consultancy Services</title>
+    <title>Consultancy — Mikkel Lorenz</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body class="dark-mode">
+
+    <!-- Grain overlay -->
+    <div class="grain-overlay" aria-hidden="true"></div>
+
     <nav class="navbar">
         <div class="container">
-            <div class="logo">MLORENZ.XYZ</div>
+            <div class="logo">MLORENZ<span class="logo-dot">.</span>XYZ</div>
             <div class="nav-items">
                 <a href="../index.html">Home</a>
                 <a href="../vibe-code/index.html">Vibe Code</a>
@@ -22,63 +29,191 @@
         </div>
     </nav>
 
+    <!-- ═══════════════ CONSULTANCY HERO ═══════════════ -->
+    <section class="consult-hero">
+        <div class="container">
+            <p class="hero-kicker">Consultancy Services</p>
+            <h1 class="hero-headline">
+                Turning complex <span class="gradient-text">bio + data</span> problems<br>
+                into systems that work.
+            </h1>
+            <p class="hero-sub" style="max-width: 700px;">
+                I help biotech teams, startups, and research groups architect the software and data infrastructure
+                they need — from automated pipelines to AI-powered lab platforms.
+            </p>
+        </div>
+    </section>
+
     <main class="container">
-        <section class="intro">
-            <h1>Consultancy Services</h1>
-            <p>Leveraging expertise in data engineering, solutions architecture, and bioinformatics to drive innovation and solve complex challenges.</p>
+
+        <!-- ═══════════════ HOW I WORK ═══════════════ -->
+        <section class="section">
+            <h2 class="section-title">How I Work</h2>
+            <p class="section-subtitle">
+                I don't just consult — I build. Every engagement starts with understanding the real bottleneck,
+                then delivering working systems, not slide decks.
+            </p>
+            <div class="process-steps">
+                <div class="process-step">
+                    <div class="step-number">01</div>
+                    <h3>Diagnose</h3>
+                    <p>Deep-dive into your current stack, workflows, and pain points. Understand where time and data are being lost.</p>
+                </div>
+                <div class="process-step">
+                    <div class="step-number">02</div>
+                    <h3>Architect</h3>
+                    <p>Design the target system — data models, integrations, automation flows, and compliance requirements.</p>
+                </div>
+                <div class="process-step">
+                    <div class="step-number">03</div>
+                    <h3>Build & Ship</h3>
+                    <p>Rapid prototyping and iterative delivery. Working software in weeks, not quarters.</p>
+                </div>
+            </div>
         </section>
 
+        <!-- ═══════════════ EXPERTISE AREAS ═══════════════ -->
         <section class="section">
-            <h2 class="section-title">Core Competencies</h2>
+            <h2 class="section-title">Expertise</h2>
             <div class="grid">
-                <div class="card">
+                <div class="card expertise-card">
                     <div class="card-content">
+                        <div class="expertise-icon"><i class="fas fa-project-diagram"></i></div>
                         <h3 class="card-title">Solutions Architecture</h3>
-                        <p class="card-description">Designing and implementing scalable, robust, and efficient system architectures tailored to your business needs.</p>
+                        <p class="card-description">
+                            Designing scalable system architectures — from cloud-native microservices
+                            to on-prem lab informatics platforms. I think in data flows, not features.
+                        </p>
                     </div>
                 </div>
-                <div class="card">
+                <div class="card expertise-card">
                     <div class="card-content">
+                        <div class="expertise-icon"><i class="fas fa-database"></i></div>
                         <h3 class="card-title">Data Engineering & Automation</h3>
-                        <p class="card-description">Building automated data pipelines, ETL processes, and closed-loop optimization systems to turn data into actionable insights.</p>
+                        <p class="card-description">
+                            Building automated data pipelines, ETL processes, and closed-loop optimization
+                            systems. From raw instrument output to actionable dashboards.
+                        </p>
                     </div>
                 </div>
-                <div class="card">
+                <div class="card expertise-card">
                     <div class="card-content">
+                        <div class="expertise-icon"><i class="fas fa-brain"></i></div>
                         <h3 class="card-title">AI & Large Language Models</h3>
-                        <p class="card-description">Integrating cutting-edge AI and LLMs to enhance automation, generate insights, and create intelligent applications.</p>
+                        <p class="card-description">
+                            Integrating LLMs and machine learning into real workflows — not demos.
+                            RAG pipelines, intelligent assistants, and automated analysis.
+                        </p>
                     </div>
                 </div>
-                 <div class="card">
+                <div class="card expertise-card">
                     <div class="card-content">
-                        <h3 class="card-title">Bioinformatics</h3>
-                        <p class="card-description">Applying computational techniques to analyze biological data, with a focus on areas like oncolytic virotherapy.</p>
+                        <div class="expertise-icon"><i class="fas fa-dna"></i></div>
+                        <h3 class="card-title">Bioinformatics & Lab Informatics</h3>
+                        <p class="card-description">
+                            Deep domain knowledge in cell therapy, oncolytic virotherapy, flow cytometry,
+                            and biological ontologies. I speak both biology and code.
+                        </p>
                     </div>
                 </div>
             </div>
         </section>
 
+        <!-- ═══════════════ BIOPILOT CASE STUDY ═══════════════ -->
         <section class="section">
-            <h2 class="section-title">Service Offerings</h2>
-            <ul>
-                <li>End-to-end system design and architecture review.</li>
-                <li>Custom data pipeline development and optimization.</li>
-                <li>AI and LLM integration strategy and implementation.</li>
-                <li>Proof-of-concept and prototype development.</li>
-                <li>Technical project management and advisory.</li>
-            </ul>
+            <h2 class="section-title">Case Study: BioPilot</h2>
+            <div class="case-study-card">
+                <div class="case-study-header">
+                    <span class="flagship-badge"><i class="fas fa-flask"></i> In Development</span>
+                    <h3>Building the operating system for cell therapy research</h3>
+                </div>
+                <div class="case-study-body">
+                    <div class="case-study-problem">
+                        <h4><i class="fas fa-exclamation-triangle"></i> The Problem</h4>
+                        <p>
+                            Cell therapy labs run on a patchwork of disconnected tools — Benchling for notebook entries,
+                            separate LIMS for inventory, FlowJo for FACS analysis, spreadsheets for DOE.
+                            File management is clunky, integrations are spotty, and there's no single source of truth
+                            connecting a protocol to its results.
+                        </p>
+                    </div>
+                    <div class="case-study-solution">
+                        <h4><i class="fas fa-lightbulb"></i> The Solution</h4>
+                        <p>
+                            BioPilot is a single integrated platform with cell-therapy-native ontologies, a day-by-day
+                            protocol scheduler, native FACS gating workspace, DOE optimization boards, full inventory
+                            management, and audit trails — all designed around how cell therapy researchers actually work.
+                        </p>
+                    </div>
+                </div>
+                <div class="case-study-outcomes">
+                    <div class="outcome">
+                        <i class="fas fa-check-circle"></i>
+                        <span>Native gating replaces FlowJo → CSV → Benchling ingestion pipeline</span>
+                    </div>
+                    <div class="outcome">
+                        <i class="fas fa-check-circle"></i>
+                        <span>DOE optimization as default working surface — no more export-to-stats-tool</span>
+                    </div>
+                    <div class="outcome">
+                        <i class="fas fa-check-circle"></i>
+                        <span>Deep ontology: cell lines ↔ media ↔ compounds ↔ hardware ↔ processes</span>
+                    </div>
+                    <div class="outcome">
+                        <i class="fas fa-check-circle"></i>
+                        <span>One platform from exploratory R&D through GMP compliance</span>
+                    </div>
+                </div>
+            </div>
         </section>
 
-        <section class="section contact-section">
-            <h2 class="section-title">Get in Touch</h2>
-            <p>If you have a project in mind or wish to explore a collaboration, please reach out.</p>
-            <a href="mailto:mikkelvind@gmail.com" class="cta-button">Contact Me</a>
+        <!-- ═══════════════ SERVICES ═══════════════ -->
+        <section class="section">
+            <h2 class="section-title">Service Offerings</h2>
+            <div class="services-list">
+                <div class="service-item">
+                    <i class="fas fa-drafting-compass"></i>
+                    <span>End-to-end system design and architecture review</span>
+                </div>
+                <div class="service-item">
+                    <i class="fas fa-stream"></i>
+                    <span>Custom data pipeline development and optimization</span>
+                </div>
+                <div class="service-item">
+                    <i class="fas fa-robot"></i>
+                    <span>AI and LLM integration strategy and implementation</span>
+                </div>
+                <div class="service-item">
+                    <i class="fas fa-rocket"></i>
+                    <span>Proof-of-concept and rapid prototype development</span>
+                </div>
+                <div class="service-item">
+                    <i class="fas fa-clipboard-check"></i>
+                    <span>Technical project management and advisory</span>
+                </div>
+                <div class="service-item">
+                    <i class="fas fa-microscope"></i>
+                    <span>Lab informatics and bioinformatics platform design</span>
+                </div>
+            </div>
         </section>
+
+        <!-- ═══════════════ CTA ═══════════════ -->
+        <section class="section contact-section" style="text-align: center; padding: 60px 0;">
+            <h2 class="section-title" style="display: block; text-align: center;">Let's Build Something</h2>
+            <p style="max-width: 550px; margin: 20px auto; color: var(--text-secondary); font-size: 1.1rem;">
+                Have a complex data or biotech challenge? I'd love to hear about it.
+            </p>
+            <a href="mailto:mikkelvind@gmail.com" class="cta-button" style="margin-top: 15px;">
+                <i class="fas fa-envelope"></i> Get in Touch
+            </a>
+        </section>
+
     </main>
 
     <footer>
         <div class="container">
-            <p>&copy; 2025 - Data Engineer & Developer Portfolio</p>
+            <p>&copy; 2026 — Mikkel Lorenz</p>
         </div>
     </footer>
 
