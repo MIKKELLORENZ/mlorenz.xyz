@@ -16,8 +16,22 @@ class FloatingBowlsGarden {
         this.container = document.getElementById('container');
         this.columnPositions = [];
         this.windField = { time: 0 };
+        this.windState = {
+            direction: Math.random() * Math.PI * 2,
+            targetDirection: Math.random() * Math.PI * 2,
+            strength: 0.0003,
+            targetStrength: 0.0003,
+            changeTimer: 0,
+            changeInterval: 8 + Math.random() * 12
+        };
         this.grassBlades = [];
         this.ambientParticles = [];
+        this.koiFish = [];
+        this.rcBoat = null;
+        this.boatMode = false;
+        this.boatKeys = { left: false, right: false, forward: false, backward: false };
+        this.boatAngle = 0;
+        this.boatSpeed = 0;
         this.clock = new THREE.Clock();
         this.elapsedTime = 0;
         this.raycaster = new THREE.Raycaster();
@@ -38,7 +52,17 @@ class FloatingBowlsGarden {
         this.targetDayProgress = 0.35;
         this.isNight = false;
         this.isMuted = false;
-        this.lydianScale = [523.25, 587.33, 659.25, 739.99, 783.99, 880.00, 987.77];
+        this.scales = {
+            lydian:      { name: 'Lydian',      notes: [523.25, 587.33, 659.25, 739.99, 783.99, 880.00, 987.77] },
+            mixolydian:  { name: 'Mixolydian',  notes: [523.25, 587.33, 659.25, 698.46, 783.99, 880.00, 932.33] },
+            dorian:      { name: 'Dorian',       notes: [523.25, 587.33, 622.25, 698.46, 783.99, 880.00, 932.33] },
+            pentatonic:  { name: 'Pentatonic',   notes: [523.25, 587.33, 659.25, 783.99, 880.00, 523.25*2, 587.33*2] },
+            aeolian:     { name: 'Aeolian',      notes: [523.25, 587.33, 622.25, 698.46, 783.99, 830.61, 932.33] },
+            phrygian:    { name: 'Phrygian',     notes: [523.25, 554.37, 622.25, 698.46, 783.99, 830.61, 932.33] }
+        };
+        this.scaleNames = ['lydian', 'mixolydian', 'dorian', 'pentatonic', 'aeolian', 'phrygian'];
+        this.currentScaleIndex = 0;
+        this.lydianScale = this.scales.lydian.notes;
         this.lights = {};
 
         this.init();
@@ -48,8 +72,10 @@ class FloatingBowlsGarden {
         this.createLilyPads();
         this.createBowls();
         this.createFireflies();
+        this.createKoiFish();
         this.setupAudio();
         this.setupControls();
+        this.setupBoatControls();
         this.setupUI();
         this.animate();
     }
@@ -68,14 +94,14 @@ class FloatingBowlsGarden {
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.outputEncoding = THREE.sRGBEncoding;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.15;
+        this.renderer.toneMappingExposure = 0.9;
         this.container.appendChild(this.renderer.domElement);
 
-        this.lights.hemisphere = new THREE.HemisphereLight(0x87CEEB, 0x3a5f0b, 0.45);
+        this.lights.hemisphere = new THREE.HemisphereLight(0x87CEEB, 0x3a5f0b, 0.3);
         this.scene.add(this.lights.hemisphere);
-        this.lights.ambient = new THREE.AmbientLight(0xffffff, 0.3);
+        this.lights.ambient = new THREE.AmbientLight(0xffffff, 0.2);
         this.scene.add(this.lights.ambient);
-        this.lights.sun = new THREE.DirectionalLight(0xfff5e0, 0.9);
+        this.lights.sun = new THREE.DirectionalLight(0xfff5e0, 0.6);
         this.lights.sun.position.set(40, 60, 30);
         this.lights.sun.castShadow = true;
         this.lights.sun.shadow.mapSize.width = 2048;
@@ -88,7 +114,7 @@ class FloatingBowlsGarden {
         this.lights.sun.shadow.camera.bottom = -60;
         this.lights.sun.shadow.bias = -0.001;
         this.scene.add(this.lights.sun);
-        this.lights.fill = new THREE.DirectionalLight(0xffe0c0, 0.25);
+        this.lights.fill = new THREE.DirectionalLight(0xffe0c0, 0.15);
         this.lights.fill.position.set(-30, 20, -20);
         this.scene.add(this.lights.fill);
         this.lights.waterGlow = new THREE.PointLight(0x4488ff, 0.3, 20);
@@ -513,13 +539,13 @@ class FloatingBowlsGarden {
             const angle = (i / 15) * Math.PI * 2;
             const radius = 2 + Math.random() * 6;
             const x = Math.cos(angle) * radius, z = Math.sin(angle) * radius;
-            const bowlSize = 0.4 + Math.random() * 0.6;
-            const bowlHeight = bowlSize * 2.5;
+            const bowlSize = 0.5 + Math.random() * 0.55;
+            const bowlHeight = bowlSize * 0.7;
             const outerPoints = [];
             for (let j = 0; j <= 16; j++) {
                 const t = j / 16;
-                const r = bowlSize * Math.sin(t * Math.PI * 0.6);
-                const y = -bowlHeight * Math.cos(t * Math.PI * 0.5) + bowlHeight;
+                const r = bowlSize * (0.1 + 0.9 * Math.pow(t, 0.35));
+                const y = bowlHeight * t;
                 outerPoints.push(new THREE.Vector2(r, y));
             }
             const bowlGeo = new THREE.LatheGeometry(outerPoints, 32);
@@ -530,7 +556,7 @@ class FloatingBowlsGarden {
                 emissive: palette.emissive, emissiveIntensity: 0.0, envMapIntensity: 1.5
             });
             const bowl = new THREE.Mesh(bowlGeo, bowlMat);
-            bowl.position.set(x, 0.2 + bowlHeight * 0.1, z);
+            bowl.position.set(x, 0.15 - bowlHeight * 0.35, z);
             bowl.castShadow = true; bowl.receiveShadow = true;
             bowl.userData = {
                 velocity: new THREE.Vector3((Math.random() - 0.5) * 0.005, 0, (Math.random() - 0.5) * 0.005),
@@ -538,7 +564,7 @@ class FloatingBowlsGarden {
                 frequency: this.lydianScale[i % this.lydianScale.length] * (0.8 + bowlSize * 0.4),
                 lastCollision: 0, isVibrating: false, vibratingUntil: 0,
                 glowIntensity: 0, targetGlow: 0, baseEmissive: palette.emissive,
-                bowlHeight: bowlHeight, originalY: 0.2 + bowlHeight * 0.1
+                bowlHeight: bowlHeight, originalY: 0.15 - bowlHeight * 0.35
             };
             this.bowls.push(bowl);
             this.scene.add(bowl);
@@ -567,6 +593,382 @@ class FloatingBowlsGarden {
             this.scene.add(ff);
         }
     }
+
+    createKoiFish() {
+        const koiColors = [
+            { body: 0xDD2200, accent: 0xFFFFFF, belly: 0xFFEEDD },
+            { body: 0xFF8C00, accent: 0xFFFFFF, belly: 0xFFF8E0 },
+            { body: 0xFFFFFF, accent: 0xCC2200, belly: 0xFFF5EE },
+        ];
+        for (let i = 0; i < 3; i++) {
+            const koiGroup = new THREE.Group();
+            const palette = koiColors[i];
+            const bodyMat = new THREE.MeshStandardMaterial({ color: palette.body, roughness: 0.2, metalness: 0.05 });
+            const bellyMat = new THREE.MeshStandardMaterial({ color: palette.belly, roughness: 0.25 });
+            const accentMat = new THREE.MeshStandardMaterial({ color: palette.accent, roughness: 0.25 });
+            // Body — use lathe for smooth tapered fish shape
+            const bodyProfile = [];
+            for (let j = 0; j <= 20; j++) {
+                const t = j / 20;
+                // Fish cross-section: slim nose, fat middle, thin tail
+                let r;
+                if (t < 0.15) r = 0.04 + t * 0.7;  // nose taper
+                else if (t < 0.55) r = 0.145 - (t - 0.35) * (t - 0.35) * 0.3;  // fat middle
+                else r = Math.max(0.01, 0.145 * (1 - t) / 0.45 * 1.1);  // tail taper
+                bodyProfile.push(new THREE.Vector2(r, (t - 0.5) * 0.9));
+            }
+            const bodyGeo = new THREE.LatheGeometry(bodyProfile, 12);
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.rotation.z = Math.PI / 2;
+            body.scale.set(1, 0.55, 1);  // flatten vertically for fish shape
+            koiGroup.add(body);
+            // Belly highlight
+            const bellyGeo = new THREE.SphereGeometry(0.1, 8, 6);
+            bellyGeo.scale(2.5, 0.25, 0.7);
+            const belly = new THREE.Mesh(bellyGeo, bellyMat);
+            belly.position.set(0.02, -0.03, 0);
+            koiGroup.add(belly);
+            // Eyes
+            const eyeWhiteGeo = new THREE.SphereGeometry(0.018, 6, 6);
+            const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.2 });
+            const eyePupilGeo = new THREE.SphereGeometry(0.01, 6, 6);
+            const eyePupilMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.1 });
+            [-1, 1].forEach(side => {
+                const eyeW = new THREE.Mesh(eyeWhiteGeo, eyeWhiteMat);
+                eyeW.position.set(0.32, 0.02, side * 0.06);
+                koiGroup.add(eyeW);
+                const eyeP = new THREE.Mesh(eyePupilGeo, eyePupilMat);
+                eyeP.position.set(0.335, 0.02, side * 0.065);
+                koiGroup.add(eyeP);
+            });
+            // Dorsal fin — thin triangular ridge
+            const dorsalShape = new THREE.Shape();
+            dorsalShape.moveTo(0, 0);
+            dorsalShape.lineTo(-0.12, 0);
+            dorsalShape.lineTo(-0.04, 0.1);
+            dorsalShape.lineTo(0.06, 0.06);
+            dorsalShape.lineTo(0, 0);
+            const dorsalGeo = new THREE.ExtrudeGeometry(dorsalShape, { depth: 0.005, bevelEnabled: false });
+            const finMat = new THREE.MeshStandardMaterial({ color: palette.body, roughness: 0.3, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+            const dorsal = new THREE.Mesh(dorsalGeo, finMat);
+            dorsal.position.set(0.05, 0.06, -0.0025);
+            koiGroup.add(dorsal);
+            // Pectoral fins (side)
+            const pFinShape = new THREE.Shape();
+            pFinShape.moveTo(0, 0);
+            pFinShape.lineTo(-0.08, -0.04);
+            pFinShape.lineTo(-0.02, -0.06);
+            pFinShape.lineTo(0.03, -0.02);
+            pFinShape.lineTo(0, 0);
+            const pFinGeo = new THREE.ExtrudeGeometry(pFinShape, { depth: 0.003, bevelEnabled: false });
+            const pFinL = new THREE.Mesh(pFinGeo, finMat);
+            pFinL.position.set(0.15, -0.02, 0.07);
+            pFinL.rotation.y = 0.3;
+            pFinL.name = 'pFinL';
+            koiGroup.add(pFinL);
+            const pFinR = new THREE.Mesh(pFinGeo, finMat);
+            pFinR.position.set(0.15, -0.02, -0.07);
+            pFinR.rotation.y = -0.3;
+            pFinR.name = 'pFinR';
+            koiGroup.add(pFinR);
+            // Tail — forked fan
+            const tailShape = new THREE.Shape();
+            tailShape.moveTo(0, 0);
+            tailShape.lineTo(-0.14, 0.08);
+            tailShape.lineTo(-0.1, 0.02);
+            tailShape.lineTo(-0.1, -0.02);
+            tailShape.lineTo(-0.14, -0.08);
+            tailShape.lineTo(0, 0);
+            const tailGeo = new THREE.ExtrudeGeometry(tailShape, { depth: 0.004, bevelEnabled: false });
+            const tailFin = new THREE.Mesh(tailGeo, finMat);
+            tailFin.position.set(-0.42, 0, -0.002);
+            tailFin.name = 'tailFin';
+            koiGroup.add(tailFin);
+            // Accent color patches
+            const numPatches = 2 + Math.floor(Math.random() * 2);
+            for (let p = 0; p < numPatches; p++) {
+                const pGeo = new THREE.SphereGeometry(0.04 + Math.random() * 0.03, 8, 6);
+                pGeo.scale(2.0, 0.45, 0.9);
+                const pMesh = new THREE.Mesh(pGeo, accentMat);
+                pMesh.position.set((Math.random() - 0.3) * 0.4, 0.035, (Math.random() - 0.5) * 0.08);
+                koiGroup.add(pMesh);
+            }
+
+            const angle = (i / 3) * Math.PI * 2 + Math.random() * 0.5;
+            const radius = 2.5 + Math.random() * 4.5;
+            koiGroup.position.set(Math.cos(angle) * radius, 0.08, Math.sin(angle) * radius);
+            koiGroup.scale.set(0.55, 0.55, 0.55);
+            koiGroup.userData = {
+                angle: angle,
+                speed: 0.15 + Math.random() * 0.25,
+                radius: radius,
+                targetRadius: radius,
+                turnTimer: 0,
+                turnInterval: 5 + Math.random() * 10,
+                phase: Math.random() * Math.PI * 2,
+                swimAngle: angle
+            };
+            this.koiFish.push(koiGroup);
+            this.scene.add(koiGroup);
+        }
+    }
+
+    updateKoiFish(delta) {
+        this.koiFish.forEach(koi => {
+            const ud = koi.userData;
+            ud.turnTimer += delta;
+            if (ud.turnTimer > ud.turnInterval) {
+                ud.turnTimer = 0;
+                ud.turnInterval = 4 + Math.random() * 8;
+                ud.swimAngle += (Math.random() - 0.5) * 1.5;
+                ud.targetRadius = 2 + Math.random() * 5.5;
+            }
+            ud.radius += (ud.targetRadius - ud.radius) * delta * 0.5;
+            ud.angle += ud.speed * delta * (1.0 / Math.max(2, ud.radius));
+            const tx = Math.cos(ud.angle) * ud.radius;
+            const tz = Math.sin(ud.angle) * ud.radius;
+            const dx = tx - koi.position.x;
+            const dz = tz - koi.position.z;
+            koi.position.x += dx * delta * 2;
+            koi.position.z += dz * delta * 2;
+            koi.position.y = 0.05 + Math.sin(this.elapsedTime * 1.5 + ud.phase) * 0.015;
+            // Face direction of movement
+            const moveAngle = Math.atan2(dz, dx);
+            koi.rotation.y = -moveAngle;
+            // Tail wag
+            const tailFin = koi.getObjectByName('tailFin');
+            const tailWag = Math.sin(this.elapsedTime * 6 + ud.phase) * 0.45;
+            if (tailFin) tailFin.rotation.y = tailWag;
+            // Pectoral fins paddle
+            const pFinL = koi.getObjectByName('pFinL');
+            const pFinR = koi.getObjectByName('pFinR');
+            const finPaddle = Math.sin(this.elapsedTime * 3.5 + ud.phase) * 0.25;
+            if (pFinL) pFinL.rotation.x = 0.3 + finPaddle;
+            if (pFinR) pFinR.rotation.x = -0.3 - finPaddle;
+            // Gentle body undulation
+            koi.rotation.z = Math.sin(this.elapsedTime * 3 + ud.phase) * 0.04;
+            // Avoid RC boat
+            if (this.rcBoat && this.boatMode) {
+                const bDist = koi.position.distanceTo(this.rcBoat.position);
+                if (bDist < 2.5) {
+                    const away = new THREE.Vector3().subVectors(koi.position, this.rcBoat.position);
+                    away.y = 0; away.normalize();
+                    const flee = (2.5 - bDist) / 2.5;
+                    koi.position.x += away.x * flee * delta * 3;
+                    koi.position.z += away.z * flee * delta * 3;
+                    ud.speed = 0.5; // swim faster when scared
+                }
+            } else {
+                ud.speed += (0.15 + 0.25 * Math.sin(ud.phase) * 0.5 - ud.speed) * delta * 0.3; // relax speed
+            }
+            // Keep inside pond
+            const dist = Math.sqrt(koi.position.x ** 2 + koi.position.z ** 2);
+            if (dist > 8.5) {
+                const n = new THREE.Vector3(koi.position.x, 0, koi.position.z).normalize();
+                koi.position.x -= n.x * (dist - 8.5);
+                koi.position.z -= n.z * (dist - 8.5);
+                ud.swimAngle += Math.PI * 0.5;
+            }
+        });
+    }
+
+    spawnRCBoat() {
+        if (this.rcBoat) {
+            this.scene.remove(this.rcBoat);
+            this.rcBoat = null;
+            this.boatMode = false;
+            return;
+        }
+        const boatGroup = new THREE.Group();
+        const redMat = new THREE.MeshStandardMaterial({ color: 0xCC0000, roughness: 0.2, metalness: 0.3 });
+        const whiteMat = new THREE.MeshStandardMaterial({ color: 0xF2F2F2, roughness: 0.25, metalness: 0.1 });
+        const darkMat = new THREE.MeshStandardMaterial({ color: 0x1b1b1b, roughness: 0.35, metalness: 0.7 });
+        const chromeMat = new THREE.MeshStandardMaterial({ color: 0xCFCFCF, roughness: 0.1, metalness: 0.9 });
+        // Hull — classic RC speedboat V-hull
+        const hullShape = new THREE.Shape();
+        hullShape.moveTo(0.6, 0);
+        hullShape.lineTo(0.35, 0.16);
+        hullShape.lineTo(0.1, 0.18);
+        hullShape.lineTo(-0.2, 0.16);
+        hullShape.lineTo(-0.48, 0.12);
+        hullShape.lineTo(-0.62, 0.08);
+        hullShape.lineTo(-0.62, -0.08);
+        hullShape.lineTo(-0.48, -0.12);
+        hullShape.lineTo(-0.2, -0.16);
+        hullShape.lineTo(0.1, -0.18);
+        hullShape.lineTo(0.35, -0.16);
+        hullShape.lineTo(0.6, 0);
+        const hullGeo = new THREE.ExtrudeGeometry(hullShape, { depth: 0.12, bevelEnabled: false });
+        hullGeo.translate(0, 0, -0.06);
+        const hull = new THREE.Mesh(hullGeo, redMat);
+        hull.rotation.x = -Math.PI / 2;
+        hull.position.set(0, 0.0, 0);
+        boatGroup.add(hull);
+        // Deck — raised top surface
+        const deckGeo = new THREE.ExtrudeGeometry(hullShape, { depth: 0.04, bevelEnabled: false });
+        deckGeo.scale(0.82, 0.7, 1);
+        deckGeo.translate(0.02, 0, -0.02);
+        const deck = new THREE.Mesh(deckGeo, whiteMat);
+        deck.rotation.x = -Math.PI / 2;
+        deck.position.set(0.02, 0.05, 0);
+        boatGroup.add(deck);
+        // Cockpit cutout
+        const cockpitGeo = new THREE.BoxGeometry(0.18, 0.015, 0.12);
+        const cockpitMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.6 });
+        const cockpit = new THREE.Mesh(cockpitGeo, cockpitMat);
+        cockpit.position.set(0.12, 0.055, 0);
+        boatGroup.add(cockpit);
+        // Windshield — angled trapezoid
+        const wsShape = new THREE.Shape();
+        wsShape.moveTo(-0.08, 0);
+        wsShape.lineTo(0.08, 0);
+        wsShape.lineTo(0.05, 0.06);
+        wsShape.lineTo(-0.05, 0.06);
+        wsShape.lineTo(-0.08, 0);
+        const wsGeo = new THREE.ExtrudeGeometry(wsShape, { depth: 0.004, bevelEnabled: false });
+        const wsMat = new THREE.MeshPhysicalMaterial({ color: 0xA9D9FF, roughness: 0.0, metalness: 0.05, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
+        const ws = new THREE.Mesh(wsGeo, wsMat);
+        ws.rotation.set(-0.35, 0, 0);
+        ws.position.set(0.2, 0.09, -0.002);
+        boatGroup.add(ws);
+        // Rear hatch
+        const hatchGeo = new THREE.BoxGeometry(0.2, 0.03, 0.14);
+        const hatch = new THREE.Mesh(hatchGeo, redMat);
+        hatch.position.set(-0.18, 0.065, 0);
+        boatGroup.add(hatch);
+        // Side stripes
+        const stripeGeo = new THREE.BoxGeometry(0.72, 0.004, 0.02);
+        const stripeMat = new THREE.MeshStandardMaterial({ color: 0xFFCC00, roughness: 0.3 });
+        const stripeL = new THREE.Mesh(stripeGeo, stripeMat);
+        stripeL.position.set(0.0, 0.035, 0.11);
+        boatGroup.add(stripeL);
+        const stripeR = new THREE.Mesh(stripeGeo, stripeMat);
+        stripeR.position.set(0.0, 0.035, -0.11);
+        boatGroup.add(stripeR);
+        // Outboard motor
+        const motorBlockGeo = new THREE.BoxGeometry(0.07, 0.09, 0.05);
+        const motorBlock = new THREE.Mesh(motorBlockGeo, darkMat);
+        motorBlock.position.set(-0.7, -0.01, 0);
+        boatGroup.add(motorBlock);
+        const shaftGeo = new THREE.CylinderGeometry(0.006, 0.006, 0.07, 6);
+        const shaft = new THREE.Mesh(shaftGeo, chromeMat);
+        shaft.position.set(-0.7, -0.06, 0);
+        boatGroup.add(shaft);
+        // Propeller
+        const propGeo = new THREE.BoxGeometry(0.004, 0.012, 0.06);
+        const prop = new THREE.Mesh(propGeo, chromeMat);
+        prop.position.set(-0.7, -0.095, 0);
+        prop.name = 'propeller';
+        boatGroup.add(prop);
+        // Antenna
+        const antGeo = new THREE.CylinderGeometry(0.002, 0.002, 0.15, 4);
+        const ant = new THREE.Mesh(antGeo, darkMat);
+        ant.position.set(-0.05, 0.16, 0.02);
+        boatGroup.add(ant);
+        const antTipGeo = new THREE.SphereGeometry(0.006, 4, 4);
+        const antTip = new THREE.Mesh(antTipGeo, new THREE.MeshStandardMaterial({ color: 0xFF0000, emissive: 0xFF0000, emissiveIntensity: 0.6 }));
+        antTip.position.set(-0.05, 0.235, 0.02);
+        antTip.name = 'antTip';
+        boatGroup.add(antTip);
+        // Wake V-shape
+        const wakeArmGeo = new THREE.PlaneGeometry(0.35, 0.025);
+        const wakeMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.0, side: THREE.DoubleSide });
+        const wakeL = new THREE.Mesh(wakeArmGeo, wakeMat);
+        wakeL.rotation.x = -Math.PI / 2;
+        wakeL.rotation.z = -0.2;
+        wakeL.position.set(-0.48, 0.155, 0.06);
+        wakeL.name = 'wakeL';
+        boatGroup.add(wakeL);
+        const wakeR = new THREE.Mesh(wakeArmGeo, wakeMat.clone());
+        wakeR.rotation.x = -Math.PI / 2;
+        wakeR.rotation.z = 0.2;
+        wakeR.position.set(-0.48, 0.155, -0.06);
+        wakeR.name = 'wakeR';
+        boatGroup.add(wakeR);
+
+        boatGroup.position.set(0, 0.14, 5);
+        boatGroup.scale.set(1.0, 1.0, 1.0);
+        this.rcBoat = boatGroup;
+        this.boatAngle = 0;
+        this.boatSpeed = 0;
+        this.boatMode = true;
+        this.scene.add(boatGroup);
+    }
+
+    updateRCBoat(delta) {
+        if (!this.rcBoat || !this.boatMode) return;
+        const turnRate = 2.5;
+        const accel = 3.0;
+        const maxSpeed = 5.0;
+        const drag = 0.97;
+        if (this.boatKeys.left) this.boatAngle += turnRate * delta;
+        if (this.boatKeys.right) this.boatAngle -= turnRate * delta;
+        if (this.boatKeys.forward) this.boatSpeed = Math.min(maxSpeed, this.boatSpeed + accel * delta);
+        if (this.boatKeys.backward) this.boatSpeed = Math.max(-maxSpeed * 0.3, this.boatSpeed - accel * 1.5 * delta);
+        this.boatSpeed *= drag;
+        if (Math.abs(this.boatSpeed) < 0.01) this.boatSpeed = 0;
+        const vx = Math.cos(this.boatAngle) * this.boatSpeed * delta;
+        const vz = -Math.sin(this.boatAngle) * this.boatSpeed * delta;
+        this.rcBoat.position.x += vx;
+        this.rcBoat.position.z += vz;
+        // Bob on water
+        this.rcBoat.position.y = 0.14 + Math.sin(this.elapsedTime * 3) * 0.008 + Math.abs(this.boatSpeed) * 0.005;
+        this.rcBoat.rotation.y = this.boatAngle;
+        // Lean into turns
+        const targetLean = (this.boatKeys.left ? 1 : 0) - (this.boatKeys.right ? 1 : 0);
+        this.rcBoat.rotation.z = targetLean * 0.12 * Math.min(1, Math.abs(this.boatSpeed));
+        // Nose pitch based on speed
+        this.rcBoat.rotation.x = -this.boatSpeed * 0.02;
+        // Wake visibility + propeller spin
+        const wakeL = this.rcBoat.getObjectByName('wakeL');
+        const wakeR = this.rcBoat.getObjectByName('wakeR');
+        const wakeOp = Math.min(0.4, Math.abs(this.boatSpeed) * 0.12);
+        if (wakeL) { wakeL.material.opacity = wakeOp; wakeL.scale.x = 0.5 + Math.abs(this.boatSpeed) * 0.2; }
+        if (wakeR) { wakeR.material.opacity = wakeOp; wakeR.scale.x = 0.5 + Math.abs(this.boatSpeed) * 0.2; }
+        const prop = this.rcBoat.getObjectByName('propeller');
+        if (prop) prop.rotation.y += this.boatSpeed * 15 * delta;
+        // Blink antenna
+        const antTip = this.rcBoat.getObjectByName('antTip');
+        if (antTip) antTip.material.emissiveIntensity = 0.3 + 0.5 * Math.sin(this.elapsedTime * 4);
+        // Keep in pond
+        const dist = Math.sqrt(this.rcBoat.position.x ** 2 + this.rcBoat.position.z ** 2);
+        if (dist > 9.0) {
+            const n = new THREE.Vector3(this.rcBoat.position.x, 0, this.rcBoat.position.z).normalize();
+            this.rcBoat.position.x = n.x * 9.0;
+            this.rcBoat.position.z = n.z * 9.0;
+            this.boatSpeed *= -0.3;
+        }
+        // Push bowls out of the way
+        this.bowls.forEach(bowl => {
+            const d = this.rcBoat.position.distanceTo(bowl.position);
+            if (d < 1.0 && d > 0.01) {
+                const push = new THREE.Vector3().subVectors(bowl.position, this.rcBoat.position);
+                push.y = 0; push.normalize();
+                bowl.userData.velocity.add(push.multiplyScalar(0.01 * Math.abs(this.boatSpeed)));
+            }
+        });
+    }
+
+    setupBoatControls() {
+        document.addEventListener('keydown', (e) => {
+            if (!this.boatMode) return;
+            switch (e.key) {
+                case 'ArrowUp': case 'w': case 'W': this.boatKeys.forward = true; break;
+                case 'ArrowDown': case 's': case 'S': this.boatKeys.backward = true; break;
+                case 'ArrowLeft': case 'a': case 'A': this.boatKeys.left = true; break;
+                case 'ArrowRight': case 'd': case 'D': this.boatKeys.right = true; break;
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            switch (e.key) {
+                case 'ArrowUp': case 'w': case 'W': this.boatKeys.forward = false; break;
+                case 'ArrowDown': case 's': case 'S': this.boatKeys.backward = false; break;
+                case 'ArrowLeft': case 'a': case 'A': this.boatKeys.left = false; break;
+                case 'ArrowRight': case 'd': case 'D': this.boatKeys.right = false; break;
+            }
+        });
+    }
+
     setupAudio() {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
         this.createReverbChain();
@@ -695,9 +1097,30 @@ class FloatingBowlsGarden {
 
     getWindForce(position) {
         const x = position.x, z = position.z, t = this.windField.time;
-        const windX = 0.0003 * Math.sin(t * 0.3 + x * 0.05) * Math.cos(t * 0.25 + z * 0.05);
-        const windZ = 0.0003 * Math.cos(t * 0.35 + x * 0.05) * Math.sin(t * 0.3 + z * 0.05);
-        return new THREE.Vector3(windX, 0, windZ);
+        const ws = this.windState;
+        const baseX = ws.strength * Math.cos(ws.direction);
+        const baseZ = ws.strength * Math.sin(ws.direction);
+        // Add local turbulence
+        const turbX = 0.00008 * Math.sin(t * 0.5 + x * 0.1) * Math.cos(t * 0.3 + z * 0.08);
+        const turbZ = 0.00008 * Math.cos(t * 0.4 + x * 0.08) * Math.sin(t * 0.45 + z * 0.1);
+        return new THREE.Vector3(baseX + turbX, 0, baseZ + turbZ);
+    }
+
+    updateWind(delta) {
+        const ws = this.windState;
+        ws.changeTimer += delta;
+        if (ws.changeTimer >= ws.changeInterval) {
+            ws.changeTimer = 0;
+            ws.changeInterval = 8 + Math.random() * 15;
+            ws.targetDirection = Math.random() * Math.PI * 2;
+            ws.targetStrength = 0.00015 + Math.random() * 0.0004;
+        }
+        // Smooth interpolation toward target
+        let dAngle = ws.targetDirection - ws.direction;
+        while (dAngle > Math.PI) dAngle -= Math.PI * 2;
+        while (dAngle < -Math.PI) dAngle += Math.PI * 2;
+        ws.direction += dAngle * delta * 0.3;
+        ws.strength += (ws.targetStrength - ws.strength) * delta * 0.4;
     }
 
     updateBowlPhysics() {
@@ -730,8 +1153,8 @@ class FloatingBowlsGarden {
                 bowl.material.emissiveIntensity = Math.max(bowl.material.emissiveIntensity, 0.08);
             }
             const dist = Math.sqrt(bowl.position.x ** 2 + bowl.position.z ** 2);
-            const pondR = 10.0;
-            const edgeL = pondR - Math.max(0.5, ud.size * 0.6);
+            const pondR = 9.5;
+            const edgeL = pondR - ud.size * 1.2;
             if (dist > edgeL) {
                 const n = new THREE.Vector3(bowl.position.x, 0, bowl.position.z).normalize();
                 const vDotN = ud.velocity.dot(n);
@@ -747,7 +1170,7 @@ class FloatingBowlsGarden {
                 const other = this.bowls[j];
                 const od = other.userData;
                 const d = bowl.position.distanceTo(other.position);
-                const minD = (ud.size + od.size) * 1.8;
+                const minD = (ud.size + od.size) * 1.05;
                 if (d < minD && d > 0.01) {
                     const n = bowl.position.clone().sub(other.position);
                     n.y = 0; n.normalize();
@@ -816,16 +1239,16 @@ class FloatingBowlsGarden {
 
     updateDayNight(delta) {
         this.targetDayProgress = this.isNight ? 0.85 : 0.35;
-        this.dayProgress += (this.targetDayProgress - this.dayProgress) * delta * 0.5;
+        this.dayProgress += (this.targetDayProgress - this.dayProgress) * delta * 2.5;
         const sunElev = Math.sin(this.dayProgress * Math.PI);
         const sunAngle = this.dayProgress * Math.PI;
         this.lights.sun.position.set(40 * Math.cos(sunAngle), 60 * Math.max(0.1, sunElev), 30);
-        this.lights.sun.intensity = Math.max(0.05, sunElev * 0.9);
+        this.lights.sun.intensity = Math.max(0.05, sunElev * 0.6);
         const warmth = 1 - sunElev;
         this.lights.sun.color.setRGB(1, 0.95 - warmth * 0.3, 0.88 - warmth * 0.5);
-        this.lights.ambient.intensity = 0.1 + sunElev * 0.25;
-        this.lights.hemisphere.intensity = 0.15 + sunElev * 0.35;
-        this.lights.fill.intensity = sunElev * 0.25;
+        this.lights.ambient.intensity = 0.08 + sunElev * 0.15;
+        this.lights.hemisphere.intensity = 0.1 + sunElev * 0.25;
+        this.lights.fill.intensity = sunElev * 0.15;
         this.lights.waterGlow.intensity = 0.2 + (1 - sunElev) * 0.6;
         this.lights.waterGlow.color.setHSL(0.6, 0.6, 0.5 + (1 - sunElev) * 0.2);
         if (this.skyDome) {
@@ -837,7 +1260,7 @@ class FloatingBowlsGarden {
         }
         const fogDay = new THREE.Color(0x87CEEB), fogNight = new THREE.Color(0x1a1a3e);
         this.scene.fog.color.copy(fogDay).lerp(fogNight, 1 - sunElev);
-        this.renderer.toneMappingExposure = 0.4 + sunElev * 0.8;
+        this.renderer.toneMappingExposure = 0.35 + sunElev * 0.6;
     }
 
     updateAmbientEffects() {
@@ -1016,6 +1439,8 @@ class FloatingBowlsGarden {
         const orbitBtn = document.getElementById('btn-orbit');
         const dayNightBtn = document.getElementById('btn-daynight');
         const muteBtn = document.getElementById('btn-mute');
+        const boatBtn = document.getElementById('btn-boat');
+        const scaleBtn = document.getElementById('btn-scale');
         if (orbitBtn) {
             orbitBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1041,9 +1466,70 @@ class FloatingBowlsGarden {
                 }
             });
         }
+        if (boatBtn) {
+            boatBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.spawnRCBoat();
+                boatBtn.classList.toggle('active', this.boatMode);
+                if (this.boatMode) {
+                    this.orbit.autoOrbit = false;
+                    const ob = document.getElementById('btn-orbit');
+                    if (ob) ob.classList.remove('active');
+                }
+            });
+        }
+        if (scaleBtn) {
+            scaleBtn.title = 'Scale: Lydian';
+            scaleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.cycleScale();
+                const scaleName = this.scales[this.scaleNames[this.currentScaleIndex]].name;
+                scaleBtn.title = 'Scale: ' + scaleName;
+                // Flash label briefly
+                let label = document.getElementById('scale-label');
+                if (!label) {
+                    label = document.createElement('div');
+                    label.id = 'scale-label';
+                    label.style.cssText = 'position:absolute;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-family:Inter,sans-serif;font-size:0.85rem;font-weight:300;background:rgba(255,255,255,0.1);backdrop-filter:blur(12px);padding:6px 16px;border-radius:20px;border:1px solid rgba(255,255,255,0.12);z-index:100;pointer-events:none;transition:opacity 0.5s;';
+                    document.body.appendChild(label);
+                }
+                label.textContent = scaleName;
+                label.style.opacity = '1';
+                clearTimeout(label._hideTimer);
+                label._hideTimer = setTimeout(() => { label.style.opacity = '0'; }, 1800);
+            });
+        }
+    }
+
+    cycleScale() {
+        this.currentScaleIndex = (this.currentScaleIndex + 1) % this.scaleNames.length;
+        const newScale = this.scales[this.scaleNames[this.currentScaleIndex]].notes;
+        this.lydianScale = newScale;
+        // Update existing bowl frequencies
+        this.bowls.forEach((bowl, i) => {
+            const ud = bowl.userData;
+            ud.frequency = newScale[i % newScale.length] * (0.8 + ud.size * 0.4);
+        });
     }
 
     smoothCameraUpdate(delta) {
+        if (this.boatMode && this.rcBoat) {
+            // Chase camera behind boat
+            const camDist = 3.5;
+            const camHeight = 1.8;
+            const behindX = this.rcBoat.position.x - Math.cos(this.boatAngle) * camDist;
+            const behindZ = this.rcBoat.position.z + Math.sin(this.boatAngle) * camDist;
+            this.camera.position.x += (behindX - this.camera.position.x) * 4 * delta;
+            this.camera.position.z += (behindZ - this.camera.position.z) * 4 * delta;
+            this.camera.position.y += (camHeight - this.camera.position.y) * 4 * delta;
+            const lookTarget = new THREE.Vector3(
+                this.rcBoat.position.x + Math.cos(this.boatAngle) * 2,
+                0.2,
+                this.rcBoat.position.z - Math.sin(this.boatAngle) * 2
+            );
+            this.camera.lookAt(lookTarget);
+            return;
+        }
         const damping = 3.0;
         if (this.orbit.autoOrbit) this.orbit.targetTheta += this.orbit.speed * delta;
         this.orbit.theta += (this.orbit.targetTheta - this.orbit.theta) * damping * delta;
@@ -1060,9 +1546,12 @@ class FloatingBowlsGarden {
         requestAnimationFrame(() => this.animate());
         const delta = Math.min(this.clock.getDelta(), 0.05);
         this.elapsedTime += delta;
+        this.updateWind(delta);
         this.smoothCameraUpdate(delta);
         this.updateDayNight(delta);
         this.updateBowlPhysics();
+        this.updateKoiFish(delta);
+        this.updateRCBoat(delta);
         this.renderer.render(this.scene, this.camera);
     }
 
