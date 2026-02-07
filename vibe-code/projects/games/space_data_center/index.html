@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Space Data Center Tycoon</title>
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <div id="game">
+      <!-- Top HUD Bar -->
+      <header class="hud">
+        <div class="brand">
+          <span class="title">Space Data Center</span>
+          <span class="subtitle">Orbital Ops Division</span>
+        </div>
+        <div class="hud-right">
+          <div class="mission-clock">
+            <span class="clock-label">MISSION</span>
+            <span class="clock-time" id="mission-time">00:00</span>
+          </div>
+          <div class="ai-badge">
+            <span class="ai-label">AI RIVAL</span>
+            <span class="ai-value" id="ai-score">0</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Alert Bar -->
+      <div id="alert-bar" class="alert-bar hidden" aria-live="polite"></div>
+
+      <!-- Main Content -->
+      <main class="main-layout">
+        <!-- LEFT: Orbital Canvas -->
+        <div class="orbit-column">
+          <div class="orbit-container" id="orbit-container">
+            <canvas id="orbit-canvas"></canvas>
+            <div class="zoom-controls">
+              <button id="zoom-in" class="zoom-btn" title="Zoom In">+</button>
+              <button id="zoom-out" class="zoom-btn" title="Zoom Out">−</button>
+              <button id="zoom-reset" class="zoom-btn" title="Reset">⊙</button>
+            </div>
+            <!-- Selected satellite info overlay -->
+            <div id="selection-info" class="selection-info hidden"></div>
+          </div>
+          <div class="orbit-stats">
+            <div class="stat-chip">
+              <span class="stat-label">Throughput</span>
+              <span class="stat-value" id="throughput">0</span>
+              <span class="stat-unit">/sec</span>
+            </div>
+            <div class="stat-chip">
+              <span class="stat-label">Contracts</span>
+              <span class="stat-value" id="contracts-active">0</span>
+            </div>
+            <div class="stat-chip">
+              <span class="stat-label">Data Beamed</span>
+              <span class="stat-value" id="data-beamed">0</span>
+            </div>
+            <div class="stat-chip beam-chip" id="beam-indicator">
+              <span class="stat-label">Connection</span>
+              <span class="stat-value" id="beam-status">Ready</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: Sidebar -->
+        <aside class="sidebar">
+          <section class="telemetry-panel">
+            <div class="telemetry-title">Telemetry</div>
+            <div class="telemetry-grid">
+              <div class="metric glow-green">
+                <span class="metric-icon">💰</span>
+                <div class="metric-body">
+                  <span class="metric-value" id="money">$8,000</span>
+                  <span class="metric-rate" id="money-rate">+$0/s</span>
+                </div>
+              </div>
+              <div class="metric glow-blue">
+                <span class="metric-icon">📡</span>
+                <div class="metric-body">
+                  <span class="metric-value" id="data-rate">0/s</span>
+                  <span class="metric-rate" id="data-total">0 total</span>
+                </div>
+              </div>
+              <div class="metric">
+                <span class="metric-icon">⭐</span>
+                <div class="metric-body">
+                  <span class="metric-value" id="satisfaction">70%</span>
+                  <span class="metric-label">Satisfaction</span>
+                </div>
+              </div>
+              <div class="metric">
+                <span class="metric-icon">🏆</span>
+                <div class="metric-body">
+                  <span class="metric-value" id="reputation">1.00</span>
+                  <span class="metric-label">Reputation</span>
+                </div>
+              </div>
+              <div class="metric">
+                <span class="metric-icon">🛰️</span>
+                <div class="metric-body">
+                  <span class="metric-value" id="center-count">0/4</span>
+                  <span class="metric-label">Centers</span>
+                </div>
+              </div>
+            </div>
+          </section>
+          <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="ops">Ops</button>
+            <button class="tab-btn" data-tab="launch">🚀 Launch</button>
+            <button class="tab-btn" data-tab="contracts" id="tab-btn-contracts">Contracts</button>
+            <button class="tab-btn" data-tab="upgrades">Upgrades</button>
+          </nav>
+
+          <!-- Operations -->
+          <div class="tab-panel active" id="tab-ops">
+            <div id="tutorial-panel" class="briefing" aria-live="polite"></div>
+            <div class="action-group">
+              <button id="btn-solar" class="action-btn">
+                <span class="btn-icon">☀️</span>
+                <span class="btn-text">
+                  <strong>Deploy Solar</strong>
+                  <small id="solar-cost">$1,200</small>
+                </span>
+                <span class="btn-level" id="solar-level">1/8</span>
+              </button>
+              <button id="btn-connect" class="action-btn">
+                <span class="btn-icon">📡</span>
+                <span class="btn-text">
+                  <strong>Enable Connection</strong>
+                  <small id="connect-cost">$1,400</small>
+                </span>
+                <span class="btn-level" id="connect-cooldown"></span>
+              </button>
+              <button id="btn-jammer" class="action-btn jammer-btn" style="display:none">
+                <span class="btn-icon">🔻</span>
+                <span class="btn-text">
+                  <strong>Orbital Jammer</strong>
+                  <small id="jammer-cost">$1,600</small>
+                </span>
+              </button>
+            </div>
+
+            <div class="system-bars">
+              <div class="sys-row">
+                <span class="sys-label">Power</span>
+                <div class="bar"><div id="power-bar" class="fill fill-power"></div></div>
+              </div>
+              <div class="sys-row">
+                <span class="sys-label">Link</span>
+                <div class="bar"><div id="connect-bar" class="fill fill-signal"></div></div>
+              </div>
+            </div>
+
+            <!-- Satellite list -->
+            <div class="satellite-section">
+              <h3 class="section-title">Your Satellites</h3>
+              <div id="satellite-list" class="satellite-list"></div>
+            </div>
+
+            <div class="goals-section">
+              <h3 class="section-title">Goals</h3>
+              <div id="goal-list" class="goal-list"></div>
+            </div>
+
+            <div class="shortcuts-hint">L launch · S solar · C connect · J jammer · +/- zoom</div>
+          </div>
+
+          <!-- Launch (inline in sidebar) -->
+          <div class="tab-panel" id="tab-launch">
+            <div class="launch-inline">
+              <h3 class="section-title">🚀 Launch Control</h3>
+              <div id="launch-contract-banner" class="launch-contract-banner hidden"></div>
+              <div class="launch-cost-display">
+                Cost: <span id="launch-cost" class="launch-cost-value">$3,500</span>
+              </div>
+              <div class="launch-controls">
+                <div class="launch-stat">
+                  <label>Payload</label>
+                  <input id="payload-slider" type="range" min="50" max="100" value="75" />
+                  <span id="payload-val" class="slider-val">75%</span>
+                </div>
+                <div class="launch-stat">
+                  <label>Throttle</label>
+                  <input id="throttle-slider" type="range" min="60" max="100" value="85" />
+                  <span id="throttle-val" class="slider-val">85%</span>
+                </div>
+                <div class="launch-stat">
+                  <label>Launch Angle</label>
+                  <input id="angle-slider" type="range" min="0" max="90" value="45" />
+                  <span id="angle-val" class="slider-val">45°</span>
+                </div>
+              </div>
+              <button id="btn-launch" class="action-btn launch-btn full-width">
+                <span class="btn-icon">🚀</span>
+                <span class="btn-text"><strong>LAUNCH</strong></span>
+              </button>
+              <div id="launch-readout" class="launch-readout">Accept a contract, set throttle & angle, then launch!</div>
+            </div>
+          </div>
+
+          <!-- Contracts -->
+          <div class="tab-panel" id="tab-contracts">
+            <h3 class="section-title">Available Contracts</h3>
+            <div id="contract-list" class="card-list"></div>
+            <h3 class="section-title">Active</h3>
+            <div id="active-contract-list" class="card-list"></div>
+            <div class="ai-intel">
+              <h3 class="section-title">AI Rival</h3>
+              <div class="ai-grid">
+                <div class="ai-stat"><span>Centers</span><span id="ai-centers">1</span></div>
+                <div class="ai-stat"><span>Satisfaction</span><span id="ai-satisfaction">55%</span></div>
+                <div class="ai-stat"><span>Disruption</span><span id="ai-disruption">Clear</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Upgrades -->
+          <div class="tab-panel" id="tab-upgrades">
+            <h3 class="section-title">Upgrades</h3>
+            <div id="upgrade-list" class="card-list"></div>
+            <div id="upgrade-locked"></div>
+          </div>
+        </aside>
+      </main>
+
+      <!-- Log -->
+      <section class="log-bar">
+        <h3 class="log-title">Mission Log</h3>
+        <div id="log" class="log-feed"></div>
+      </section>
+    </div>
+
+    <script src="js/bundle.js"></script>
+  </body>
+</html>
