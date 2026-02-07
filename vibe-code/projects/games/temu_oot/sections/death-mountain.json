@@ -1,0 +1,17 @@
+{
+  "id": "death-mountain",
+  "name": "Death Mountain",
+  "ground": "#b06a3b",
+  "sky": "#ffb074",
+  "width": 220,
+  "depth": 180,
+  "roughness": 2.4,
+  "objects": [
+    {"type": "rock", "x": -60, "z": -20, "scale": 1.6},
+    {"type": "rock", "x": 10, "z": 10, "scale": 1.4},
+    {"type": "rock", "x": 60, "z": -30, "scale": 1.3},
+    {"type": "pillar", "x": -20, "z": 40, "scale": 1.0},
+    {"type": "pillar", "x": 20, "z": 40, "scale": 1.0},
+    {"type": "banner", "x": 0, "z": 60, "scale": 1.2, "color": "0xc94a3a"}
+  ]
+}

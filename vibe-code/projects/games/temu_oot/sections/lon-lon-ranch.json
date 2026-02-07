@@ -1,0 +1,17 @@
+{
+  "id": "lon-lon-ranch",
+  "name": "Lon Lon Ranch",
+  "ground": "#b6c56b",
+  "sky": "#8fd2ff",
+  "width": 220,
+  "depth": 180,
+  "roughness": 0.3,
+  "objects": [
+    {"type": "house", "x": -40, "z": -10, "scale": 1.2, "color": "0xd9a24a"},
+    {"type": "house", "x": 30, "z": -20, "scale": 1.1, "color": "0xd9a24a"},
+    {"type": "tree", "x": -70, "z": 40, "scale": 1.2},
+    {"type": "tree", "x": 70, "z": 40, "scale": 1.2},
+    {"type": "rock", "x": 0, "z": 60, "scale": 1.0},
+    {"type": "fence", "x": 0, "z": -60, "length": 18, "axis": "x"}
+  ]
+}

@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Temu OOT (Offline)</title>
+    <link rel="stylesheet" href="styles/main.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="hud">
+      <div class="hud-left">
+        <div class="hearts" aria-label="health">
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+        </div>
+        <div class="stamina">
+          <div class="stamina-fill"></div>
+        </div>
+      </div>
+      <div class="hud-center">
+        <div class="title">TEMU TIME</div>
+        <div id="region-name">Loading...</div>
+        <div id="loading-status">Booting region stream</div>
+        <div id="save-status">Save: idle</div>
+        <div id="audio-status">Audio: off</div>
+      </div>
+      <div class="hud-right">
+        <div class="minimap" aria-hidden="true">
+          <div id="mini-dot"></div>
+        </div>
+        <div class="item-wheel">
+          <div class="item-slot">A</div>
+          <div class="item-slot">B</div>
+          <div class="item-slot">C</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="lock-overlay">
+      <div class="lock-panel">
+        <div class="lock-title">Click To Play</div>
+        <div class="lock-sub">Mouse look + WASD</div>
+      </div>
+    </div>
+
+    <canvas id="game-canvas"></canvas>
+
+    <div id="help">
+      <div>WASD / Arrows: move</div>
+      <div>Shift: sprint</div>
+      <div>Mouse: look</div>
+      <div>M: mute</div>
+    </div>
+
+    <script src="vendor/three.min.js"></script>
+    <script>
+      const REGION_DATA = {
+        "kokiri-forest": {
+          id: "kokiri-forest",
+          name: "Kokiri Forest",
+          ground: "#6dbf6d",
+          sky: "#7cc7ff",
+          width: 220,
+          depth: 180,
+          roughness: 1.1,
+          objects: [
+            { type: "path", x: 0, z: -8, width: 90, depth: 12, color: "0xa78b5f" },
+            { type: "path", x: -40, z: 18, width: 44, depth: 8, color: "0xa78b5f" },
+            { type: "path", x: 40, z: 18, width: 44, depth: 8, color: "0xa78b5f" },
+            { type: "path", x: 0, z: 48, width: 34, depth: 8, color: "0xa78b5f" },
+
+            { type: "hill", x: -90, z: -60, radius: 10, height: 3.6, color: "0x5aa85f" },
+            { type: "hill", x: 85, z: 55, radius: 9, height: 3.2, color: "0x5aa85f" },
+            { type: "hill", x: 92, z: -30, radius: 8, height: 2.6, color: "0x5fae69" },
+            { type: "hill", x: -78, z: 62, radius: 7, height: 2.2, color: "0x5fae69" },
+
+            { type: "house", x: -20, z: 56, scale: 1.05 },
+            { type: "house", x: 24, z: 56, scale: 1.05 },
+            { type: "house", x: -58, z: 28, scale: 0.95 },
+            { type: "house", x: 58, z: 30, scale: 0.95 },
+
+            { type: "tree", x: -60, z: -30, scale: 1.5 },
+            { type: "tree", x: -35, z: -42, scale: 1.3 },
+            { type: "tree", x: -10, z: -35, scale: 1.2 },
+            { type: "tree", x: 20, z: -40, scale: 1.3 },
+            { type: "tree", x: 48, z: -36, scale: 1.4 },
+            { type: "tree", x: 70, z: -18, scale: 1.5 },
+            { type: "tree", x: -70, z: 10, scale: 1.6 },
+            { type: "tree", x: -42, z: 10, scale: 1.3 },
+            { type: "tree", x: -10, z: 8, scale: 1.1 },
+            { type: "tree", x: 12, z: 12, scale: 1.1 },
+            { type: "tree", x: 44, z: 8, scale: 1.2 },
+            { type: "tree", x: 72, z: 12, scale: 1.5 },
+            { type: "tree", x: -60, z: 70, scale: 1.4 },
+            { type: "tree", x: 62, z: 70, scale: 1.4 },
+
+            { type: "fence", x: -30, z: 68, length: 16, axis: "x" },
+            { type: "fence", x: 30, z: 68, length: 16, axis: "x" },
+            { type: "fence", x: -76, z: 44, length: 12, axis: "z" },
+            { type: "fence", x: 76, z: 44, length: 12, axis: "z" },
+
+            { type: "lantern", x: -10, z: -2 },
+            { type: "lantern", x: 10, z: -2 },
+            { type: "lantern", x: -22, z: 34 },
+            { type: "lantern", x: 22, z: 34 },
+
+            { type: "stump", x: -6, z: 20, scale: 1.2 },
+            { type: "stump", x: 8, z: 26, scale: 1.0 },
+            { type: "rock", x: -12, z: -60, scale: 1.1 },
+            { type: "rock", x: 18, z: -62, scale: 1.0 },
+            { type: "banner", x: 0, z: 78, scale: 1.1 }
+          ]
+        },
+        "hyrule-field": {
+          id: "hyrule-field",
+          name: "Hyrule Field",
+          ground: "#90c56f",
+          sky: "#8fd2ff",
+          width: 220,
+          depth: 180,
+          roughness: 0.5,
+          objects: [
+            { type: "path", x: 0, z: 0, width: 90, depth: 12, color: "0xb9a277" },
+            { type: "tree", x: -70, z: 0, scale: 1.6 },
+            { type: "tree", x: 70, z: -20, scale: 1.4 },
+            { type: "rock", x: 30, z: 40, scale: 1.3 },
+            { type: "rock", x: -30, z: -40, scale: 1.1 },
+            { type: "totem", x: 0, z: 60, scale: 1.2 },
+            { type: "fence", x: -50, z: -60, length: 16, axis: "x" }
+          ]
+        },
+        "market-castle-town": {
+          id: "market-castle-town",
+          name: "Market / Castle Town",
+          ground: "#c6b18a",
+          sky: "#a5c9ff",
+          width: 220,
+          depth: 180,
+          roughness: 0.2,
+          objects: [
+            { type: "path", x: 0, z: 10, width: 80, depth: 12, color: "0xb9a37d" },
+            { type: "house", x: -40, z: -20, scale: 1.2 },
+            { type: "house", x: 0, z: -30, scale: 1.1 },
+            { type: "house", x: 40, z: -10, scale: 1.0 },
+            { type: "totem", x: -20, z: 40, scale: 1.4 },
+            { type: "totem", x: 20, z: 40, scale: 1.4 },
+            { type: "arch", x: 0, z: 60, scale: 1.1 },
+            { type: "banner", x: -70, z: 50, scale: 1.2 },
+            { type: "banner", x: 70, z: 50, scale: 1.2 }
+          ]
+        },
+        kakariko: {
+          id: "kakariko",
+          name: "Kakariko Village",
+          ground: "#b9936c",
+          sky: "#9fb3ff",
+          width: 220,
+          depth: 180,
+          roughness: 0.6,
+          objects: [
+            { type: "path", x: 0, z: -5, width: 70, depth: 10, color: "0xbfa27c" },
+            { type: "house", x: -50, z: -20, scale: 1.1 },
+            { type: "house", x: -10, z: -30, scale: 0.9 },
+            { type: "house", x: 30, z: -10, scale: 1.0 },
+            { type: "tree", x: 50, z: 40, scale: 1.0 },
+            { type: "rock", x: -60, z: 50, scale: 1.2 },
+            { type: "fence", x: 40, z: 60, length: 14, axis: "x" }
+          ]
+        },
+        "death-mountain": {
+          id: "death-mountain",
+          name: "Death Mountain",
+          ground: "#b06a3b",
+          sky: "#ffb074",
+          width: 220,
+          depth: 180,
+          roughness: 2.4,
+          objects: [
+            { type: "rock", x: -60, z: -20, scale: 1.6 },
+            { type: "rock", x: 10, z: 10, scale: 1.4 },
+            { type: "rock", x: 60, z: -30, scale: 1.3 },
+            { type: "pillar", x: -20, z: 40, scale: 1.0 },
+            { type: "pillar", x: 20, z: 40, scale: 1.0 },
+            { type: "banner", x: 0, z: 60, scale: 1.2, color: "0xc94a3a" }
+          ]
+        },
+        "zoras-domain": {
+          id: "zoras-domain",
+          name: "Zora's Domain",
+          ground: "#6aa7c9",
+          sky: "#9ad6ff",
+          width: 220,
+          depth: 180,
+          roughness: 1.1,
+          objects: [
+            { type: "water", x: 0, z: 0, y: 0.05, width: 120, depth: 80 },
+            { type: "bridge", x: 0, z: 0, y: 0.3, length: 8, width: 3.4, color: "0x7a5c3b" },
+            { type: "totem", x: -50, z: -20, scale: 1.2, color: "0x3b6c90" },
+            { type: "totem", x: 50, z: -20, scale: 1.2, color: "0x3b6c90" },
+            { type: "rock", x: -70, z: 50, scale: 1.1 },
+            { type: "rock", x: 70, z: 50, scale: 1.1 }
+          ]
+        },
+        "lake-hylia": {
+          id: "lake-hylia",
+          name: "Lake Hylia",
+          ground: "#5fb2a3",
+          sky: "#8ad8ff",
+          width: 220,
+          depth: 180,
+          roughness: 0.4,
+          objects: [
+            { type: "water", x: 0, z: 20, y: 0.05, width: 150, depth: 90 },
+            { type: "bridge", x: 0, z: -10, y: 0.2, length: 10, width: 3.8 },
+            { type: "tree", x: -80, z: -40, scale: 1.3 },
+            { type: "tree", x: 80, z: -40, scale: 1.3 },
+            { type: "rock", x: 0, z: -60, scale: 1.0 },
+            { type: "fence", x: 60, z: 60, length: 12, axis: "z" }
+          ]
+        },
+        "gerudo-desert": {
+          id: "gerudo-desert",
+          name: "Gerudo Desert",
+          ground: "#d8b878",
+          sky: "#f5c48b",
+          width: 220,
+          depth: 180,
+          roughness: 0.2,
+          objects: [
+            { type: "rock", x: -70, z: -20, scale: 1.5 },
+            { type: "rock", x: 70, z: -20, scale: 1.3 },
+            { type: "totem", x: 0, z: 50, scale: 1.6, color: "0x7b4a2c" },
+            { type: "house", x: 0, z: -60, scale: 1.0, color: "0xcc7a4a" },
+            { type: "arch", x: 0, z: 20, scale: 1.2, color: "0xb9783f" },
+            { type: "fence", x: -60, z: 60, length: 12, axis: "x" }
+          ]
+        },
+        "lost-woods": {
+          id: "lost-woods",
+          name: "Lost Woods",
+          ground: "#4fa36a",
+          sky: "#6cbfa7",
+          width: 220,
+          depth: 180,
+          roughness: 1.0,
+          objects: [
+            { type: "path", x: 0, z: 0, width: 50, depth: 10, color: "0x9f8a62" },
+            { type: "tree", x: -70, z: -10, scale: 1.8 },
+            { type: "tree", x: -30, z: 30, scale: 1.6 },
+            { type: "tree", x: 20, z: -20, scale: 1.4 },
+            { type: "tree", x: 60, z: 40, scale: 1.5 },
+            { type: "rock", x: 0, z: 60, scale: 1.1 },
+            { type: "banner", x: -60, z: 50, scale: 1.1, color: "0x3b7d58" }
+          ]
+        },
+        "lon-lon-ranch": {
+          id: "lon-lon-ranch",
+          name: "Lon Lon Ranch",
+          ground: "#b6c56b",
+          sky: "#8fd2ff",
+          width: 220,
+          depth: 180,
+          roughness: 0.3,
+          objects: [
+            { type: "house", x: -40, z: -10, scale: 1.2, color: "0xd9a24a" },
+            { type: "house", x: 30, z: -20, scale: 1.1, color: "0xd9a24a" },
+            { type: "tree", x: -70, z: 40, scale: 1.2 },
+            { type: "tree", x: 70, z: 40, scale: 1.2 },
+            { type: "rock", x: 0, z: 60, scale: 1.0 },
+            { type: "fence", x: 0, z: -60, length: 18, axis: "x" }
+          ]
+        }
+      };
+
+      const regionWidth = 220;
+      const regionDepth = 180;
+      const orderedNames = [
+        "Kokiri Forest",
+        "Hyrule Field",
+        "Market / Castle Town",
+        "Kakariko Village",
+        "Death Mountain",
+        "Zora's Domain",
+        "Lake Hylia",
+        "Gerudo Desert",
+        "Lost Woods",
+        "Lon Lon Ranch"
+      ];
+      const ids = [
+        "kokiri-forest",
+        "hyrule-field",
+        "market-castle-town",
+        "kakariko",
+        "death-mountain",
+        "zoras-domain",
+        "lake-hylia",
+        "gerudo-desert",
+        "lost-woods",
+        "lon-lon-ranch"
+      ];
+      const regions = ids.map((id, index) => {
+        const startX = index * regionWidth;
+        return {
+          id,
+          name: orderedNames[index],
+          path: "",
+          index,
+          startX,
+          centerX: startX + regionWidth / 2,
+          width: regionWidth,
+          depth: regionDepth,
+          loadRadius: regionWidth
+        };
+      });
+      const getRegionForX = (x) => {
+        return regions.find((region) => x >= region.startX && x < region.startX + region.width) || regions[0];
+      };
+
+      const STORAGE_KEY = "temu-oot-save-v1";
+      const loadState = () => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return null;
+          return JSON.parse(raw);
+        } catch (error) {
+          console.warn("Save load failed", error);
+          return null;
+        }
+      };
+      const saveState = (state) => {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          return true;
+        } catch (error) {
+          console.warn("Save failed", error);
+          return false;
+        }
+      };
+
+      const buildTree = (color = 0x2f7d32) => {
+        const group = new THREE.Group();
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.2, 0.25, 1.2, 6),
+          new THREE.MeshStandardMaterial({ color: 0x7b5a3c })
+        );
+        const leaves = new THREE.Mesh(
+          new THREE.ConeGeometry(0.9, 1.6, 8),
+          new THREE.MeshStandardMaterial({ color })
+        );
+        leaves.position.y = 1.2;
+        group.add(trunk, leaves);
+        return group;
+      };
+      const buildHouse = (color = 0xc38b4a) => {
+        const group = new THREE.Group();
+        const base = new THREE.Mesh(
+          new THREE.BoxGeometry(2.2, 1.6, 2.2),
+          new THREE.MeshStandardMaterial({ color })
+        );
+        const roof = new THREE.Mesh(
+          new THREE.ConeGeometry(1.8, 1.2, 4),
+          new THREE.MeshStandardMaterial({ color: 0xa94b3a })
+        );
+        roof.position.y = 1.4;
+        roof.rotation.y = Math.PI * 0.25;
+        base.position.y = 0.8;
+        group.add(base, roof);
+        return group;
+      };
+      const buildRock = (color = 0x6e6b6a) => {
+        return new THREE.Mesh(
+          new THREE.DodecahedronGeometry(0.9, 0),
+          new THREE.MeshStandardMaterial({ color })
+        );
+      };
+      const buildTotem = (color = 0x2b5f7a) => {
+        return new THREE.Mesh(
+          new THREE.CylinderGeometry(0.35, 0.4, 2.4, 8),
+          new THREE.MeshStandardMaterial({ color })
+        );
+      };
+      const buildFence = (length = 8, axis = "x", color = 0x8c6c3f) => {
+        const group = new THREE.Group();
+        const postGeo = new THREE.BoxGeometry(0.2, 1.2, 0.2);
+        const railGeo = new THREE.BoxGeometry(length, 0.15, 0.2);
+        const material = new THREE.MeshStandardMaterial({ color });
+        const posts = Math.max(2, Math.floor(length / 1.2));
+        const spacing = length / (posts - 1);
+        for (let i = 0; i < posts; i += 1) {
+          const post = new THREE.Mesh(postGeo, material);
+          const offset = -length / 2 + i * spacing;
+          if (axis === "x") {
+            post.position.set(offset, 0.6, 0);
+          } else {
+            post.position.set(0, 0.6, offset);
+          }
+          group.add(post);
+        }
+        const railTop = new THREE.Mesh(railGeo, material);
+        const railMid = new THREE.Mesh(railGeo, material);
+        railTop.position.y = 0.95;
+        railMid.position.y = 0.55;
+        if (axis === "z") {
+          railTop.rotation.y = Math.PI / 2;
+          railMid.rotation.y = Math.PI / 2;
+        }
+        group.add(railTop, railMid);
+        return group;
+      };
+      const buildArch = (color = 0xc8a46a) => {
+        const group = new THREE.Group();
+        const pillarGeo = new THREE.BoxGeometry(0.6, 3, 0.6);
+        const beamGeo = new THREE.BoxGeometry(3, 0.6, 0.6);
+        const material = new THREE.MeshStandardMaterial({ color });
+        const left = new THREE.Mesh(pillarGeo, material);
+        const right = new THREE.Mesh(pillarGeo, material);
+        const beam = new THREE.Mesh(beamGeo, material);
+        left.position.set(-1.2, 1.5, 0);
+        right.position.set(1.2, 1.5, 0);
+        beam.position.set(0, 3.1, 0);
+        group.add(left, right, beam);
+        return group;
+      };
+      const buildBanner = (color = 0xb54b5f) => {
+        const group = new THREE.Group();
+        const pole = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08, 0.1, 2.8, 6),
+          new THREE.MeshStandardMaterial({ color: 0x6f5137 })
+        );
+        const flag = new THREE.Mesh(
+          new THREE.PlaneGeometry(1.4, 1),
+          new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide })
+        );
+        pole.position.y = 1.4;
+        flag.position.set(0.8, 1.6, 0);
+        flag.rotation.y = Math.PI / 2;
+        group.add(pole, flag);
+        return group;
+      };
+      const buildBridge = (length = 6, width = 2.6, color = 0x9c7a4b) => {
+        const group = new THREE.Group();
+        const deck = new THREE.Mesh(
+          new THREE.BoxGeometry(length, 0.3, width),
+          new THREE.MeshStandardMaterial({ color })
+        );
+        deck.position.y = 0.2;
+        const railGeo = new THREE.BoxGeometry(length, 0.2, 0.2);
+        const railLeft = new THREE.Mesh(railGeo, new THREE.MeshStandardMaterial({ color: 0x6b4e2e }));
+        const railRight = railLeft.clone();
+        railLeft.position.set(0, 0.6, width / 2 - 0.1);
+        railRight.position.set(0, 0.6, -width / 2 + 0.1);
+        group.add(deck, railLeft, railRight);
+        return group;
+      };
+      const buildHill = (radius = 6, height = 2.6, color = 0x6cb369) => {
+        const geometry = new THREE.CylinderGeometry(radius, radius * 0.8, height, 12, 1, false);
+        const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color }));
+        mesh.position.y = height / 2;
+        return mesh;
+      };
+      const buildStump = (radius = 0.45, height = 0.5, color = 0x7b5a3c) => {
+        const geometry = new THREE.CylinderGeometry(radius * 0.9, radius, height, 8);
+        const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color }));
+        mesh.position.y = height / 2;
+        return mesh;
+      };
+      const buildLantern = (color = 0xf7d37a) => {
+        const group = new THREE.Group();
+        const post = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08, 0.1, 1.2, 6),
+          new THREE.MeshStandardMaterial({ color: 0x6f5137 })
+        );
+        const glow = new THREE.Mesh(
+          new THREE.SphereGeometry(0.25, 10, 8),
+          new THREE.MeshStandardMaterial({ color, emissive: 0xffe3a3, emissiveIntensity: 0.9 })
+        );
+        post.position.y = 0.6;
+        glow.position.y = 1.3;
+        group.add(post, glow);
+        return group;
+      };
+      const deformGround = (geometry, roughness = 0.6, seed = 1) => {
+        const position = geometry.attributes.position;
+        for (let i = 0; i < position.count; i += 1) {
+          const x = position.getX(i);
+          const z = position.getY(i);
+          const wave = Math.sin((x + seed) * 0.06) * Math.cos((z - seed) * 0.05);
+          const ripple = Math.sin((x - z + seed) * 0.025);
+          const height = (wave + ripple) * roughness;
+          position.setZ(i, height);
+        }
+        geometry.computeVertexNormals();
+      };
+
+      class RegionLoader {
+        constructor(scene, worldGroup) {
+          this.scene = scene;
+          this.worldGroup = worldGroup;
+          this.loaded = new Map();
+          this.loading = new Set();
+        }
+        load(region) {
+          if (this.loaded.has(region.id) || this.loading.has(region.id)) {
+            return this.loaded.get(region.id);
+          }
+          this.loading.add(region.id);
+          const data = REGION_DATA[region.id];
+          if (!data) {
+            this.loading.delete(region.id);
+            throw new Error("Missing region data: " + region.id);
+          }
+          const metadata = {
+            id: data.id,
+            name: data.name,
+            ground: data.ground,
+            sky: data.sky,
+            width: Number(data.width),
+            depth: Number(data.depth),
+            roughness: data.roughness
+          };
+          const objects = Array.isArray(data.objects) ? data.objects : [];
+
+          const group = new THREE.Group();
+          group.name = metadata.name;
+          group.userData.index = region.index;
+          group.position.x = region.startX;
+
+          const roughness = Number(
+            metadata.roughness ?? (metadata.id.includes("mountain") ? 2.2 : metadata.id.includes("desert") ? 0.3 : 0.8)
+          );
+          const groundGeometry = new THREE.PlaneGeometry(
+            metadata.width,
+            metadata.depth,
+            Math.floor(metadata.width / 8),
+            Math.floor(metadata.depth / 8)
+          );
+          deformGround(groundGeometry, roughness, region.startX * 0.03);
+          const ground = new THREE.Mesh(
+            groundGeometry,
+            new THREE.MeshStandardMaterial({ color: metadata.ground })
+          );
+          ground.rotation.x = -Math.PI / 2;
+          ground.receiveShadow = false;
+          group.add(ground);
+
+          objects.forEach((item) => {
+            let mesh = null;
+            switch (item.type) {
+              case "tree":
+                mesh = buildTree(item.color ? Number(item.color) : undefined);
+                break;
+              case "house":
+                mesh = buildHouse(item.color ? Number(item.color) : undefined);
+                break;
+              case "totem":
+                mesh = buildTotem(item.color ? Number(item.color) : undefined);
+                break;
+              case "rock":
+                mesh = buildRock(item.color ? Number(item.color) : undefined);
+                break;
+              case "pillar":
+                mesh = new THREE.Mesh(
+                  new THREE.CylinderGeometry(0.5, 0.6, 3, 10),
+                  new THREE.MeshStandardMaterial({ color: 0x9d8e7a })
+                );
+                break;
+              case "water":
+                mesh = new THREE.Mesh(
+                  new THREE.PlaneGeometry(item.width, item.depth),
+                  new THREE.MeshStandardMaterial({ color: 0x3b8fbf, transparent: true, opacity: 0.75 })
+                );
+                mesh.rotation.x = -Math.PI / 2;
+                break;
+              case "fence":
+                mesh = buildFence(item.length ?? 8, item.axis ?? "x", item.color ? Number(item.color) : undefined);
+                break;
+              case "arch":
+                mesh = buildArch(item.color ? Number(item.color) : undefined);
+                break;
+              case "banner":
+                mesh = buildBanner(item.color ? Number(item.color) : undefined);
+                break;
+              case "bridge":
+                mesh = buildBridge(item.length ?? 6, item.width ?? 2.6, item.color ? Number(item.color) : undefined);
+                break;
+              case "path":
+                mesh = new THREE.Mesh(
+                  new THREE.PlaneGeometry(item.width ?? 20, item.depth ?? 6),
+                  new THREE.MeshStandardMaterial({ color: item.color ? Number(item.color) : 0xc2aa79 })
+                );
+                mesh.rotation.x = -Math.PI / 2;
+                mesh.position.y = 0.05;
+                break;
+              case "hill":
+                mesh = buildHill(item.radius ?? 6, item.height ?? 2.6, item.color ? Number(item.color) : undefined);
+                break;
+              case "stump":
+                mesh = buildStump(item.radius ?? 0.45, item.height ?? 0.5, item.color ? Number(item.color) : undefined);
+                break;
+              case "lantern":
+                mesh = buildLantern(item.color ? Number(item.color) : undefined);
+                break;
+              default:
+                break;
+            }
+
+            if (!mesh) return;
+            mesh.position.set(item.x, item.y || 0, item.z);
+            if (item.scale) {
+              mesh.scale.setScalar(item.scale);
+            }
+            mesh.castShadow = false;
+            group.add(mesh);
+          });
+
+          this.worldGroup.add(group);
+          this.loaded.set(region.id, { group, metadata });
+          this.loading.delete(region.id);
+          return this.loaded.get(region.id);
+        }
+        get(regionId) {
+          return this.loaded.get(regionId);
+        }
+        setActiveRegion(activeIndex, radius = 1) {
+          this.loaded.forEach((entry) => {
+            const regionIndex = entry.group.userData.index ?? 0;
+            const visible = Math.abs(regionIndex - activeIndex) <= radius;
+            entry.group.visible = visible;
+          });
+        }
+      }
+
+      const createPlayer = (scene, options = {}) => {
+        const limits = {
+          minX: options.minX ?? 0,
+          maxX: options.maxX ?? 2000,
+          minZ: options.minZ ?? -80,
+          maxZ: options.maxZ ?? 80
+        };
+        const group = new THREE.Group();
+        const body = new THREE.Mesh(
+          new THREE.CapsuleGeometry(0.45, 0.8, 4, 8),
+          new THREE.MeshStandardMaterial({ color: 0x2ca24b })
+        );
+        body.castShadow = false;
+        const shield = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 0.6, 0.08),
+          new THREE.MeshStandardMaterial({ color: 0x7c5a2b })
+        );
+        shield.position.set(0.35, 0.2, 0.35);
+        shield.rotation.y = Math.PI * 0.2;
+        group.add(body, shield);
+        group.position.set(20, 1, 0);
+        scene.add(group);
+
+        const state = {
+          velocity: new THREE.Vector3(),
+          direction: new THREE.Vector3(),
+          speed: 6,
+          sprint: 10,
+          stamina: 100,
+          staminaMax: 100,
+          staminaDrain: 28,
+          staminaRegen: 18
+        };
+        const keys = {
+          forward: false,
+          back: false,
+          left: false,
+          right: false,
+          sprint: false
+        };
+        const onKey = (event, value) => {
+          switch (event.code) {
+            case "KeyW":
+            case "ArrowUp":
+              keys.forward = value;
+              break;
+            case "KeyS":
+            case "ArrowDown":
+              keys.back = value;
+              break;
+            case "KeyA":
+            case "ArrowLeft":
+              keys.left = value;
+              break;
+            case "KeyD":
+            case "ArrowRight":
+              keys.right = value;
+              break;
+            case "ShiftLeft":
+            case "ShiftRight":
+              keys.sprint = value;
+              break;
+            default:
+              break;
+          }
+        };
+        window.addEventListener("keydown", (event) => onKey(event, true));
+        window.addEventListener("keyup", (event) => onKey(event, false));
+
+        const update = (delta, yaw = 0) => {
+          state.direction.set(0, 0, 0);
+          if (keys.forward) state.direction.z -= 1;
+          if (keys.back) state.direction.z += 1;
+          if (keys.left) state.direction.x -= 1;
+          if (keys.right) state.direction.x += 1;
+
+          const moving = state.direction.lengthSq() > 0;
+          const canSprint = keys.sprint && state.stamina > 0;
+          const speed = canSprint ? state.sprint : state.speed;
+
+          if (moving) {
+            state.direction.normalize();
+            const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+            const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+            const move = new THREE.Vector3()
+              .addScaledVector(right, state.direction.x)
+              .addScaledVector(forward, state.direction.z);
+            move.normalize();
+            state.velocity.x = move.x * speed;
+            state.velocity.z = move.z * speed;
+            group.rotation.y = Math.atan2(state.velocity.x, state.velocity.z);
+          } else {
+            state.velocity.x = 0;
+            state.velocity.z = 0;
+          }
+
+          if (canSprint && moving) {
+            state.stamina = Math.max(0, state.stamina - state.staminaDrain * delta);
+          } else {
+            state.stamina = Math.min(state.staminaMax, state.stamina + state.staminaRegen * delta);
+          }
+
+          group.position.x += state.velocity.x * delta;
+          group.position.z += state.velocity.z * delta;
+          group.position.y = 1;
+
+          group.position.x = Math.min(limits.maxX, Math.max(limits.minX, group.position.x));
+          group.position.z = Math.min(limits.maxZ, Math.max(limits.minZ, group.position.z));
+        };
+        const getStaminaRatio = () => state.stamina / state.staminaMax;
+        return { group, update, getStaminaRatio };
+      };
+
+      const canvas = document.querySelector("#game-canvas");
+      const regionName = document.querySelector("#region-name");
+      const loadingStatus = document.querySelector("#loading-status");
+      const saveStatus = document.querySelector("#save-status");
+      const audioStatus = document.querySelector("#audio-status");
+      const staminaFill = document.querySelector(".stamina-fill");
+      const minimapDot = document.querySelector("#mini-dot");
+      const minimap = document.querySelector(".minimap");
+      const lockOverlay = document.querySelector("#lock-overlay");
+
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = false;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x7cc7ff);
+      scene.fog = new THREE.Fog(0x7cc7ff, 30, 280);
+
+      const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 800);
+
+      const world = new THREE.Group();
+      scene.add(world);
+
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x2a2833, 0.8);
+      scene.add(hemi);
+
+      const sun = new THREE.DirectionalLight(0xfff3d6, 0.9);
+      sun.position.set(40, 60, 20);
+      sun.castShadow = false;
+      scene.add(sun);
+
+      const loader = new RegionLoader(scene, world);
+      const worldWidth = regions.length * regionWidth;
+      const zLimit = regionDepth / 2 - 6;
+      const player = createPlayer(scene, { minX: 0, maxX: worldWidth - 1, minZ: -zLimit, maxZ: zLimit });
+
+      const cameraState = {
+        yaw: 0,
+        pitch: -0.2,
+        distance: 12,
+        sensitivity: 0.0022
+      };
+
+      const audio = {
+        context: null,
+        gain: null,
+        osc: null,
+        muted: true
+      };
+
+      const dayState = {
+        time: 0,
+        length: 120
+      };
+
+      const clock = new THREE.Clock();
+      let activeRegion = null;
+      let currentSky = new THREE.Color(0x7cc7ff);
+      let saveCooldown = 0;
+      let pointerLocked = false;
+
+      const initAudio = () => {
+        if (audio.context) return;
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) {
+          audioStatus.textContent = "Audio: unsupported";
+          return;
+        }
+        const context = new AudioContextClass();
+        const osc = context.createOscillator();
+        const filter = context.createBiquadFilter();
+        const gain = context.createGain();
+        osc.type = "sine";
+        osc.frequency.value = 70;
+        filter.type = "lowpass";
+        filter.frequency.value = 620;
+        gain.gain.value = 0.04;
+        osc.connect(filter).connect(gain).connect(context.destination);
+        osc.start();
+        audio.context = context;
+        audio.osc = osc;
+        audio.gain = gain;
+        audio.muted = false;
+        audioStatus.textContent = "Audio: on";
+      };
+      const setAudioMuted = (muted) => {
+        if (!audio.gain) return;
+        audio.muted = muted;
+        audio.gain.gain.value = muted ? 0 : 0.04;
+        audioStatus.textContent = muted ? "Audio: muted" : "Audio: on";
+      };
+      const updateAudioForRegion = (regionIndex) => {
+        if (!audio.osc) return;
+        const base = 60 + regionIndex * 6;
+        audio.osc.frequency.value = base;
+      };
+
+      const loadSave = () => {
+        const saved = loadState();
+        if (!saved) return;
+        if (saved.player) {
+          player.group.position.set(saved.player.x ?? 20, 1, saved.player.z ?? 0);
+        }
+        if (saved.camera) {
+          cameraState.yaw = saved.camera.yaw ?? cameraState.yaw;
+          cameraState.pitch = saved.camera.pitch ?? cameraState.pitch;
+        }
+        if (typeof saved.time === "number") {
+          dayState.time = saved.time;
+        }
+        saveStatus.textContent = "Save: restored";
+      };
+
+      const updateCamera = () => {
+        const target = player.group.position.clone();
+        const offset = new THREE.Vector3(
+          Math.sin(cameraState.yaw) * Math.cos(cameraState.pitch),
+          Math.sin(cameraState.pitch),
+          Math.cos(cameraState.yaw) * Math.cos(cameraState.pitch)
+        ).multiplyScalar(cameraState.distance);
+        camera.position.copy(target).sub(offset);
+        camera.lookAt(target.x, target.y + 1, target.z);
+      };
+
+      const updateRegion = () => {
+        const region = getRegionForX(player.group.position.x);
+        if (region.id !== activeRegion?.id) {
+          activeRegion = region;
+          regionName.textContent = region.name;
+          updateAudioForRegion(region.index);
+          loader.setActiveRegion(region.index, 1);
+        }
+
+        loadingStatus.textContent = "Loading " + (region.index + 1) + " / " + regions.length;
+        const loadTargets = [regions[region.index - 1], region, regions[region.index + 1]].filter(Boolean);
+        loadTargets.forEach((target) => {
+          try {
+            loader.load(target);
+          } catch (error) {
+            console.error(error);
+          }
+        });
+
+        const regionData = loader.get(region.id);
+        if (regionData?.metadata?.sky) {
+          currentSky.set(regionData.metadata.sky);
+        }
+        if (regionData?.metadata?.ground) {
+          minimap.style.background =
+            "radial-gradient(circle at 30% 30%, " + regionData.metadata.ground + " 0%, #1e3a35 70%)";
+        }
+      };
+
+      const updateDayNight = (delta) => {
+        dayState.time += delta;
+        const cycle = (dayState.time % dayState.length) / dayState.length;
+        const angle = cycle * Math.PI * 2;
+        const daylight = Math.max(0, Math.sin(angle) * 0.6 + 0.45);
+        const nightColor = new THREE.Color(0x0c1233);
+        const blended = currentSky.clone().lerp(nightColor, 1 - daylight);
+        scene.background = blended;
+        scene.fog.color.copy(blended);
+
+        sun.intensity = 0.2 + daylight * 0.9;
+        hemi.intensity = 0.2 + daylight * 0.7;
+        sun.position.set(Math.cos(angle) * 80, 18 + Math.sin(angle) * 60, Math.sin(angle) * 40);
+        sun.color.setHSL(0.1, 0.5, 0.5 + daylight * 0.2);
+      };
+
+      const updateMinimap = () => {
+        const region = getRegionForX(player.group.position.x);
+        const localX = player.group.position.x - region.startX;
+        const localZ = player.group.position.z + region.depth / 2;
+        const xPercent = Math.min(1, Math.max(0, localX / region.width));
+        const zPercent = Math.min(1, Math.max(0, localZ / region.depth));
+        minimapDot.style.left = xPercent * 100 + "%";
+        minimapDot.style.top = (1 - zPercent) * 100 + "%";
+      };
+
+      const updateStamina = () => {
+        staminaFill.style.width = player.getStaminaRatio() * 100 + "%";
+      };
+
+      const saveProgress = (delta) => {
+        saveCooldown -= delta;
+        if (saveCooldown > 0) return;
+        const ok = saveState({
+          player: { x: player.group.position.x, z: player.group.position.z },
+          camera: { yaw: cameraState.yaw, pitch: cameraState.pitch },
+          time: dayState.time
+        });
+        saveStatus.textContent = ok ? "Save: ok" : "Save: failed";
+        saveCooldown = 2.5;
+      };
+
+      const animate = () => {
+        const delta = clock.getDelta();
+        player.update(delta, cameraState.yaw);
+        updateCamera();
+        updateRegion();
+        updateDayNight(delta);
+        updateMinimap();
+        updateStamina();
+        saveProgress(delta);
+        renderer.render(scene, camera);
+        requestAnimationFrame(animate);
+      };
+
+      const onResize = () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      };
+
+      window.addEventListener("resize", onResize);
+
+      const onPointerLockChange = () => {
+        pointerLocked = document.pointerLockElement === canvas;
+        lockOverlay.classList.toggle("hidden", pointerLocked);
+        document.body.classList.toggle("locked", pointerLocked);
+        if (pointerLocked) {
+          initAudio();
+          if (audio.context?.state === "suspended") {
+            audio.context.resume();
+          }
+        }
+      };
+
+      const requestLock = () => {
+        canvas.requestPointerLock();
+      };
+      canvas.addEventListener("click", requestLock);
+      lockOverlay.addEventListener("click", requestLock);
+
+      document.addEventListener("pointerlockchange", onPointerLockChange);
+
+      document.addEventListener("mousemove", (event) => {
+        if (!pointerLocked) return;
+        cameraState.yaw -= event.movementX * cameraState.sensitivity;
+        cameraState.pitch -= event.movementY * cameraState.sensitivity;
+        cameraState.pitch = Math.max(-0.6, Math.min(0.25, cameraState.pitch));
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.code === "KeyM") {
+          setAudioMuted(!audio.muted);
+        }
+      });
+
+      loadSave();
+      updateRegion();
+      animate();
+    </script>
+  </body>
+</html>

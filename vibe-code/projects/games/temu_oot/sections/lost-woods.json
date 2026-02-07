@@ -1,0 +1,18 @@
+{
+  "id": "lost-woods",
+  "name": "Lost Woods",
+  "ground": "#4fa36a",
+  "sky": "#6cbfa7",
+  "width": 220,
+  "depth": 180,
+  "roughness": 1.0,
+  "objects": [
+    {"type": "path", "x": 0, "z": 0, "width": 50, "depth": 10, "color": "0x9f8a62"},
+    {"type": "tree", "x": -70, "z": -10, "scale": 1.8},
+    {"type": "tree", "x": -30, "z": 30, "scale": 1.6},
+    {"type": "tree", "x": 20, "z": -20, "scale": 1.4},
+    {"type": "tree", "x": 60, "z": 40, "scale": 1.5},
+    {"type": "rock", "x": 0, "z": 60, "scale": 1.1},
+    {"type": "banner", "x": -60, "z": 50, "scale": 1.1, "color": "0x3b7d58"}
+  ]
+}

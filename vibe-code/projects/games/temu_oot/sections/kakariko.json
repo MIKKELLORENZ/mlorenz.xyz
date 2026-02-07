@@ -1,0 +1,18 @@
+{
+  "id": "kakariko",
+  "name": "Kakariko Village",
+  "ground": "#b9936c",
+  "sky": "#9fb3ff",
+  "width": 220,
+  "depth": 180,
+  "roughness": 0.6,
+  "objects": [
+    {"type": "path", "x": 0, "z": -5, "width": 70, "depth": 10, "color": "0xbfa27c"},
+    {"type": "house", "x": -50, "z": -20, "scale": 1.1},
+    {"type": "house", "x": -10, "z": -30, "scale": 0.9},
+    {"type": "house", "x": 30, "z": -10, "scale": 1.0},
+    {"type": "tree", "x": 50, "z": 40, "scale": 1.0},
+    {"type": "rock", "x": -60, "z": 50, "scale": 1.2},
+    {"type": "fence", "x": 40, "z": 60, "length": 14, "axis": "x"}
+  ]
+}

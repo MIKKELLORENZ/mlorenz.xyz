@@ -1,0 +1,20 @@
+{
+  "id": "market-castle-town",
+  "name": "Market / Castle Town",
+  "ground": "#c6b18a",
+  "sky": "#a5c9ff",
+  "width": 220,
+  "depth": 180,
+  "roughness": 0.2,
+  "objects": [
+    {"type": "path", "x": 0, "z": 10, "width": 80, "depth": 12, "color": "0xb9a37d"},
+    {"type": "house", "x": -40, "z": -20, "scale": 1.2},
+    {"type": "house", "x": 0, "z": -30, "scale": 1.1},
+    {"type": "house", "x": 40, "z": -10, "scale": 1.0},
+    {"type": "totem", "x": -20, "z": 40, "scale": 1.4},
+    {"type": "totem", "x": 20, "z": 40, "scale": 1.4},
+    {"type": "arch", "x": 0, "z": 60, "scale": 1.1},
+    {"type": "banner", "x": -70, "z": 50, "scale": 1.2},
+    {"type": "banner", "x": 70, "z": 50, "scale": 1.2}
+  ]
+}

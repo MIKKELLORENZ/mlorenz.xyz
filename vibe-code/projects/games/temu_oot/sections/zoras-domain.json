@@ -1,0 +1,17 @@
+{
+  "id": "zoras-domain",
+  "name": "Zora's Domain",
+  "ground": "#6aa7c9",
+  "sky": "#9ad6ff",
+  "width": 220,
+  "depth": 180,
+  "roughness": 1.1,
+  "objects": [
+    {"type": "water", "x": 0, "z": 0, "y": 0.05, "width": 120, "depth": 80},
+    {"type": "bridge", "x": 0, "z": 0, "y": 0.3, "length": 8, "width": 3.4, "color": "0x7a5c3b"},
+    {"type": "totem", "x": -50, "z": -20, "scale": 1.2, "color": "0x3b6c90"},
+    {"type": "totem", "x": 50, "z": -20, "scale": 1.2, "color": "0x3b6c90"},
+    {"type": "rock", "x": -70, "z": 50, "scale": 1.1},
+    {"type": "rock", "x": 70, "z": 50, "scale": 1.1}
+  ]
+}

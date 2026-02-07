@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Temu OOT (Joke Clone)</title>
+    <link rel="stylesheet" href="styles/main.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="hud">
+      <div class="hud-left">
+        <div class="hearts" aria-label="health">
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+          <span class="heart full"></span>
+        </div>
+        <div class="stamina">
+          <div class="stamina-fill"></div>
+        </div>
+      </div>
+      <div class="hud-center">
+        <div class="title">TEMU TIME</div>
+        <div id="region-name">Loading...</div>
+        <div id="loading-status">Booting region stream</div>
+        <div id="save-status">Save: idle</div>
+        <div id="audio-status">Audio: off</div>
+      </div>
+      <div class="hud-right">
+        <div class="minimap" aria-hidden="true">
+          <div id="mini-dot"></div>
+        </div>
+        <div class="item-wheel">
+          <div class="item-slot">A</div>
+          <div class="item-slot">B</div>
+          <div class="item-slot">C</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="lock-overlay">
+      <div class="lock-panel">
+        <div class="lock-title">Click To Play</div>
+        <div class="lock-sub">Mouse look + WASD</div>
+      </div>
+    </div>
+
+    <canvas id="game-canvas"></canvas>
+
+    <div id="help">
+      <div>WASD / Arrows: move</div>
+      <div>Shift: sprint</div>
+      <div>Mouse: look</div>
+      <div>M: mute</div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
