@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="description" content="Tank Wars is a fast turn-based artillery game with destructible terrain, wind physics, and tactical weapon drafting." />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f1a2d'/%3E%3Crect x='10' y='36' width='44' height='12' rx='4' fill='%2366b7ff'/%3E%3Crect x='24' y='27' width='16' height='8' rx='2' fill='%237fd4ff'/%3E%3Crect x='34' y='22' width='16' height='4' rx='2' fill='%23ffe7a2'/%3E%3C/svg%3E" />
+  <title>Tank Wars</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1>Tank Wars</h1>
+      <div class="top-actions">
+        <button id="muteBtn" class="btn" aria-pressed="false">Mute</button>
+        <button id="newGameBtn" class="btn">New Game</button>
+      </div>
+    </header>
+
+    <section id="menu" class="menu hidden"></section>
+
+    <section class="hud hidden" id="hud">
+      <div><strong>Turn:</strong> <span id="turnText">-</span></div>
+      <div><strong>Wind:</strong> <span id="windText">0</span></div>
+      <div><strong>Weapon:</strong> <span id="weaponText">Basic</span></div>
+      <div class="score-wrap">
+        <span>P1</span><div class="score-pill"><span id="score1">0</span></div>
+        <span>P2</span><div class="score-pill score-pill-p2"><span id="score2">0</span></div>
+      </div>
+    </section>
+
+    <main class="game-wrap">
+      <canvas id="gameCanvas" width="1200" height="700"></canvas>
+    </main>
+
+    <section class="controls hidden" id="controls">
+      <div class="group">
+        <button id="angleDown" class="btn">Angle -</button>
+        <button id="angleUp" class="btn">Angle +</button>
+      </div>
+      <div class="group">
+        <button id="powerDown" class="btn">Power -</button>
+        <button id="powerUp" class="btn">Power +</button>
+      </div>
+      <div class="aim-stats">
+        <div><strong>Angle:</strong> <span id="angleText">45°</span></div>
+        <div class="power-block">
+          <strong>Power:</strong> <span id="powerNumText" class="power-num">50</span>
+          <div class="power-track"><div id="powerFill" class="power-fill"></div></div>
+        </div>
+      </div>
+      <button id="fireBtn" class="btn fire">FIRE</button>
+    </section>
+
+    <section id="weaponBar" class="weapon-bar hidden"></section>
+
+    <section id="message" class="message"></section>
+  </div>
+
+  <section id="draftModal" class="draft-modal hidden">
+    <div class="draft-card">
+      <h2>Weapon Draft</h2>
+      <div class="draft-actions">
+        <p id="draftText" class="hint">Player 1: choose your weapon</p>
+        <button id="draftRandomizeBtn" class="btn primary">Randomize Remaining</button>
+      </div>
+      <div class="draft-layout">
+        <aside class="draft-preview">
+          <h3>Player 1</h3>
+          <div id="draftP1List" class="draft-picked"></div>
+        </aside>
+        <div id="draftGrid" class="draft-grid"></div>
+        <aside class="draft-preview">
+          <h3>Player 2</h3>
+          <div id="draftP2List" class="draft-picked"></div>
+        </aside>
+      </div>
+      <p class="hint">Pick weapons in your preferred order, or hit Randomize to fill the rest. Each player selects all weapons.</p>
+    </div>
+  </section>
+
+  <section id="winnerModal" class="winner-modal hidden">
+    <div class="winner-card">
+      <div id="confettiLayer" class="confetti-layer"></div>
+      <h2 id="winnerTitle">Winner!</h2>
+      <p id="winnerSubtitle" class="hint">Great shot!</p>
+      <canvas id="winnerCanvas" width="260" height="140"></canvas>
+      <div class="winner-actions">
+        <button id="nextGameBtn" class="btn primary">Next Game</button>
+        <button id="winnerCloseBtn" class="btn">Back to Menu</button>
+      </div>
+    </div>
+  </section>
+
+  <script defer src="js/main.js"></script>
+</body>
+</html>

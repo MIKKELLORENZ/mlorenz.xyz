@@ -10,22 +10,67 @@
     <!-- Loading Screen -->
     <div id="loadingScreen" class="screen active">
         <div class="loading-content">
+            <div class="ps1-boot-logo">
+                <span class="boot-s">S</span><span class="boot-c">C</span><span class="boot-e">E</span>
+            </div>
             <div class="ps1-logo">RETRO POOL</div>
             <div class="loading-bar">
                 <div class="loading-progress"></div>
             </div>
             <div class="loading-text">Loading...</div>
+            <div class="memory-card-icon">&#x1F4BE;</div>
         </div>
     </div>
 
     <!-- Main Menu -->
     <div id="mainMenu" class="screen">
         <div class="menu-content">
-            <h1 class="game-title">RETRO POOL</h1>
+            <div class="menu-subtitle">~ PRESENTS ~</div>
+            <h1 class="game-title">RETRO<br>POOL</h1>
+            <div class="menu-tagline">PlayStation Style</div>
             <div class="menu-buttons">
-                <button id="playButton" class="ps1-button">PLAY</button>
-                <button id="optionsButton" class="ps1-button">OPTIONS</button>
-                <button id="exitButton" class="ps1-button">EXIT</button>
+                <button id="playButton" class="ps1-button"><span class="btn-icon">&#9654;</span> PLAY</button>
+                <button id="optionsButton" class="ps1-button"><span class="btn-icon">&#9881;</span> OPTIONS</button>
+                <button id="exitButton" class="ps1-button"><span class="btn-icon">&#10005;</span> EXIT</button>
+            </div>
+            <div class="menu-footer">PRESS START &bull; &copy; 2026 RETRO GAMES</div>
+        </div>
+    </div>
+
+    <!-- Options Screen -->
+    <div id="optionsMenu" class="screen">
+        <div class="menu-content options-content">
+            <h2 class="options-title">OPTIONS</h2>
+            <div class="menu-buttons">
+                <button id="toggleScanlines" class="ps1-button">SCANLINES: ON</button>
+                <button id="toggleCursor" class="ps1-button">GAME CURSOR: ON</button>
+                <button id="toggleDither" class="ps1-button">DITHER: OFF</button>
+                <button id="toggleSound" class="ps1-button">SOUND: ON</button>
+                <button id="toggleJitter" class="ps1-button">PS1 JITTER: ON</button>
+                <button id="togglePov" class="ps1-button">POV CLOSE-UP: ON</button>
+                <div class="options-sliders">
+                    <div class="slider-row">
+                        <label for="aimSensitivity">Aim Sensitivity <span id="aimSensitivityValue">1.00</span></label>
+                        <input id="aimSensitivity" type="range" min="0.4" max="2.5" step="0.05" value="1">
+                    </div>
+                    <div class="slider-row">
+                        <label for="cameraSensitivity">Camera Orbit <span id="cameraSensitivityValue">1.00</span></label>
+                        <input id="cameraSensitivity" type="range" min="0.4" max="2.5" step="0.05" value="1">
+                    </div>
+                    <div class="slider-row">
+                        <label for="zoomSpeed">Zoom Speed <span id="zoomSpeedValue">1.00</span></label>
+                        <input id="zoomSpeed" type="range" min="0.5" max="2.5" step="0.05" value="1">
+                    </div>
+                    <div class="slider-row">
+                        <label for="chargeRate">Charge Rate <span id="chargeRateValue">1.00</span></label>
+                        <input id="chargeRate" type="range" min="0.6" max="2.0" step="0.05" value="1">
+                    </div>
+                    <div class="slider-row">
+                        <label for="fovSetting">Camera FOV <span id="fovSettingValue">60</span></label>
+                        <input id="fovSetting" type="range" min="45" max="80" step="1" value="60">
+                    </div>
+                </div>
+                <button id="optionsBackButton" class="ps1-button back-button">&#9664; BACK</button>
             </div>
         </div>
     </div>
@@ -33,23 +78,43 @@
     <!-- Game Screen -->
     <div id="gameScreen" class="screen">
         <canvas id="gameCanvas"></canvas>
+
+        <!-- Turn Notification -->
+        <div id="turnNotification" class="turn-notification"></div>
         
         <!-- Game UI -->
         <div id="gameUI">
             <div class="ui-top">
                 <div class="player-info">
-                    <div class="player-name">PLAYER 1</div>
-                    <div class="player-score">Score: <span id="player1Score">0</span></div>
+                    <div class="player-panel" id="player1Label">
+                        <div class="player-name">PLAYER 1 <span id="player1Type" class="player-type"></span></div>
+                        <div class="player-score">Score: <span id="player1Score">0</span></div>
+                        <div class="pocketed-balls" id="player1PocketedBalls"></div>
+                    </div>
+                    <div class="player-panel" id="player2Label">
+                        <div class="player-name">PLAYER 2 <span id="player2Type" class="player-type"></span></div>
+                        <div class="player-score">Score: <span id="player2Score">0</span></div>
+                        <div class="pocketed-balls" id="player2PocketedBalls"></div>
+                    </div>
                 </div>
                 <div class="game-info">
+                    <div class="current-player">Turn: <span id="currentPlayer">Player 1</span></div>
                     <div class="shot-power">Power: <span id="shotPower">0</span>%</div>
-                    <div class="current-player">Current: <span id="currentPlayer">Player 1</span></div>
+                    <div class="shot-power-bar">
+                        <div id="shotPowerFill" class="shot-power-fill"></div>
+                    </div>
                 </div>
             </div>
             
             <div class="ui-bottom">
                 <div class="controls-hint">
-                    S to aim • A/D or ← → to adjust angle • Hold SPACE to charge shot • R to reset camera • ESC to pause
+                    <span class="key">LMB</span> Hold to charge &amp; release to shoot &bull;
+                    <span class="key">RMB</span> Drag to orbit camera &bull;
+                    <span class="key">Scroll</span> Zoom &bull;
+                    <span class="key">A/D</span> Fine aim &bull;
+                    <span class="key">Q/E</span> Orbit camera &bull;
+                    <span class="key">R</span> Reset view &bull;
+                    <span class="key">ESC</span> Pause
                 </div>
             </div>
         </div>
@@ -57,12 +122,24 @@
 
     <!-- Pause Menu -->
     <div id="pauseMenu" class="screen overlay">
-        <div class="menu-content">
-            <h2>PAUSED</h2>
+        <div class="menu-content pause-content">
+            <h2>&#9612;&#9612; PAUSED</h2>
             <div class="menu-buttons">
                 <button id="resumeButton" class="ps1-button">RESUME</button>
                 <button id="restartButton" class="ps1-button">RESTART</button>
                 <button id="menuButton" class="ps1-button">MAIN MENU</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameOverScreen" class="screen overlay">
+        <div class="menu-content gameover-content">
+            <h2 id="gameOverMessage" class="gameover-title">PLAYER 1 WINS!</h2>
+            <p id="gameOverSub" class="gameover-sub">Score: 7 balls pocketed</p>
+            <div class="menu-buttons">
+                <button id="playAgainButton" class="ps1-button">PLAY AGAIN</button>
+                <button id="gameOverMenuButton" class="ps1-button">MAIN MENU</button>
             </div>
         </div>
     </div>

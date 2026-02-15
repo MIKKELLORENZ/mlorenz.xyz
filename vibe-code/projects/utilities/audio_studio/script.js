@@ -7,14 +7,29 @@ let pixelsPerSecond = 100;
 let selectedRegion = null;
 let isDraggingRegion = false;
 let isResizingRegion = false;
+let isAdjustingFade = false;
+let isAdjustingRegionGain = false;
 let resizeState = null;
+let fadeAdjustState = null;
+let regionGainAdjustState = null;
+let dragGhost = null;
+let dragGhostTrackElement = null;
 let dragOffset = { x: 0, y: 0 };
 let timelineScroll = 0;
 let zoomLevel = 1.0;
+const MIN_ZOOM_LEVEL = 0.05;
+const MAX_ZOOM_LEVEL = 30;
 let snapEnabled = true;
 let snapValue = 0.25; // quarter note
 let bpm = 120;
 let settingsInitialized = false;
+
+// Project save/load
+let autoSaveTimeout = null;
+let isLoadingProject = false;
+const DB_NAME = 'AudioStudioDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'projects';
 
 // Undo/Redo system
 let undoStack = [];
@@ -38,27 +53,37 @@ let recordingTrack = null;
 let inputAnalyser = null;
 let inputSource = null;
 let inputMeterAnimationId = null;
+let activeInputMeterTrackId = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
     audioEngine = new AudioEngine();
     await audioEngine.initialize();
     
-    // Create default tracks
-    for (let i = 0; i < 4; i++) {
-        createTrack();
-    }
-    
     setupEventListeners();
     setupTimeline();
     startMetering();
     updateTrackControlsWidthVar();
     initializeSliderFills();
+    
+    // Try to load saved project from IndexedDB
+    const loaded = await loadProjectFromIndexedDB();
+    if (!loaded) {
+        // Create default tracks if no saved project
+        for (let i = 0; i < 4; i++) {
+            createTrack();
+        }
+    }
 });
 
 // Event Listeners
 function setupEventListeners() {
     // Transport controls
+    document.getElementById('returnToStartBtn').addEventListener('click', () => {
+        audioEngine.seek(0);
+        updatePlayhead();
+        updateTimeDisplay();
+    });
     document.getElementById('recordBtn').addEventListener('click', toggleRecording);
     document.getElementById('playPauseBtn').addEventListener('click', togglePlayPause);
     document.getElementById('stopBtn').addEventListener('click', () => {
@@ -76,27 +101,35 @@ function setupEventListeners() {
     document.getElementById('loopBtn').addEventListener('click', toggleLoop);
     
     // Add track
-    document.getElementById('addTrackBtn').addEventListener('click', createTrack);
+    document.getElementById('addTrackBtn').addEventListener('click', () => createTrack());
     
     // Export
     document.getElementById('exportBtn').addEventListener('click', exportProject);
+    
+    // Save / Load project
+    document.getElementById('saveProjectBtn').addEventListener('click', saveProjectToFile);
+    document.getElementById('loadProjectBtn').addEventListener('click', loadProjectFromFile);
+    document.getElementById('clearProjectBtn').addEventListener('click', clearProject);
     
     // BPM
     document.getElementById('bpmInput').addEventListener('change', (e) => {
         bpm = parseInt(e.target.value);
         updateTimelineGrid(); // Update grid when BPM changes
+        scheduleAutoSave();
     });
     
     // Snap settings
     document.getElementById('snapEnabled').addEventListener('change', (e) => {
         snapEnabled = e.target.checked;
         updateTimelineGrid(); // Update grid when snap is toggled
+        scheduleAutoSave();
     });
     
     document.getElementById('snapValue').addEventListener('change', (e) => {
         snapValue = parseFloat(e.target.value);
         updateTimelineGrid(); // Update grid when snap value changes
         snapAllRegionsToGrid(); // Snap existing regions to new grid
+        scheduleAutoSave();
     });
     
     // Master volume
@@ -107,6 +140,7 @@ function setupEventListeners() {
         document.getElementById('masterVolumeValue').textContent = db === -Infinity ? '-∞ dB' : db.toFixed(1) + ' dB';
         // Update slider fill
         updateSliderFill(e.target, value * 100);
+        scheduleAutoSave();
     });
     
     // Master settings
@@ -119,11 +153,13 @@ function setupEventListeners() {
     const closeBtn = modal.querySelector('.close');
     closeBtn.addEventListener('click', () => {
         modal.classList.remove('active');
+        stopGRMeter();
     });
     
     window.addEventListener('click', (e) => {
         if (e.target === modal) {
             modal.classList.remove('active');
+            stopGRMeter();
         }
     });
     
@@ -144,6 +180,10 @@ function setupEventListeners() {
     document.addEventListener('mouseup', handleRegionDragEnd);
     document.addEventListener('mousemove', handleRegionResize);
     document.addEventListener('mouseup', handleRegionResizeEnd);
+    document.addEventListener('mousemove', handleRegionFadeAdjust);
+    document.addEventListener('mouseup', handleRegionFadeAdjustEnd);
+    document.addEventListener('mousemove', handleRegionGainAdjust);
+    document.addEventListener('mouseup', handleRegionGainAdjustEnd);
     
     // Scrolling and Zooming
     const tracksWrapper = document.querySelector('.tracks-wrapper');
@@ -168,9 +208,14 @@ function getTrackControlsWidth() {
 }
 
 function syncRulerScroll() {
+    const timelineContainer = document.querySelector('.timeline-container');
+    if (timelineContainer) {
+        timelineContainer.scrollLeft = timelineScroll;
+    }
+    // Clear any residual CSS transform on the ruler
     const ruler = document.getElementById('timelineRuler');
     if (ruler) {
-        ruler.style.transform = `translateX(${-timelineScroll}px)`;
+        ruler.style.transform = '';
     }
 }
 
@@ -186,26 +231,33 @@ function handleKeyPress(e) {
     // Delete key to remove selected region
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRegion) {
         e.preventDefault();
-        const track = audioEngine.tracks.find(t => 
-            t.regions && t.regions.some(r => r.element === selectedRegion)
-        );
-        if (track) {
-            const regionData = track.regions.find(r => r.element === selectedRegion);
-            pushUndo('Delete Region', () => {
-                const regionIndex = track.regions.findIndex(r => r.element === selectedRegion);
-                if (regionIndex !== -1) {
-                    track.regions.splice(regionIndex, 1);
-                    selectedRegion.remove();
-                    selectedRegion = null;
-                    audioEngine.updateDuration();
-                    updateTimelineZoom();
-                    updateTimeDisplay();
+        const owner = findRegionOwner(selectedRegion);
+        if (owner) {
+            const { track, regionData } = owner;
+            const trackId = track.id;
+            const regionSnapshot = cloneRegionDataForHistory(regionData);
+            let activeRegionData = regionData;
+
+            const deleteRegion = () => {
+                const currentOwner = findRegionOwner(activeRegionData);
+                if (!currentOwner) return;
+                if (removeRegionFromTrack(currentOwner.track, currentOwner.regionData)) {
+                    applyArrangementChange();
                 }
-            }, () => {
-                // Redo: recreate region
-                const trackElement = document.querySelector(`.track[data-track-id="${track.id}"]`);
-                createRegionFromData({...regionData, element: null}, track, trackElement);
-            });
+            };
+
+            const restoreRegion = () => {
+                const targetTrack = audioEngine.tracks.find(t => t.id === trackId);
+                if (!targetTrack) return;
+                const restored = restoreRegionToTrack(regionSnapshot, targetTrack);
+                if (restored) {
+                    activeRegionData = restored;
+                    applyArrangementChange();
+                }
+            };
+
+            deleteRegion();
+            recordHistoryAction('Delete Region', restoreRegion, deleteRegion);
         }
     }
     
@@ -267,18 +319,50 @@ function handleKeyPress(e) {
         updatePlayhead();
         updateTimeDisplay();
     }
+
+    // Arrow keys - Move timeline view left/right
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const step = e.shiftKey ? 400 : 120;
+        const direction = e.key === 'ArrowRight' ? 1 : -1;
+        const maxScroll = getTimelineMaxScroll();
+        timelineScroll = Math.max(0, Math.min(maxScroll, timelineScroll + (direction * step)));
+        updateTimelineScroll();
+    }
+
+    // X - Split selected region at playhead
+    if (e.key === 'x' || e.key === 'X') {
+        e.preventDefault();
+        if (selectedRegion) {
+            const track = audioEngine.tracks.find(t =>
+                t.regions && t.regions.some(r => r.element === selectedRegion)
+            );
+
+            if (track) {
+                const regionData = track.regions.find(r => r.element === selectedRegion);
+                const playheadTime = audioEngine.getCurrentTime();
+                const regionEnd = regionData.startTime + regionData.duration;
+
+                if (playheadTime > regionData.startTime && playheadTime < regionEnd) {
+                    const relativeSplitTime = playheadTime - regionData.startTime;
+                    const trackElement = document.querySelector(`.track[data-track-id="${track.id}"]`);
+                    splitRegionAtTime(regionData, relativeSplitTime, track, trackElement);
+                }
+            }
+        }
+    }
     
     // + / = - Zoom in
     if (e.key === '+' || e.key === '=') {
         zoomLevel *= 1.2;
-        zoomLevel = Math.min(10, zoomLevel);
+        zoomLevel = Math.min(MAX_ZOOM_LEVEL, zoomLevel);
         updateTimelineZoom();
     }
     
     // - - Zoom out
     if (e.key === '-') {
         zoomLevel *= 0.8;
-        zoomLevel = Math.max(0.5, zoomLevel);
+        zoomLevel = Math.max(MIN_ZOOM_LEVEL, zoomLevel);
         updateTimelineZoom();
     }
     
@@ -318,6 +402,20 @@ function updateSoloMuteStates() {
             track.gainNode.gain.value = targetVolume;
         }
     });
+}
+
+function refreshPlaybackIfActive() {
+    if (audioEngine?.isPlaying) {
+        audioEngine.refreshPlayback();
+    }
+}
+
+function applyArrangementChange() {
+    audioEngine.updateDuration();
+    refreshPlaybackIfActive();
+    updateTimelineZoom();
+    updateTimeDisplay();
+    scheduleAutoSave();
 }
 
 // ============================================
@@ -514,7 +612,14 @@ async function stopRecording() {
     document.querySelectorAll('.recording-indicator').forEach(el => el.remove());
 }
 
+let isProcessingRecording = false;
+
 async function processRecording() {
+    // Guard against re-entry (e.g., MediaRecorder.onstop firing twice)
+    if (isProcessingRecording) return;
+    isProcessingRecording = true;
+
+    try {
     console.log('processRecording called');
     console.log('recordingChunks.length:', recordingChunks.length);
     console.log('recordingTrack:', recordingTrack?.id);
@@ -590,10 +695,7 @@ async function processRecording() {
             console.log('Creating region with data:', { startTime: savedStartTime, duration: audioBuffer.duration });
             createRegionFromData(regionData, savedTrack, trackElement);
             
-            // Update duration
-            audioEngine.updateDuration();
-            updateTimelineZoom();
-            updateTimeDisplay();
+            applyArrangementChange();
             
             showNotification(`Recording added to ${savedTrack.name}`);
         } else {
@@ -607,6 +709,10 @@ async function processRecording() {
     // Clear state
     recordingChunks = [];
     recordingTrack = null;
+
+    } finally {
+        isProcessingRecording = false;
+    }
 }
 
 // Input metering functions
@@ -663,6 +769,7 @@ async function setupInputMeteringWithStream(stream, trackId) {
     // Store stream reference for cleanup
     inputAnalyser._stream = stream;
     inputAnalyser._trackId = trackId;
+    activeInputMeterTrackId = trackId;
     
     // Start metering animation
     meterLogCounter = 0;
@@ -688,6 +795,8 @@ function stopInputMetering() {
         }
         inputAnalyser = null;
     }
+
+    activeInputMeterTrackId = null;
     
     // Reset all input meters
     document.querySelectorAll('.input-meter-bar').forEach(bar => {
@@ -734,9 +843,21 @@ function updateInputMeter() {
     }
     
     // Update meter bars for armed tracks
-    const trackId = inputAnalyser._trackId;
+    const trackId = activeInputMeterTrackId || inputAnalyser._trackId;
     const meterBar = document.querySelector(`.input-meter-bar[data-track-id="${trackId}"]`);
     const meterPeak = document.querySelector(`.input-meter-peak[data-track-id="${trackId}"]`);
+
+    // Ensure only the active track reflects input meter movement
+    document.querySelectorAll('.input-meter-bar').forEach(bar => {
+        if (bar.dataset.trackId !== trackId) {
+            bar.style.width = '0%';
+        }
+    });
+    document.querySelectorAll('.input-meter-peak').forEach(peak => {
+        if (peak.dataset.trackId !== trackId) {
+            peak.style.left = '0%';
+        }
+    });
     
     // Log element state occasionally
     if (meterLogCounter % 120 === 1) {
@@ -808,9 +929,10 @@ function pushUndo(description, undoFn, redoFn) {
         undoStack.shift();
     }
     redoStack = []; // Clear redo stack on new action
-    
-    // Execute the action
-    undoFn();
+}
+
+function recordHistoryAction(description, undoFn, redoFn) {
+    pushUndo(description, undoFn, redoFn);
 }
 
 function undo() {
@@ -862,6 +984,18 @@ function initializeSliderFills() {
     }
 }
 
+function getTimelineContentWidth() {
+    const duration = audioEngine.duration || 60;
+    const timelineWidth = duration * pixelsPerSecond * zoomLevel;
+    return getTrackControlsWidth() + timelineWidth;
+}
+
+function getTimelineMaxScroll() {
+    const tracksWrapper = document.querySelector('.tracks-wrapper');
+    if (!tracksWrapper) return 0;
+    return Math.max(0, getTimelineContentWidth() - tracksWrapper.clientWidth);
+}
+
 function handleWheelScroll(e) {
     e.preventDefault();
     
@@ -883,7 +1017,7 @@ function handleWheelScroll(e) {
         const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
         const oldZoom = zoomLevel;
         zoomLevel *= zoomDelta;
-        zoomLevel = Math.max(0.5, Math.min(10, zoomLevel));
+        zoomLevel = Math.max(MIN_ZOOM_LEVEL, Math.min(MAX_ZOOM_LEVEL, zoomLevel));
         
         // Calculate new total width
         const newTotalWidth = duration * pixelsPerSecond * zoomLevel;
@@ -894,7 +1028,7 @@ function handleWheelScroll(e) {
         timelineScroll = newCursorX - cursorOffsetFromViewport;
         
         // Clamp scroll
-        const maxScroll = Math.max(0, newTotalWidth - (tracksWrapper.clientWidth - trackControlsWidth));
+        const maxScroll = Math.max(0, (newTotalWidth + trackControlsWidth) - tracksWrapper.clientWidth);
         timelineScroll = Math.max(0, Math.min(maxScroll, timelineScroll));
         
         updateTimelineZoom();
@@ -902,10 +1036,7 @@ function handleWheelScroll(e) {
         // Shift + Wheel: Horizontal scroll
         const scrollDelta = e.deltaY;
         timelineScroll += scrollDelta;
-        const duration = audioEngine.duration || 60;
-        const totalWidth = duration * pixelsPerSecond * zoomLevel;
-        const tracksWrapper = document.querySelector('.tracks-wrapper');
-        const maxScroll = Math.max(0, totalWidth - tracksWrapper.clientWidth);
+        const maxScroll = getTimelineMaxScroll();
         timelineScroll = Math.max(0, Math.min(maxScroll, timelineScroll));
         updateTimelineScroll();
     } else if (e.altKey) {
@@ -930,19 +1061,37 @@ function updateTimelineZoom() {
     // Update all track timelines width based on zoom
     const duration = audioEngine.duration || 60;
     const newWidth = duration * pixelsPerSecond * zoomLevel;
+    const trackControlsWidth = getTrackControlsWidth();
+    const contentWidth = trackControlsWidth + newWidth;
+
+    const tracksContainer = document.getElementById('tracksContainer');
+    if (tracksContainer) {
+        tracksContainer.style.width = `${contentWidth}px`;
+    }
+    document.querySelectorAll('.track').forEach(track => {
+        track.style.width = `${contentWidth}px`;
+    });
     
     document.querySelectorAll('.track-timeline').forEach(timeline => {
+        timeline.style.flex = '0 0 auto';
         timeline.style.width = `${newWidth}px`;
     });
 
     const tracksWrapper = document.querySelector('.tracks-wrapper');
-    const maxScroll = Math.max(0, newWidth - tracksWrapper.clientWidth);
-    timelineScroll = Math.min(timelineScroll, maxScroll);
+    const maxScroll = getTimelineMaxScroll();
+    timelineScroll = Math.max(0, Math.min(timelineScroll, maxScroll));
     tracksWrapper.scrollLeft = timelineScroll;
+
+    // Also update the timeline header width to match content
+    const timelineHeader = document.querySelector('.timeline-header');
+    if (timelineHeader) {
+        timelineHeader.style.width = `${contentWidth}px`;
+    }
     
     updateTimelineRuler();
     updateAllRegions(); // Changed from updateAllWaveforms
     updateTimelineGrid();
+    updatePlayhead();
 }
 
 function updateAllRegions() {
@@ -970,6 +1119,7 @@ function updateAllRegions() {
                     
                     // Redraw waveform with new dimensions
                     drawRegionWaveform(canvas, regionData.buffer, regionData.startOffset, regionData.endOffset);
+                    updateRegionFadeVisuals(regionData);
                 }
             }
         }
@@ -993,6 +1143,8 @@ function updateAllWaveforms() {
 function updateTimelineScroll() {
     // Scroll all track timelines horizontally
     const tracksWrapper = document.querySelector('.tracks-wrapper');
+    const maxScroll = getTimelineMaxScroll();
+    timelineScroll = Math.max(0, Math.min(timelineScroll, maxScroll));
     tracksWrapper.scrollLeft = timelineScroll;
     syncRulerScroll();
 }
@@ -1112,14 +1264,9 @@ function updateTimelineGrid() {
 function handleTimelineClick(e) {
     const ruler = e.currentTarget;
     const rect = ruler.getBoundingClientRect();
-    const tracksWrapper = document.querySelector('.tracks-wrapper');
-    const x = e.clientX - rect.left + tracksWrapper.scrollLeft;
     const totalWidth = (audioEngine.duration || 60) * pixelsPerSecond * zoomLevel;
-    const percentage = x / totalWidth;
-    let time = percentage * (audioEngine.duration || 60);
-    
-    // Apply snap if enabled
-    time = snapToGrid(time);
+    const x = Math.max(0, Math.min(totalWidth, e.clientX - rect.left));
+    const time = (x / totalWidth) * (audioEngine.duration || 60);
     
     audioEngine.seek(time);
     updatePlayhead();
@@ -1168,10 +1315,20 @@ function formatTime(seconds) {
 }
 
 // Track Management
-function createTrack() {
-    trackCounter++;
-    const trackId = `track-${trackCounter}`;
-    const trackName = `Track ${trackCounter}`;
+function createTrack(options) {
+    if (!options || options instanceof Event) options = {};
+    
+    if (options.id) {
+        const idNum = parseInt(options.id.replace('track-', ''));
+        if (!isNaN(idNum) && idNum > trackCounter) trackCounter = idNum;
+        else if (!isNaN(idNum) && idNum === trackCounter) { /* keep */ }
+        else trackCounter++;
+    } else {
+        trackCounter++;
+    }
+    
+    const trackId = options.id || `track-${trackCounter}`;
+    const trackName = options.name || `Track ${trackCounter}`;
     
     const track = audioEngine.createTrack(trackId, trackName);
     
@@ -1235,16 +1392,30 @@ function createTrack() {
     const nameInput = trackElement.querySelector('.track-name');
     nameInput.addEventListener('change', (e) => {
         track.name = e.target.value;
+        scheduleAutoSave();
     });
     
     // Record arm button
     const recordBtn = trackElement.querySelector('.record-btn');
     recordBtn.addEventListener('click', async (e) => {
-        track.isArmed = !track.isArmed;
+        selectTrack(trackElement);
+        const willArm = !track.isArmed;
+
+        audioEngine.tracks.forEach(otherTrack => {
+            if (otherTrack.id === track.id) return;
+            if (!otherTrack.isArmed) return;
+
+            otherTrack.isArmed = false;
+            const otherTrackElement = document.querySelector(`.track[data-track-id="${otherTrack.id}"]`);
+            const otherRecordBtn = otherTrackElement?.querySelector('.record-btn');
+            if (otherRecordBtn) otherRecordBtn.classList.remove('active');
+            if (otherTrackElement) otherTrackElement.classList.remove('armed');
+        });
+
+        track.isArmed = willArm;
         recordBtn.classList.toggle('active', track.isArmed);
         trackElement.classList.toggle('armed', track.isArmed);
-        
-        // Start/stop input metering
+
         if (track.isArmed) {
             await startInputMetering(track.id);
         } else {
@@ -1255,6 +1426,7 @@ function createTrack() {
     // Mute button
     const muteBtn = trackElement.querySelector('.mute-btn');
     muteBtn.addEventListener('click', (e) => {
+        selectTrack(trackElement);
         track.isMuted = !track.isMuted;
         if (track.isMuted) {
             track.gainNode.gain.value = 0;
@@ -1265,14 +1437,17 @@ function createTrack() {
             muteBtn.classList.remove('active');
         }
         updateSoloMuteStates();
+        scheduleAutoSave();
     });
 
     // Solo button
     const soloBtn = trackElement.querySelector('.solo-btn');
     soloBtn.addEventListener('click', (e) => {
+        selectTrack(trackElement);
         track.isSoloed = !track.isSoloed;
         soloBtn.classList.toggle('active', track.isSoloed);
         updateSoloMuteStates();
+        scheduleAutoSave();
     });
 
     // Delete track button
@@ -1284,10 +1459,12 @@ function createTrack() {
         }
         if (confirm(`Delete "${track.name}"?`)) {
             audioEngine.removeTrack(track.id);
+            if (selectedTrack === trackElement) {
+                selectedTrack = null;
+            }
             trackElement.remove();
-            audioEngine.updateDuration();
-            updateTimelineZoom();
-            updateTimeDisplay();
+            applyArrangementChange();
+            scheduleAutoSave();
         }
     });
     
@@ -1302,6 +1479,7 @@ function createTrack() {
         const db = value > 0 ? 20 * Math.log10(value) : -Infinity;
         volumeValue.textContent = db === -Infinity ? '-∞ dB' : db.toFixed(1) + ' dB';
         updateSliderFill(e.target, value * 100);
+        scheduleAutoSave();
     });
     // Initialize fill
     updateSliderFill(volumeSlider, parseFloat(volumeSlider.value) * 100);
@@ -1320,19 +1498,21 @@ function createTrack() {
             panValue.textContent = 'C';
         }
         // Pan slider uses center-based fill (handled by CSS)
+        scheduleAutoSave();
     });
     
     // Track selection (click on track controls to select)
     const trackControls = trackElement.querySelector('.track-controls');
     trackControls.addEventListener('click', (e) => {
-        // Don't select if clicking on a button or input
-        if (e.target.closest('button') || e.target.closest('input')) return;
+        // Keep the rename field focused without interrupting typing
+        if (e.target.closest('.track-name')) return;
         selectTrack(trackElement);
     });
     
     // Settings button
     const settingsBtn = trackElement.querySelector('.settings-btn');
     settingsBtn.addEventListener('click', () => {
+        selectTrack(trackElement);
         openTrackSettings(track, trackElement);
     });
     
@@ -1340,6 +1520,7 @@ function createTrack() {
     const timeline = trackElement.querySelector('.track-timeline');
     timeline.addEventListener('mousedown', (e) => {
         if (e.target.closest('.audio-region')) return;
+        selectTrack(trackElement);
         if (selectedRegion) {
             selectedRegion.classList.remove('selected');
             selectedRegion = null;
@@ -1405,11 +1586,9 @@ async function loadAudioFile(track, file, trackElement, startTime = 0) {
         
         // Create audio region
         createAudioRegion(track, trackElement, buffer, snappedStartTime);
-        audioEngine.updateDuration();
-        updateTimelineZoom();
+        applyArrangementChange();
         
         trackElement.classList.add('has-audio');
-        updateTimeDisplay();
     } catch (error) {
         console.error('Error loading audio:', error);
         alert('Error loading audio file');
@@ -1417,6 +1596,143 @@ async function loadAudioFile(track, file, trackElement, startTime = 0) {
         // Remove loading overlay
         loadingOverlay.remove();
     }
+}
+
+// Check if a region with matching properties already exists on the track.
+// This prevents accidental duplicates from undo/redo bugs, double event
+// fires, recording re-entry, etc.
+function isRegionDuplicate(track, regionData, excludeElement) {
+    if (!track.regions || track.regions.length === 0) return false;
+    const TIME_TOL = 0.05; // 50 ms tolerance
+    return track.regions.some(r => {
+        if (excludeElement && r.element === excludeElement) return false;
+        if (r === regionData) return false;
+        return r.buffer === regionData.buffer &&
+            Math.abs(r.startTime - regionData.startTime) < TIME_TOL &&
+            Math.abs(r.startOffset - regionData.startOffset) < TIME_TOL &&
+            Math.abs(r.duration - regionData.duration) < TIME_TOL;
+    });
+}
+
+function getTrackElementById(trackId) {
+    return document.querySelector(`.track[data-track-id="${trackId}"]`);
+}
+
+function cloneRegionDataForHistory(regionData) {
+    return {
+        buffer: regionData.buffer,
+        startTime: regionData.startTime,
+        duration: regionData.duration,
+        startOffset: regionData.startOffset,
+        endOffset: regionData.endOffset,
+        fadeInDuration: regionData.fadeInDuration || 0,
+        fadeOutDuration: regionData.fadeOutDuration || 0,
+        gain: regionData.gain !== undefined ? regionData.gain : 1.0,
+        crossfade: regionData.crossfade ? structuredClone(regionData.crossfade) : undefined
+    };
+}
+
+function findRegionOwner(regionOrElement) {
+    const element = regionOrElement?.element || regionOrElement;
+
+    for (const track of audioEngine.tracks) {
+        if (!track.regions) continue;
+
+        for (const regionData of track.regions) {
+            if (regionData === regionOrElement || regionData.element === element) {
+                return {
+                    track,
+                    trackElement: getTrackElementById(track.id),
+                    regionData
+                };
+            }
+        }
+    }
+
+    return null;
+}
+
+function removeRegionFromTrack(track, regionData) {
+    if (!track || !track.regions) return false;
+    const index = track.regions.indexOf(regionData);
+    if (index === -1) return false;
+
+    track.regions.splice(index, 1);
+    if (regionData.element) {
+        if (selectedRegion === regionData.element) {
+            selectedRegion = null;
+        }
+        regionData.element.remove();
+    }
+
+    return true;
+}
+
+function restoreRegionToTrack(regionSnapshot, track) {
+    const trackElement = getTrackElementById(track.id);
+    if (!trackElement) return null;
+
+    const restoredData = {
+        ...cloneRegionDataForHistory(regionSnapshot),
+        element: null
+    };
+
+    createRegionFromData(restoredData, track, trackElement);
+    return restoredData.element ? restoredData : null;
+}
+
+function applyRegionGeometry(regionData) {
+    if (!regionData || !regionData.element) return;
+
+    const duration = audioEngine.duration || 60;
+    const totalWidth = duration * pixelsPerSecond * zoomLevel;
+    const left = (regionData.startTime / duration) * totalWidth;
+    const width = (regionData.duration / duration) * totalWidth;
+
+    regionData.element.style.left = `${left}px`;
+    regionData.element.style.width = `${Math.max(1, width)}px`;
+    regionData.element.dataset.startOffset = regionData.startOffset.toString();
+    regionData.element.dataset.endOffset = regionData.endOffset.toString();
+
+    const canvas = regionData.element.querySelector('canvas');
+    if (canvas) {
+        drawRegionWaveform(canvas, regionData.buffer, regionData.startOffset, regionData.endOffset);
+    }
+    updateRegionFadeVisuals(regionData);
+    updateRegionGainVisuals(regionData);
+}
+
+// Remove exact-duplicate regions from a track (same buffer, position,
+// offsets). Keeps only the first occurrence of each unique region.
+function deduplicateTrackRegions(track) {
+    if (!track.regions || track.regions.length < 2) return;
+    const dominated = new Set();
+    const TIME_TOL = 0.05;
+    for (let i = 0; i < track.regions.length; i++) {
+        if (dominated.has(i)) continue;
+        for (let j = i + 1; j < track.regions.length; j++) {
+            if (dominated.has(j)) continue;
+            const a = track.regions[i];
+            const b = track.regions[j];
+            if (
+                a.buffer === b.buffer &&
+                Math.abs(a.startTime - b.startTime) < TIME_TOL &&
+                Math.abs(a.startOffset - b.startOffset) < TIME_TOL &&
+                Math.abs(a.duration - b.duration) < TIME_TOL
+            ) {
+                dominated.add(j);
+            }
+        }
+    }
+    if (dominated.size === 0) return;
+    // Remove duplicates in reverse order to keep indices stable
+    const toRemove = Array.from(dominated).sort((a, b) => b - a);
+    for (const idx of toRemove) {
+        const r = track.regions[idx];
+        if (r.element) r.element.remove();
+        track.regions.splice(idx, 1);
+    }
+    console.warn(`Removed ${toRemove.length} duplicate region(s) from ${track.name}`);
 }
 
 function createAudioRegion(track, trackElement, buffer, startTime = 0) {
@@ -1472,9 +1788,23 @@ function createAudioRegion(track, trackElement, buffer, startTime = 0) {
         startTime: startTime,
         duration: regionDuration,
         startOffset: 0,
-        endOffset: regionDuration
+        endOffset: regionDuration,
+        fadeInDuration: 0,
+        fadeOutDuration: 0,
+        gain: 1.0
     };
+
+    // Prevent duplicate regions from being stacked
+    if (isRegionDuplicate(track, regionData)) {
+        console.warn('Blocked duplicate region in createAudioRegion');
+        region.remove();
+        return;
+    }
+
     track.regions.push(regionData);
+
+    addRegionFadeControls(region, regionData);
+    addRegionGainControl(region, regionData);
     
     // Region interaction
     setupRegionInteraction(region, regionData, track, trackElement);
@@ -1486,7 +1816,12 @@ function createAudioRegion(track, trackElement, buffer, startTime = 0) {
 function setupRegionInteraction(region, regionData, track, trackElement) {
     // Click to select
     region.addEventListener('mousedown', (e) => {
-        if (e.target.classList.contains('region-handle')) return;
+        if (
+            e.target.classList.contains('region-handle') ||
+            e.target.classList.contains('fade-handle') ||
+            e.target.classList.contains('region-gain-line') ||
+            e.target.classList.contains('region-gain-baseline')
+        ) return;
         
         e.stopPropagation();
         
@@ -1498,14 +1833,19 @@ function setupRegionInteraction(region, regionData, track, trackElement) {
         region.classList.add('selected');
         selectedRegion = region;
         region.style.zIndex = Date.now().toString();
+
+        const owner = findRegionOwner(regionData) || { track, trackElement, regionData };
+        const activeTrack = owner.track;
+        const activeTrackElement = owner.trackElement;
+        const activeRegionData = owner.regionData;
         
         // Alt+Click to duplicate
         if (e.altKey) {
-            const duplicatedData = duplicateRegion(regionData, track, trackElement);
+            const duplicatedData = duplicateRegion(activeRegionData, activeTrack, activeTrackElement);
             if (duplicatedData) {
                 dragOffset.regionData = duplicatedData;
-                dragOffset.track = track;
-                dragOffset.trackElement = trackElement;
+                dragOffset.track = activeTrack;
+                dragOffset.trackElement = activeTrackElement;
                 selectedRegion = duplicatedData.element;
                 selectedRegion.classList.add('selected');
                 isDraggingRegion = true;
@@ -1521,22 +1861,27 @@ function setupRegionInteraction(region, regionData, track, trackElement) {
         const rect = region.getBoundingClientRect();
         dragOffset.x = e.clientX - rect.left;
         dragOffset.y = e.clientY - rect.top;
-        dragOffset.track = track;
-        dragOffset.trackElement = trackElement;
-        dragOffset.regionData = regionData;
+        dragOffset.track = activeTrack;
+        dragOffset.trackElement = activeTrackElement;
+        dragOffset.regionData = activeRegionData;
+        dragOffset.originalLeftPx = parseFloat(region.style.left) || 0;
+        dragOffset.startClientX = e.clientX;
+        dragOffset.startClientY = e.clientY;
     });
     
     // Right-click context menu on region
     region.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        showRegionContextMenu(e, regionData, track, trackElement);
+        const owner = findRegionOwner(regionData) || { track, trackElement, regionData };
+        showRegionContextMenu(e, owner.regionData, owner.track, owner.trackElement);
     });
     
     // Double-click to split
     region.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        splitRegionAtPosition(region, regionData, track, trackElement, e);
+        const owner = findRegionOwner(regionData) || { track, trackElement, regionData };
+        splitRegionAtPosition(region, owner.regionData, owner.track, owner.trackElement, e);
     });
 
     // Resize handles
@@ -1545,13 +1890,55 @@ function setupRegionInteraction(region, regionData, track, trackElement) {
     [leftHandle, rightHandle].forEach(handle => {
         handle.addEventListener('mousedown', (e) => {
             e.stopPropagation();
-            startRegionResize(e, handle.classList.contains('left') ? 'left' : 'right', regionData, track, trackElement);
+            const owner = findRegionOwner(regionData) || { track, trackElement, regionData };
+            startRegionResize(
+                e,
+                handle.classList.contains('left') ? 'left' : 'right',
+                owner.regionData,
+                owner.track,
+                owner.trackElement
+            );
         });
     });
 }
 
+function clearTrackDragPreview() {
+    document.querySelectorAll('.track.drag-preview').forEach(el => el.classList.remove('drag-preview'));
+}
+
+function removeRegionDragGhost() {
+    if (dragGhost) {
+        dragGhost.remove();
+        dragGhost = null;
+    }
+    dragGhostTrackElement = null;
+    clearTrackDragPreview();
+}
+
+function getRegionLeftPxFromTime(regionData) {
+    const duration = audioEngine.duration || 60;
+    const totalWidth = duration * pixelsPerSecond * zoomLevel;
+    return (regionData.startTime / duration) * totalWidth;
+}
+
+function updateRegionDragGhost(targetTrackElement, leftPx) {
+    const timeline = targetTrackElement.querySelector('.track-timeline');
+    if (!timeline) return;
+
+    if (!dragGhost || dragGhostTrackElement !== targetTrackElement) {
+        if (dragGhost) dragGhost.remove();
+        dragGhost = document.createElement('div');
+        dragGhost.className = 'audio-region drag-ghost';
+        dragGhost.style.width = `${selectedRegion.offsetWidth}px`;
+        timeline.appendChild(dragGhost);
+        dragGhostTrackElement = targetTrackElement;
+    }
+
+    dragGhost.style.left = `${Math.max(0, leftPx)}px`;
+}
+
 function handleRegionDrag(e) {
-    if (isResizingRegion || !isDraggingRegion || !selectedRegion) return;
+    if (isResizingRegion || isAdjustingFade || isAdjustingRegionGain || !isDraggingRegion || !selectedRegion) return;
     
     selectedRegion.classList.add('dragging');
     
@@ -1575,16 +1962,33 @@ function handleRegionDrag(e) {
         
         // Calculate new position accounting for zoom and scroll
         const x = e.clientX - rect.left - dragOffset.x;
-        
-        selectedRegion.style.left = `${Math.max(0, x)}px`;
+
+        if (targetTrackElement !== dragOffset.trackElement) {
+            updateRegionDragGhost(targetTrackElement, x);
+            targetTrackElement.classList.add('drag-preview');
+            selectedRegion.style.left = `${dragOffset.originalLeftPx}px`;
+        } else {
+            removeRegionDragGhost();
+            selectedRegion.style.left = `${Math.max(0, x)}px`;
+        }
     }
 }
 
 function handleRegionDragEnd(e) {
-    if (isResizingRegion || !isDraggingRegion || !selectedRegion) return;
+    if (isResizingRegion || isAdjustingFade || isAdjustingRegionGain || !isDraggingRegion || !selectedRegion) return;
     
     isDraggingRegion = false;
     selectedRegion.classList.remove('dragging');
+
+    // If the mouse barely moved this was a click, not a drag — skip
+    // repositioning to avoid snapping the region to a new location or
+    // triggering unnecessary arrangement changes.
+    const dxDrag = e.clientX - (dragOffset.startClientX ?? e.clientX);
+    const dyDrag = e.clientY - (dragOffset.startClientY ?? e.clientY);
+    if (Math.sqrt(dxDrag * dxDrag + dyDrag * dyDrag) < 4) {
+        removeRegionDragGhost();
+        return;
+    }
     
     // Find target track
     const tracks = document.querySelectorAll('.track');
@@ -1603,21 +2007,27 @@ function handleRegionDragEnd(e) {
     if (targetTrack && targetTrackElement) {
         const timeline = targetTrackElement.querySelector('.track-timeline');
         const rect = timeline.getBoundingClientRect();
-        
-        // Calculate new start time
-        const x = e.clientX - rect.left - dragOffset.x;
-        const duration = audioEngine.duration || 60;
-        const totalWidth = duration * pixelsPerSecond * zoomLevel;
-        let newStartTime = (x / totalWidth) * duration;
+
+        let x;
+        if (dragGhost && dragGhostTrackElement === targetTrackElement) {
+            x = parseFloat(dragGhost.style.left) || 0;
+        } else {
+            x = e.clientX - rect.left - dragOffset.x;
+        }
+
+        // Calculate new start time from pixel position
+        let newStartTime = Math.max(0, x / (pixelsPerSecond * zoomLevel));
         
         // Apply snap if enabled
         if (snapEnabled) {
-            newStartTime = snapToGrid(Math.max(0, newStartTime));
-        } else {
-            newStartTime = Math.max(0, newStartTime);
+            newStartTime = snapToGrid(newStartTime);
         }
         
-        // Update region data
+        // Save old startTime for undo
+        const oldStartTime = dragOffset.regionData.startTime;
+        const oldTrack = dragOffset.track;
+        
+        // Update region data - startOffset and endOffset stay the same (only position changes)
         dragOffset.regionData.startTime = newStartTime;
         
         // If moved to different track
@@ -1643,14 +2053,63 @@ function handleRegionDragEnd(e) {
             dragOffset.trackElement = targetTrackElement;
         }
         
-        // Recalculate position based on snap
+        // Recalculate position using direct time-to-pixel conversion
+        const duration = audioEngine.duration || 60;
+        const totalWidth = duration * pixelsPerSecond * zoomLevel;
         const left = (dragOffset.regionData.startTime / duration) * totalWidth;
         selectedRegion.style.left = `${left}px`;
 
-        audioEngine.updateDuration();
-        updateTimelineZoom();
-        updateTimeDisplay();
+        applyArrangementChange();
+
+        const newTrack = dragOffset.track;
+        const finalStartTime = dragOffset.regionData.startTime;
+        const movedRegionData = dragOffset.regionData;
+
+        const didTrackChange = oldTrack !== newTrack;
+        const didTimeChange = Math.abs(oldStartTime - finalStartTime) > 0.0001;
+
+        if (didTrackChange || didTimeChange) {
+            const applyMoveState = (targetTrackId, targetStartTime) => {
+                const targetTrackForMove = audioEngine.tracks.find(t => t.id === targetTrackId);
+                if (!targetTrackForMove) return;
+
+                const ownerNow = findRegionOwner(movedRegionData);
+                if (!ownerNow) return;
+
+                if (ownerNow.track !== targetTrackForMove) {
+                    const ownerIndex = ownerNow.track.regions.indexOf(movedRegionData);
+                    if (ownerIndex !== -1) {
+                        ownerNow.track.regions.splice(ownerIndex, 1);
+                    }
+                    if (!targetTrackForMove.regions) {
+                        targetTrackForMove.regions = [];
+                    }
+                    targetTrackForMove.regions.push(movedRegionData);
+
+                    const targetTrackElementForMove = getTrackElementById(targetTrackForMove.id);
+                    if (targetTrackElementForMove && movedRegionData.element) {
+                        const targetTimeline = targetTrackElementForMove.querySelector('.track-timeline');
+                        if (targetTimeline) {
+                            movedRegionData.element.remove();
+                            targetTimeline.appendChild(movedRegionData.element);
+                        }
+                    }
+                }
+
+                movedRegionData.startTime = targetStartTime;
+                applyRegionGeometry(movedRegionData);
+                applyArrangementChange();
+            };
+
+            recordHistoryAction(
+                'Move Region',
+                () => applyMoveState(oldTrack.id, oldStartTime),
+                () => applyMoveState(newTrack.id, finalStartTime)
+            );
+        }
     }
+
+    removeRegionDragGhost();
 }
 
 function startRegionResize(e, direction, regionData, track, trackElement) {
@@ -1680,54 +2139,33 @@ function handleRegionResize(e) {
     const duration = audioEngine.duration || 60;
     const totalWidth = duration * pixelsPerSecond * zoomLevel;
     const deltaX = e.clientX - resizeState.startX;
-    const deltaTime = (deltaX / totalWidth) * duration;
+    const rawDelta = (deltaX / totalWidth) * duration;
     const minDuration = 0.05;
 
     if (direction === 'left') {
-        let newStartTime = resizeState.startTime + deltaTime;
-        let newStartOffset = resizeState.startOffset + deltaTime;
-        let newDuration = resizeState.duration - deltaTime;
+        // Left handle: right edge (endTime, endOffset) stays fixed.
+        // Clamp delta so startTime >= 0, startOffset >= 0, duration >= minDuration.
+        const endTime = resizeState.startTime + resizeState.duration;
+        const maxLeftExtend = Math.min(resizeState.startTime, resizeState.startOffset);
+        const maxRightShrink = resizeState.duration - minDuration;
+        const clampedDelta = Math.max(-maxLeftExtend, Math.min(maxRightShrink, rawDelta));
 
-        if (newStartTime < 0) {
-            newDuration += newStartTime;
-            newStartOffset += newStartTime;
-            newStartTime = 0;
-        }
-
-        if (newStartOffset < 0) {
-            newDuration += newStartOffset;
-            newStartTime += newStartOffset;
-            newStartOffset = 0;
-        }
-
-        if (newDuration < minDuration) {
-            newDuration = minDuration;
-            newStartTime = resizeState.startTime + (resizeState.duration - minDuration);
-            newStartOffset = resizeState.startOffset + (resizeState.duration - minDuration);
-        }
-
-        regionData.startTime = newStartTime;
-        regionData.startOffset = newStartOffset;
-        regionData.duration = newDuration;
-        regionData.endOffset = newStartOffset + newDuration;
+        regionData.startTime = resizeState.startTime + clampedDelta;
+        regionData.startOffset = resizeState.startOffset + clampedDelta;
+        regionData.duration = resizeState.duration - clampedDelta;
+        regionData.endOffset = resizeState.endOffset; // Right edge never moves
     } else {
-        let newDuration = resizeState.duration + deltaTime;
-        let newEndOffset = resizeState.endOffset + deltaTime;
+        // Right handle: left edge (startTime, startOffset) stays fixed.
+        // Clamp delta so endOffset <= buffer.duration, duration >= minDuration.
+        const maxRightExtend = regionData.buffer.duration - resizeState.endOffset;
+        const maxLeftShrink = resizeState.duration - minDuration;
+        const clampedDelta = Math.max(-maxLeftShrink, Math.min(maxRightExtend, rawDelta));
 
-        if (newEndOffset > regionData.buffer.duration) {
-            const over = newEndOffset - regionData.buffer.duration;
-            newDuration -= over;
-            newEndOffset = regionData.buffer.duration;
-        }
-
-        if (newDuration < minDuration) {
-            newDuration = minDuration;
-            newEndOffset = resizeState.startOffset + minDuration;
-        }
-
-        regionData.duration = newDuration;
-        regionData.endOffset = newEndOffset;
+        regionData.duration = resizeState.duration + clampedDelta;
+        regionData.endOffset = resizeState.endOffset + clampedDelta;
     }
+
+    normalizeRegionFadeDurations(regionData);
 
     const left = (regionData.startTime / duration) * totalWidth;
     const width = (regionData.duration / duration) * totalWidth;
@@ -1740,6 +2178,8 @@ function handleRegionResize(e) {
     if (canvas) {
         drawRegionWaveform(canvas, regionData.buffer, regionData.startOffset, regionData.endOffset);
     }
+
+    updateRegionFadeVisuals(regionData);
 }
 
 function handleRegionResizeEnd() {
@@ -1750,15 +2190,33 @@ function handleRegionResizeEnd() {
 
     if (snapEnabled) {
         if (direction === 'left') {
-            const originalEnd = regionData.startTime + regionData.duration;
+            // Snap the left edge; right edge (endOffset, endTime) stays fixed.
+            const endTime = regionData.startTime + regionData.duration;
+            const endOffset = regionData.endOffset;
             const snappedStart = snapToGrid(regionData.startTime);
-            let newDuration = Math.max(minDuration, originalEnd - snappedStart);
-            const delta = snappedStart - regionData.startTime;
-            regionData.startTime = snappedStart;
-            regionData.startOffset = Math.max(0, regionData.startOffset + delta);
-            regionData.duration = newDuration;
-            regionData.endOffset = regionData.startOffset + newDuration;
+            let delta = snappedStart - regionData.startTime;
+
+            // Clamp: startOffset cannot go below 0
+            if (regionData.startOffset + delta < 0) {
+                delta = -regionData.startOffset;
+            }
+            // Clamp: startTime cannot go below 0
+            if (regionData.startTime + delta < 0) {
+                delta = -regionData.startTime;
+            }
+
+            const newStartTime = regionData.startTime + delta;
+            const newStartOffset = regionData.startOffset + delta;
+            const newDuration = endTime - newStartTime;
+
+            if (newDuration >= minDuration) {
+                regionData.startTime = newStartTime;
+                regionData.startOffset = newStartOffset;
+                regionData.duration = newDuration;
+                regionData.endOffset = endOffset; // Stays fixed
+            }
         } else {
+            // Snap the right edge; left edge stays fixed.
             const endTime = regionData.startTime + regionData.duration;
             const snappedEnd = snapToGrid(endTime);
             let newDuration = Math.max(minDuration, snappedEnd - regionData.startTime);
@@ -1769,9 +2227,65 @@ function handleRegionResizeEnd() {
         }
     }
 
-    audioEngine.updateDuration();
-    updateTimelineZoom();
-    updateTimeDisplay();
+    normalizeRegionFadeDurations(regionData);
+
+    const oldState = {
+        startTime: resizeState.startTime,
+        duration: resizeState.duration,
+        startOffset: resizeState.startOffset,
+        endOffset: resizeState.endOffset
+    };
+
+    const newState = {
+        startTime: regionData.startTime,
+        duration: regionData.duration,
+        startOffset: regionData.startOffset,
+        endOffset: regionData.endOffset
+    };
+
+    // Update data attributes and visuals after snap
+    regionData.element.dataset.startOffset = regionData.startOffset.toString();
+    regionData.element.dataset.endOffset = regionData.endOffset.toString();
+
+    const duration = audioEngine.duration || 60;
+    const totalWidth = duration * pixelsPerSecond * zoomLevel;
+    const left = (regionData.startTime / duration) * totalWidth;
+    const width = (regionData.duration / duration) * totalWidth;
+    regionData.element.style.left = `${left}px`;
+    regionData.element.style.width = `${Math.max(1, width)}px`;
+
+    const canvas = regionData.element.querySelector('canvas');
+    if (canvas) {
+        drawRegionWaveform(canvas, regionData.buffer, regionData.startOffset, regionData.endOffset);
+    }
+
+    updateRegionFadeVisuals(regionData);
+
+    applyArrangementChange();
+
+    const resized =
+        Math.abs(oldState.startTime - newState.startTime) > 0.0001 ||
+        Math.abs(oldState.duration - newState.duration) > 0.0001 ||
+        Math.abs(oldState.startOffset - newState.startOffset) > 0.0001 ||
+        Math.abs(oldState.endOffset - newState.endOffset) > 0.0001;
+
+    if (resized) {
+        const applyResizeState = (state) => {
+            regionData.startTime = state.startTime;
+            regionData.duration = state.duration;
+            regionData.startOffset = state.startOffset;
+            regionData.endOffset = state.endOffset;
+            normalizeRegionFadeDurations(regionData);
+            applyRegionGeometry(regionData);
+            applyArrangementChange();
+        };
+
+        recordHistoryAction(
+            'Resize Region',
+            () => applyResizeState(oldState),
+            () => applyResizeState(newState)
+        );
+    }
 
     isResizingRegion = false;
     resizeState = null;
@@ -1790,6 +2304,12 @@ function splitRegionAtPosition(region, regionData, track, trackElement, e) {
     if (firstRegionDuration < 0.1 || secondRegionDuration < 0.1) {
         return; // Too small to split
     }
+
+    // Calculate fade distributions BEFORE removing the original region
+    const originalFadeIn = regionData.fadeInDuration || 0;
+    const originalFadeOut = regionData.fadeOutDuration || 0;
+    const originalDuration = regionData.duration;
+    const fadeOutStart = originalDuration - originalFadeOut;
     
     // Remove original region
     const regionIndex = track.regions.indexOf(regionData);
@@ -1797,34 +2317,43 @@ function splitRegionAtPosition(region, regionData, track, trackElement, e) {
         track.regions.splice(regionIndex, 1);
     }
     region.remove();
+    if (selectedRegion === region) selectedRegion = null;
     
-    // Create first region
+    // Create first region with correct fades pre-calculated
     const firstRegionData = {
         element: null,
         buffer: regionData.buffer,
         startTime: regionData.startTime,
         duration: firstRegionDuration,
         startOffset: regionData.startOffset,
-        endOffset: regionData.startOffset + firstRegionDuration
+        endOffset: regionData.startOffset + firstRegionDuration,
+        fadeInDuration: Math.min(originalFadeIn, firstRegionDuration),
+        fadeOutDuration: firstRegionDuration > fadeOutStart
+            ? Math.min(firstRegionDuration - fadeOutStart, firstRegionDuration)
+            : 0,
+        gain: regionData.gain !== undefined ? regionData.gain : 1.0
     };
     
     createRegionFromData(firstRegionData, track, trackElement);
     
-    // Create second region
+    // Create second region with correct fades pre-calculated
     const secondRegionData = {
         element: null,
         buffer: regionData.buffer,
         startTime: regionData.startTime + firstRegionDuration,
         duration: secondRegionDuration,
         startOffset: regionData.startOffset + firstRegionDuration,
-        endOffset: regionData.endOffset
+        endOffset: regionData.endOffset,
+        fadeInDuration: firstRegionDuration < originalFadeIn
+            ? Math.min(originalFadeIn - firstRegionDuration, secondRegionDuration)
+            : 0,
+        fadeOutDuration: Math.min(originalFadeOut, secondRegionDuration),
+        gain: regionData.gain !== undefined ? regionData.gain : 1.0
     };
     
     createRegionFromData(secondRegionData, track, trackElement);
 
-    audioEngine.updateDuration();
-    updateTimelineZoom();
-    updateTimeDisplay();
+    applyArrangementChange();
 }
 
 function createRegionFromData(regionData, track, trackElement) {
@@ -1844,6 +2373,17 @@ function createRegionFromData(regionData, track, trackElement) {
     // Store region offsets as data attributes
     region.dataset.startOffset = regionData.startOffset.toString();
     region.dataset.endOffset = regionData.endOffset.toString();
+
+    if (typeof regionData.fadeInDuration !== 'number') {
+        regionData.fadeInDuration = 0;
+    }
+    if (typeof regionData.fadeOutDuration !== 'number') {
+        regionData.fadeOutDuration = 0;
+    }
+    if (regionData.gain === undefined) {
+        regionData.gain = 1.0;
+    }
+    normalizeRegionFadeDurations(regionData);
     
     const canvas = document.createElement('canvas');
     canvas.className = 'region-waveform';
@@ -1860,10 +2400,21 @@ function createRegionFromData(regionData, track, trackElement) {
     rightHandle.className = 'region-handle right';
     region.appendChild(leftHandle);
     region.appendChild(rightHandle);
+
+    addRegionFadeControls(region, regionData);
+    addRegionGainControl(region, regionData);
     
     timeline.appendChild(region);
     
     regionData.element = region;
+
+    // Prevent duplicate regions from being stacked
+    if (isRegionDuplicate(track, regionData)) {
+        console.warn('Blocked duplicate region in createRegionFromData');
+        region.remove();
+        return;
+    }
+
     track.regions.push(regionData);
     
     setupRegionInteraction(region, regionData, track, trackElement);
@@ -1916,16 +2467,25 @@ function drawRegionWaveform(canvas, buffer, startOffset = 0, endOffset = null) {
 
 // Duplicate a region
 function duplicateRegion(regionData, track, trackElement) {
+    // Place the duplicate after the original so it is clearly visible and
+    // does not silently stack on top of the source region.
+    let duplicateStart = regionData.startTime + regionData.duration;
+    if (snapEnabled) {
+        duplicateStart = snapToGrid(duplicateStart);
+    }
     const newRegionData = {
         element: null,
         buffer: regionData.buffer,
-        startTime: regionData.startTime + 0.01, // Slight offset so it's visible
+        startTime: duplicateStart,
         duration: regionData.duration,
         startOffset: regionData.startOffset,
-        endOffset: regionData.endOffset
+        endOffset: regionData.endOffset,
+        fadeInDuration: regionData.fadeInDuration || 0,
+        fadeOutDuration: regionData.fadeOutDuration || 0,
+        gain: regionData.gain !== undefined ? regionData.gain : 1.0
     };
     createRegionFromData(newRegionData, track, trackElement);
-    audioEngine.updateDuration();
+    applyArrangementChange();
     return newRegionData;
 }
 
@@ -1949,8 +2509,7 @@ function showRegionContextMenu(e, regionData, track, trackElement) {
                 track.regions.splice(regionIndex, 1);
                 regionData.element.remove();
                 selectedRegion = null;
-                audioEngine.updateDuration();
-                updateTimelineZoom();
+                applyArrangementChange();
             }
         }},
         { separator: true },
@@ -2116,6 +2675,8 @@ function addCrossfadeToOverlaps(track, trackElement) {
         earlier.element.style.borderColor = 'rgba(255, 200, 0, 0.8)';
         later.element.style.borderColor = 'rgba(255, 200, 0, 0.8)';
     });
+
+    refreshPlaybackIfActive();
     
     alert(`Added crossfade to ${overlaps.length} overlapping region(s)`);
 }
@@ -2141,6 +2702,8 @@ function snapAllRegionsToGrid() {
             });
         }
     });
+
+    refreshPlaybackIfActive();
 }
 
 function cutRegionAtPlayhead(track, trackElement) {
@@ -2166,38 +2729,296 @@ function splitRegionAtTime(regionData, splitTime, track, trackElement) {
     if (firstDuration < 0.01 || secondDuration < 0.01) {
         return;
     }
+
+    // Calculate fade distributions BEFORE removing or creating anything
+    const originalFadeIn = regionData.fadeInDuration || 0;
+    const originalFadeOut = regionData.fadeOutDuration || 0;
+    const originalDuration = regionData.duration;
+    const fadeOutStart = originalDuration - originalFadeOut;
     
     const regionIndex = track.regions.indexOf(regionData);
     if (regionIndex !== -1) {
         track.regions.splice(regionIndex, 1);
     }
+    if (selectedRegion === regionData.element) selectedRegion = null;
     regionData.element.remove();
     
+    // Create first region with correct fades pre-calculated
     const firstRegionData = {
         element: null,
         buffer: regionData.buffer,
         startTime: regionData.startTime,
         duration: firstDuration,
         startOffset: regionData.startOffset,
-        endOffset: regionData.startOffset + firstDuration
+        endOffset: regionData.startOffset + firstDuration,
+        fadeInDuration: Math.min(originalFadeIn, firstDuration),
+        fadeOutDuration: firstDuration > fadeOutStart
+            ? Math.min(firstDuration - fadeOutStart, firstDuration)
+            : 0,
+        gain: regionData.gain !== undefined ? regionData.gain : 1.0
     };
     
     createRegionFromData(firstRegionData, track, trackElement);
     
+    // Create second region with correct fades pre-calculated
     const secondRegionData = {
         element: null,
         buffer: regionData.buffer,
         startTime: regionData.startTime + firstDuration,
         duration: secondDuration,
         startOffset: regionData.startOffset + firstDuration,
-        endOffset: regionData.endOffset
+        endOffset: regionData.endOffset,
+        fadeInDuration: firstDuration < originalFadeIn
+            ? Math.min(originalFadeIn - firstDuration, secondDuration)
+            : 0,
+        fadeOutDuration: Math.min(originalFadeOut, secondDuration),
+        gain: regionData.gain !== undefined ? regionData.gain : 1.0
     };
     
     createRegionFromData(secondRegionData, track, trackElement);
 
-    audioEngine.updateDuration();
-    updateTimelineZoom();
-    updateTimeDisplay();
+    applyArrangementChange();
+}
+
+function normalizeRegionFadeDurations(regionData) {
+    const minRemaining = 0.01;
+    const maxTotalFade = Math.max(0, regionData.duration - minRemaining);
+
+    regionData.fadeInDuration = Math.max(0, Math.min(regionData.fadeInDuration || 0, maxTotalFade));
+    regionData.fadeOutDuration = Math.max(0, Math.min(regionData.fadeOutDuration || 0, maxTotalFade));
+
+    const totalFade = regionData.fadeInDuration + regionData.fadeOutDuration;
+    if (totalFade > maxTotalFade && totalFade > 0) {
+        const scale = maxTotalFade / totalFade;
+        regionData.fadeInDuration *= scale;
+        regionData.fadeOutDuration *= scale;
+    }
+}
+
+function addRegionGainControl(region, regionData) {
+    if (regionData.gain === undefined) regionData.gain = 1.0;
+
+    const baseline = document.createElement('div');
+    baseline.className = 'region-gain-baseline';
+
+    const gainLine = document.createElement('div');
+    gainLine.className = 'region-gain-line';
+
+    const gainLabel = document.createElement('span');
+    gainLabel.className = 'region-gain-label';
+
+    const startAdjust = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        isDraggingRegion = false;
+        isResizingRegion = false;
+        isAdjustingFade = false;
+        resizeState = null;
+        fadeAdjustState = null;
+        isAdjustingRegionGain = true;
+
+        regionGainAdjustState = {
+            regionData,
+            startY: e.clientY,
+            startGain: regionData.gain
+        };
+    };
+
+    const resetGain = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        regionData.gain = 1.0;
+        updateRegionGainVisuals(regionData);
+    };
+
+    gainLine.addEventListener('mousedown', startAdjust);
+    baseline.addEventListener('mousedown', startAdjust);
+    gainLine.addEventListener('dblclick', resetGain);
+    baseline.addEventListener('dblclick', resetGain);
+
+    region.appendChild(baseline);
+    region.appendChild(gainLine);
+    region.appendChild(gainLabel);
+
+    updateRegionGainVisuals(regionData);
+}
+
+function updateRegionGainVisuals(regionData) {
+    if (!regionData?.element) return;
+
+    const baseline = regionData.element.querySelector('.region-gain-baseline');
+    const gainLine = regionData.element.querySelector('.region-gain-line');
+    const gainLabel = regionData.element.querySelector('.region-gain-label');
+    if (!baseline || !gainLine || !gainLabel) return;
+
+    const safeGain = Math.max(0, Math.min(4.0, regionData.gain));
+    regionData.gain = safeGain;
+    const db = safeGain > 0 ? 20 * Math.log10(safeGain) : -Infinity;
+
+    const minDb = -24;
+    const maxDb = 12;
+    const clampedDb = db === -Infinity ? minDb : Math.max(minDb, Math.min(maxDb, db));
+    const normalized = (clampedDb - minDb) / (maxDb - minDb);
+    const topPercent = 100 - (normalized * 100);
+
+    gainLine.style.top = `${topPercent}%`;
+    gainLabel.style.top = `calc(${topPercent}% - 16px)`;
+    gainLabel.textContent = db === -Infinity ? '-∞ dB' : `${db.toFixed(1)} dB`;
+}
+
+function handleRegionGainAdjust(e) {
+    if (!isAdjustingRegionGain || !regionGainAdjustState?.regionData) return;
+
+    const { regionData, startY, startGain } = regionGainAdjustState;
+    const startDb = startGain > 0 ? 20 * Math.log10(startGain) : -24;
+    const deltaDb = (startY - e.clientY) * 0.2;
+    const newDb = Math.max(-24, Math.min(12, startDb + deltaDb));
+    const newGain = Math.pow(10, newDb / 20);
+
+    regionData.gain = Math.max(0, Math.min(4.0, newGain));
+    updateRegionGainVisuals(regionData);
+
+    // Live update gain node without stopping/restarting all playback
+    const track = audioEngine.tracks.find(t => t.regions && t.regions.includes(regionData));
+    if (track) {
+        track.updateLiveRegionGain(regionData);
+    }
+}
+
+function handleRegionGainAdjustEnd() {
+    if (!isAdjustingRegionGain) return;
+    isAdjustingRegionGain = false;
+    regionGainAdjustState = null;
+    scheduleAutoSave();
+}
+
+function addRegionFadeControls(region, regionData) {
+    const fadeInLine = document.createElement('div');
+    fadeInLine.className = 'fade-line fade-in';
+    const fadeOutLine = document.createElement('div');
+    fadeOutLine.className = 'fade-line fade-out';
+
+    const fadeInHandle = document.createElement('div');
+    fadeInHandle.className = 'fade-handle fade-in';
+    const fadeOutHandle = document.createElement('div');
+    fadeOutHandle.className = 'fade-handle fade-out';
+
+    region.appendChild(fadeInLine);
+    region.appendChild(fadeOutLine);
+    region.appendChild(fadeInHandle);
+    region.appendChild(fadeOutHandle);
+
+    fadeInHandle.addEventListener('mousedown', (e) => startRegionFadeAdjust(e, 'in', regionData));
+    fadeOutHandle.addEventListener('mousedown', (e) => startRegionFadeAdjust(e, 'out', regionData));
+
+    updateRegionFadeVisuals(regionData);
+}
+
+function updateRegionFadeVisuals(regionData) {
+    if (!regionData?.element) return;
+
+    normalizeRegionFadeDurations(regionData);
+
+    const regionWidth = regionData.element.offsetWidth || 1;
+    const regionHeight = regionData.element.offsetHeight || 1;
+    const fadeInRatio = regionData.duration > 0 ? regionData.fadeInDuration / regionData.duration : 0;
+    const fadeOutRatio = regionData.duration > 0 ? regionData.fadeOutDuration / regionData.duration : 0;
+    const fadeInPx = Math.max(0, Math.min(regionWidth, fadeInRatio * regionWidth));
+    const fadeOutPx = Math.max(0, Math.min(regionWidth, fadeOutRatio * regionWidth));
+
+    const fadeInLine = regionData.element.querySelector('.fade-line.fade-in');
+    const fadeOutLine = regionData.element.querySelector('.fade-line.fade-out');
+    const fadeInHandle = regionData.element.querySelector('.fade-handle.fade-in');
+    const fadeOutHandle = regionData.element.querySelector('.fade-handle.fade-out');
+
+    if (fadeInLine) {
+        if (fadeInPx > 0.5) {
+            const length = Math.hypot(fadeInPx, regionHeight);
+            const angle = -Math.atan2(regionHeight, fadeInPx) * (180 / Math.PI);
+            fadeInLine.style.opacity = '1';
+            fadeInLine.style.width = `${length}px`;
+            fadeInLine.style.left = '0px';
+            fadeInLine.style.top = `${regionHeight}px`;
+            fadeInLine.style.transform = `rotate(${angle}deg)`;
+        } else {
+            fadeInLine.style.opacity = '0';
+            fadeInLine.style.width = '0px';
+        }
+    }
+
+    if (fadeOutLine) {
+        if (fadeOutPx > 0.5) {
+            const length = Math.hypot(fadeOutPx, regionHeight);
+            const angle = Math.atan2(regionHeight, fadeOutPx) * (180 / Math.PI);
+            fadeOutLine.style.opacity = '1';
+            fadeOutLine.style.width = `${length}px`;
+            fadeOutLine.style.right = '0px';
+            fadeOutLine.style.top = '0px';
+            fadeOutLine.style.transform = `rotate(${angle}deg)`;
+        } else {
+            fadeOutLine.style.opacity = '0';
+            fadeOutLine.style.width = '0px';
+        }
+    }
+
+    if (fadeInHandle) fadeInHandle.style.left = `${Math.max(0, fadeInPx)}px`;
+    if (fadeOutHandle) fadeOutHandle.style.right = `${Math.max(0, fadeOutPx)}px`;
+
+    updateRegionGainVisuals(regionData);
+}
+
+function startRegionFadeAdjust(e, type, regionData) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    isDraggingRegion = false;
+    isResizingRegion = false;
+    resizeState = null;
+    isAdjustingFade = true;
+
+    if (selectedRegion && selectedRegion !== regionData.element) {
+        selectedRegion.classList.remove('selected');
+    }
+    selectedRegion = regionData.element;
+    selectedRegion.classList.add('selected');
+
+    fadeAdjustState = {
+        type,
+        regionData,
+        startX: e.clientX,
+        initialFadeIn: regionData.fadeInDuration || 0,
+        initialFadeOut: regionData.fadeOutDuration || 0
+    };
+}
+
+function handleRegionFadeAdjust(e) {
+    if (!isAdjustingFade || !fadeAdjustState?.regionData?.element) return;
+
+    const { type, regionData, startX, initialFadeIn, initialFadeOut } = fadeAdjustState;
+    const regionRect = regionData.element.getBoundingClientRect();
+    const regionWidth = Math.max(1, regionRect.width);
+    const secondsPerPixel = regionData.duration / regionWidth;
+    const maxFadeTotal = Math.max(0, regionData.duration - 0.01);
+
+    if (type === 'in') {
+        const deltaPixels = e.clientX - startX;
+        const proposedFadeIn = initialFadeIn + (deltaPixels * secondsPerPixel);
+        regionData.fadeInDuration = Math.max(0, Math.min(proposedFadeIn, maxFadeTotal - (regionData.fadeOutDuration || 0)));
+    } else {
+        const deltaPixels = startX - e.clientX;
+        const proposedFadeOut = initialFadeOut + (deltaPixels * secondsPerPixel);
+        regionData.fadeOutDuration = Math.max(0, Math.min(proposedFadeOut, maxFadeTotal - (regionData.fadeInDuration || 0)));
+    }
+
+    updateRegionFadeVisuals(regionData);
+    refreshPlaybackIfActive();
+}
+
+function handleRegionFadeAdjustEnd() {
+    if (!isAdjustingFade) return;
+
+    isAdjustingFade = false;
+    fadeAdjustState = null;
 }
 
 // Track Settings Modal
@@ -2215,6 +3036,9 @@ function openTrackSettings(track, trackElement) {
     
     // Setup control listeners
     setupSettingsControls();
+    
+    // Start gain reduction meter
+    startGRMeter();
 }
 
 function loadTrackSettingsValues(track) {
@@ -2247,6 +3071,13 @@ function loadTrackSettingsValues(track) {
     document.querySelector('.delay-feedback').value = track.delayFeedback.gain.value;
     document.querySelector('.delay-mix').value = track.delayWet.gain.value;
     document.querySelector('.reverb-mix').value = track.reverbWet.gain.value;
+
+    document.querySelectorAll('.effect-toggle').forEach(btn => {
+        const effect = btn.dataset.effect;
+        const enabled = track.isEffectEnabled(effect);
+        btn.classList.toggle('active', enabled);
+        btn.textContent = enabled ? 'Enabled' : 'Enable';
+    });
     
     // Update displays
     updateAllSettingsDisplays();
@@ -2267,38 +3098,224 @@ function setupSettingsControls() {
     }
     settingsInitialized = true;
     
+    // Auto-save when any setting in the modal changes
+    modal.addEventListener('input', () => scheduleAutoSave());
+    
     // EQ Controls
     setupEQControls(modal);
     
     // Compression Controls (with knobs)
     setupCompressionControls(modal);
     
+    // Setup drag-to-rotate knob interaction
+    setupKnobInteraction();
+    
     // Effects Controls
     setupEffectsControls(modal);
+
+    // Effect on/off toggles
+    modal.querySelectorAll('.effect-toggle').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (!currentTrack) return;
+            const effect = btn.dataset.effect;
+            const nextState = !currentTrack.isEffectEnabled(effect);
+            currentTrack.setEffectEnabled(effect, nextState);
+            btn.classList.toggle('active', nextState);
+            btn.textContent = nextState ? 'Enabled' : 'Enable';
+            updateEffectIndicators(currentTrack, getCurrentTrackElement());
+            if (effect === 'eq') drawEQCurve();
+            scheduleAutoSave();
+        });
+    });
     
     // Update indicators initially
     updateEffectIndicators(currentTrack, getCurrentTrackElement());
     updateKnobVisuals();
 }
 
-// Update all knob visual rotations
+// Update all knob visual rotations and arcs
 function updateKnobVisuals() {
     const modal = document.getElementById('trackSettingsModal');
     if (!modal) return;
     
     modal.querySelectorAll('.knob-wrapper').forEach(wrapper => {
         const input = wrapper.querySelector('.knob-input');
-        const visual = wrapper.querySelector('.knob-visual');
-        if (input && visual) {
-            const min = parseFloat(input.min);
-            const max = parseFloat(input.max);
-            const value = parseFloat(input.value);
-            const percent = (value - min) / (max - min);
-            // Rotate from -135deg to 135deg (270 degree range)
-            const rotation = -135 + (percent * 270);
-            visual.style.setProperty('--knob-rotation', `${rotation}deg`);
+        if (input) {
+            updateSingleKnobVisual(wrapper, input);
         }
     });
+}
+
+// Update a single knob's visual (pointer rotation + conic-gradient arc)
+function updateSingleKnobVisual(wrapper, input) {
+    const min = parseFloat(input.min);
+    const max = parseFloat(input.max);
+    const value = parseFloat(input.value);
+    const percent = (value - min) / (max - min);
+    // Rotate pointer from -135deg to 135deg (270 degree range)
+    const rotation = -135 + (percent * 270);
+    // Arc angle out of 270deg
+    const arcDeg = percent * 270;
+    
+    const visual = wrapper.querySelector('.knob-visual');
+    if (visual) {
+        visual.style.setProperty('--knob-rotation', `${rotation}deg`);
+        visual.style.setProperty('--knob-arc-deg', `${arcDeg}deg`);
+    }
+}
+
+// Setup drag-to-rotate knob interaction for all knobs
+function setupKnobInteraction() {
+    const modal = document.getElementById('trackSettingsModal');
+    if (!modal) return;
+
+    // Track active drag state
+    let activeKnob = null;
+    let startY = 0;
+    let startValue = 0;
+    let knobMin = 0;
+    let knobMax = 1;
+    let knobStep = 0.01;
+    let isFineMode = false;
+    
+    const SENSITIVITY = 200; // pixels for full range
+    const FINE_MULTIPLIER = 0.15;
+
+    modal.addEventListener('mousedown', (e) => {
+        const wrapper = e.target.closest('.knob-wrapper');
+        if (!wrapper) return;
+        const input = wrapper.querySelector('.knob-input');
+        if (!input) return;
+        
+        e.preventDefault();
+        activeKnob = { wrapper, input };
+        startY = e.clientY;
+        startValue = parseFloat(input.value);
+        knobMin = parseFloat(input.min);
+        knobMax = parseFloat(input.max);
+        knobStep = parseFloat(input.step) || ((knobMax - knobMin) / 200);
+        isFineMode = e.shiftKey;
+        wrapper.classList.add('active');
+        document.body.style.cursor = 'grabbing';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!activeKnob) return;
+        e.preventDefault();
+        
+        isFineMode = e.shiftKey;
+        const dy = startY - e.clientY; // up = positive
+        const range = knobMax - knobMin;
+        const sensitivity = isFineMode ? SENSITIVITY / FINE_MULTIPLIER : SENSITIVITY;
+        let newValue = startValue + (dy / sensitivity) * range;
+        
+        // Snap to step
+        newValue = Math.round(newValue / knobStep) * knobStep;
+        newValue = Math.max(knobMin, Math.min(knobMax, newValue));
+        
+        activeKnob.input.value = newValue;
+        activeKnob.input.dispatchEvent(new Event('input', { bubbles: true }));
+        updateSingleKnobVisual(activeKnob.wrapper, activeKnob.input);
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (activeKnob) {
+            activeKnob.wrapper.classList.remove('active');
+            activeKnob = null;
+            document.body.style.cursor = '';
+        }
+    });
+
+    // Scroll wheel support
+    modal.addEventListener('wheel', (e) => {
+        const wrapper = e.target.closest('.knob-wrapper');
+        if (!wrapper) return;
+        const input = wrapper.querySelector('.knob-input');
+        if (!input) return;
+        
+        e.preventDefault();
+        const min = parseFloat(input.min);
+        const max = parseFloat(input.max);
+        const step = parseFloat(input.step) || ((max - min) / 100);
+        const range = max - min;
+        
+        // Scroll up = increase, scroll down = decrease
+        const direction = e.deltaY < 0 ? 1 : -1;
+        const multiplier = e.shiftKey ? 0.2 : 1;
+        const increment = Math.max(step, range / 100) * direction * multiplier;
+        
+        let newValue = parseFloat(input.value) + increment;
+        newValue = Math.round(newValue / step) * step;
+        newValue = Math.max(min, Math.min(max, newValue));
+        
+        input.value = newValue;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        updateSingleKnobVisual(wrapper, input);
+    }, { passive: false });
+
+    // Double-click to reset
+    modal.addEventListener('dblclick', (e) => {
+        const wrapper = e.target.closest('.knob-wrapper');
+        if (!wrapper) return;
+        const input = wrapper.querySelector('.knob-input');
+        if (!input) return;
+        
+        const defaultVal = wrapper.dataset.default;
+        if (defaultVal !== undefined) {
+            input.value = defaultVal;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            updateSingleKnobVisual(wrapper, input);
+        }
+    });
+}
+
+// Gain Reduction Meter
+let grMeterAnimationId = null;
+
+function startGRMeter() {
+    if (grMeterAnimationId) return;
+    
+    function updateGRMeter() {
+        grMeterAnimationId = requestAnimationFrame(updateGRMeter);
+        
+        const bar = document.getElementById('grMeterBar');
+        const valueDisplay = document.getElementById('grMeterValue');
+        if (!bar || !valueDisplay) return;
+        
+        if (!currentTrack || !currentTrack.compressor || !currentTrack.isEffectEnabled('compressor')) {
+            bar.style.width = '0%';
+            valueDisplay.textContent = '0 dB';
+            return;
+        }
+        
+        // DynamicsCompressorNode.reduction is negative dB (e.g., -6 means 6dB reduction)
+        const reduction = currentTrack.compressor.reduction;
+        const absReduction = Math.abs(reduction);
+        
+        // Map 0..24 dB range to 0..100%
+        const percent = Math.min(100, (absReduction / 24) * 100);
+        bar.style.width = `${percent}%`;
+        
+        // Color the value text based on amount
+        if (absReduction > 12) {
+            valueDisplay.style.color = 'var(--orange)';
+        } else if (absReduction > 3) {
+            valueDisplay.style.color = 'var(--yellow)';
+        } else {
+            valueDisplay.style.color = 'var(--green)';
+        }
+        
+        valueDisplay.textContent = reduction < -0.1 ? `${reduction.toFixed(1)} dB` : '0 dB';
+    }
+    
+    updateGRMeter();
+}
+
+function stopGRMeter() {
+    if (grMeterAnimationId) {
+        cancelAnimationFrame(grMeterAnimationId);
+        grMeterAnimationId = null;
+    }
 }
 
 function setupEQControls(modal) {
@@ -2555,14 +3572,7 @@ function setupCompressionControls(modal) {
     const updateKnob = (input) => {
         const wrapper = input.closest('.knob-wrapper');
         if (!wrapper) return;
-        const visual = wrapper.querySelector('.knob-visual');
-        if (!visual) return;
-        const min = parseFloat(input.min);
-        const max = parseFloat(input.max);
-        const value = parseFloat(input.value);
-        const percent = (value - min) / (max - min);
-        const rotation = -135 + (percent * 270);
-        visual.style.setProperty('--knob-rotation', `${rotation}deg`);
+        updateSingleKnobVisual(wrapper, input);
     };
     
     if (thresholdSlider) {
@@ -2742,20 +3752,25 @@ function updateAllSettingsDisplays() {
         el.nextElementSibling.textContent = parseFloat(el.value).toFixed(1);
     });
     
+    const compThresholdVal = document.querySelector('.comp-threshold-value');
     const compThreshold = document.querySelector('.comp-threshold');
-    compThreshold.nextElementSibling.textContent = parseFloat(compThreshold.value).toFixed(0) + ' dB';
+    if (compThresholdVal) compThresholdVal.textContent = parseFloat(compThreshold.value).toFixed(0) + ' dB';
     
+    const compKneeVal = document.querySelector('.comp-knee-value');
     const compKnee = document.querySelector('.comp-knee');
-    compKnee.nextElementSibling.textContent = parseFloat(compKnee.value).toFixed(0) + ' dB';
+    if (compKneeVal) compKneeVal.textContent = parseFloat(compKnee.value).toFixed(0) + ' dB';
     
+    const compRatioVal = document.querySelector('.comp-ratio-value');
     const compRatio = document.querySelector('.comp-ratio');
-    compRatio.nextElementSibling.textContent = parseFloat(compRatio.value).toFixed(1) + ':1';
+    if (compRatioVal) compRatioVal.textContent = parseFloat(compRatio.value).toFixed(1) + ':1';
     
+    const compAttackVal = document.querySelector('.comp-attack-value');
     const compAttack = document.querySelector('.comp-attack');
-    compAttack.nextElementSibling.textContent = (parseFloat(compAttack.value) * 1000).toFixed(0) + ' ms';
+    if (compAttackVal) compAttackVal.textContent = (parseFloat(compAttack.value) * 1000).toFixed(0) + ' ms';
     
+    const compReleaseVal = document.querySelector('.comp-release-value');
     const compRelease = document.querySelector('.comp-release');
-    compRelease.nextElementSibling.textContent = (parseFloat(compRelease.value) * 1000).toFixed(0) + ' ms';
+    if (compReleaseVal) compReleaseVal.textContent = (parseFloat(compRelease.value) * 1000).toFixed(0) + ' ms';
     
     const delayTime = document.querySelector('.delay-time');
     delayTime.nextElementSibling.textContent = (parseFloat(delayTime.value) * 1000).toFixed(0) + ' ms';
@@ -2800,8 +3815,7 @@ function updateEffectIndicators(track, trackElement) {
     let hasActiveEffects = false;
     
     // Check EQ
-    const hasEQ = track.eqLow.gain.value !== 0 || track.eqMid.gain.value !== 0 || track.eqHigh.gain.value !== 0;
-    if (hasEQ) {
+    if (track.isEffectEnabled('eq')) {
         const indicator = document.createElement('span');
         indicator.className = 'effect-indicator';
         indicator.textContent = 'EQ';
@@ -2809,8 +3823,8 @@ function updateEffectIndicators(track, trackElement) {
         hasActiveEffects = true;
     }
     
-    // Check Compression (active if ratio > 1)
-    if (track.compressor.ratio.value > 1) {
+    // Check Compression
+    if (track.isEffectEnabled('compressor')) {
         const indicator = document.createElement('span');
         indicator.className = 'effect-indicator';
         indicator.textContent = 'COMP';
@@ -2819,7 +3833,7 @@ function updateEffectIndicators(track, trackElement) {
     }
     
     // Check Delay
-    if (track.delayWet.gain.value > 0) {
+    if (track.isEffectEnabled('delay')) {
         const indicator = document.createElement('span');
         indicator.className = 'effect-indicator';
         indicator.textContent = 'DELAY';
@@ -2828,7 +3842,7 @@ function updateEffectIndicators(track, trackElement) {
     }
     
     // Check Reverb
-    if (track.reverbWet.gain.value > 0) {
+    if (track.isEffectEnabled('reverb')) {
         const indicator = document.createElement('span');
         indicator.className = 'effect-indicator';
         indicator.textContent = 'REVERB';
@@ -2860,9 +3874,11 @@ function updateTrackControlsWidthVar() {
 function selectTrack(trackElement) {
     // Deselect previous
     if (selectedTrack) {
+        selectedTrack.classList.remove('selected');
         selectedTrack.classList.remove('track-selected');
     }
     selectedTrack = trackElement;
+    trackElement.classList.add('selected');
     trackElement.classList.add('track-selected');
 }
 
@@ -2979,4 +3995,527 @@ async function exportProject() {
         exportBtn.disabled = false;
         exportBtn.textContent = 'Export Project';
     }
+}
+
+// ============================================
+// Project Save/Load System
+// ============================================
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+        request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME);
+            }
+        };
+    });
+}
+
+function scheduleAutoSave() {
+    if (isLoadingProject) return;
+    if (autoSaveTimeout) clearTimeout(autoSaveTimeout);
+    autoSaveTimeout = setTimeout(() => {
+        saveProjectToIndexedDB().catch(err => console.warn('Auto-save failed:', err));
+    }, 2000);
+}
+
+function getTrackVolumeFromUI(trackId) {
+    const el = document.querySelector(`.track[data-track-id="${trackId}"] .track-volume`);
+    return el ? parseFloat(el.value) : 0.8;
+}
+
+function serializeProject() {
+    // Clean up any duplicate regions before serialising so they are
+    // never persisted to auto-save or project files.
+    audioEngine.tracks.forEach(deduplicateTrackRegions);
+
+    return {
+        version: 1,
+        settings: {
+            bpm,
+            snapEnabled,
+            snapValue,
+            zoomLevel,
+            masterVolume: audioEngine.masterGain.gain.value,
+            loopEnabled,
+            loopStart,
+            loopEnd,
+            trackCounter
+        },
+        tracks: audioEngine.tracks.map(track => ({
+            id: track.id,
+            name: track.name,
+            volume: getTrackVolumeFromUI(track.id),
+            pan: track.panNode.pan.value,
+            isMuted: track.isMuted,
+            isSoloed: track.isSoloed,
+            effectStates: { ...track.effectStates },
+            eq: {
+                low: { frequency: track.eqLow.frequency.value, gain: track.eqLow.gain.value, Q: track.eqLow.Q.value },
+                lowMid: { frequency: track.eqLowMid.frequency.value, gain: track.eqLowMid.gain.value, Q: track.eqLowMid.Q.value },
+                mid: { frequency: track.eqMid.frequency.value, gain: track.eqMid.gain.value, Q: track.eqMid.Q.value },
+                high: { frequency: track.eqHigh.frequency.value, gain: track.eqHigh.gain.value, Q: track.eqHigh.Q.value }
+            },
+            compressor: {
+                threshold: track.compressor.threshold.value,
+                knee: track.compressor.knee.value,
+                ratio: track.compressor.ratio.value,
+                attack: track.compressor.attack.value,
+                release: track.compressor.release.value
+            },
+            delay: {
+                time: track.delayNode.delayTime.value,
+                feedback: track.delayFeedback.gain.value,
+                wet: track.delayWet.gain.value
+            },
+            reverb: {
+                wet: track.reverbWet.gain.value
+            },
+            automation: JSON.parse(JSON.stringify(track.automation)),
+            regions: track.regions.map((r, i) => ({
+                bufferId: `${track.id}_region_${i}`,
+                startTime: r.startTime,
+                duration: r.duration,
+                startOffset: r.startOffset,
+                endOffset: r.endOffset,
+                fadeInDuration: r.fadeInDuration || 0,
+                fadeOutDuration: r.fadeOutDuration || 0,
+                gain: r.gain !== undefined ? r.gain : 1.0,
+                name: r.name || '',
+                crossfade: r.crossfade ? JSON.parse(JSON.stringify(r.crossfade)) : null
+            }))
+        }))
+    };
+}
+
+function serializeAudioBuffers() {
+    const audioBuffers = {};
+    audioEngine.tracks.forEach(track => {
+        track.regions.forEach((r, i) => {
+            if (r.buffer) {
+                const bufferId = `${track.id}_region_${i}`;
+                const channels = [];
+                for (let ch = 0; ch < r.buffer.numberOfChannels; ch++) {
+                    channels.push(new Float32Array(r.buffer.getChannelData(ch)));
+                }
+                audioBuffers[bufferId] = {
+                    channels,
+                    sampleRate: r.buffer.sampleRate,
+                    numberOfChannels: r.buffer.numberOfChannels,
+                    length: r.buffer.length
+                };
+            }
+        });
+    });
+    return audioBuffers;
+}
+
+async function saveProjectToIndexedDB() {
+    try {
+        const projectData = serializeProject();
+        const audioBuffers = serializeAudioBuffers();
+
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        store.put({ projectData, audioBuffers }, 'autosave');
+        await new Promise((resolve, reject) => {
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+        });
+        db.close();
+        console.log('Project auto-saved');
+    } catch (err) {
+        console.warn('Failed to auto-save:', err);
+    }
+}
+
+async function loadProjectFromIndexedDB() {
+    try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const request = store.get('autosave');
+
+        const saved = await new Promise((resolve, reject) => {
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+        db.close();
+
+        if (!saved || !saved.projectData || !saved.projectData.tracks || saved.projectData.tracks.length === 0) {
+            return false;
+        }
+
+        await restoreProject(saved.projectData, saved.audioBuffers || {});
+        showNotification('Project restored from auto-save');
+        return true;
+    } catch (err) {
+        console.warn('Failed to load project from IndexedDB:', err);
+        return false;
+    }
+}
+
+async function restoreProject(projectData, audioBuffers) {
+    isLoadingProject = true;
+    try {
+        // Stop playback
+        if (audioEngine.isPlaying) {
+            audioEngine.stop();
+        }
+
+        // Clear existing tracks
+        audioEngine.tracks.forEach(t => t.dispose());
+        audioEngine.tracks = [];
+        document.getElementById('tracksContainer').innerHTML = '';
+        selectedTrack = null;
+        selectedRegion = null;
+        trackCounter = 0;
+
+        // Restore global settings
+        bpm = projectData.settings.bpm || 120;
+        snapEnabled = projectData.settings.snapEnabled !== undefined ? projectData.settings.snapEnabled : true;
+        snapValue = projectData.settings.snapValue || 0.25;
+        zoomLevel = projectData.settings.zoomLevel || 1.0;
+        audioEngine.masterGain.gain.value = projectData.settings.masterVolume !== undefined ? projectData.settings.masterVolume : 0.8;
+        loopEnabled = projectData.settings.loopEnabled || false;
+        loopStart = projectData.settings.loopStart || 0;
+        loopEnd = projectData.settings.loopEnd || 10;
+        trackCounter = projectData.settings.trackCounter || 0;
+
+        // Update UI for global settings
+        document.getElementById('bpmInput').value = bpm;
+        document.getElementById('snapEnabled').checked = snapEnabled;
+        document.getElementById('snapValue').value = snapValue;
+        const masterVolumeSlider = document.getElementById('masterVolume');
+        masterVolumeSlider.value = projectData.settings.masterVolume;
+        updateSliderFill(masterVolumeSlider, projectData.settings.masterVolume * 100);
+        const masterDb = projectData.settings.masterVolume > 0 ? 20 * Math.log10(projectData.settings.masterVolume) : -Infinity;
+        document.getElementById('masterVolumeValue').textContent = masterDb === -Infinity ? '-∞ dB' : masterDb.toFixed(1) + ' dB';
+
+        const loopBtn = document.getElementById('loopBtn');
+        loopBtn.classList.toggle('loop-active', loopEnabled);
+
+        // Recreate tracks
+        for (const trackData of projectData.tracks) {
+            createTrack({ id: trackData.id, name: trackData.name });
+
+            const track = audioEngine.tracks.find(t => t.id === trackData.id);
+            const trackElement = document.querySelector(`.track[data-track-id="${trackData.id}"]`);
+            if (!track || !trackElement) continue;
+
+            // Restore volume
+            const volumeSlider = trackElement.querySelector('.track-volume');
+            const vol = trackData.volume !== undefined ? trackData.volume : 0.8;
+            volumeSlider.value = vol;
+            updateSliderFill(volumeSlider, vol * 100);
+            const volumeDb = vol > 0 ? 20 * Math.log10(vol) : -Infinity;
+            trackElement.querySelector('.volume-value').textContent = volumeDb === -Infinity ? '-∞ dB' : volumeDb.toFixed(1) + ' dB';
+
+            // Restore pan
+            track.panNode.pan.value = trackData.pan || 0;
+            const panSlider = trackElement.querySelector('.track-pan');
+            panSlider.value = trackData.pan || 0;
+            const panValueEl = trackElement.querySelector('.pan-value');
+            if (trackData.pan < -0.1) panValueEl.textContent = `L${Math.abs(trackData.pan * 100).toFixed(0)}`;
+            else if (trackData.pan > 0.1) panValueEl.textContent = `R${(trackData.pan * 100).toFixed(0)}`;
+            else panValueEl.textContent = 'C';
+
+            // Restore mute/solo
+            track.isMuted = !!trackData.isMuted;
+            track.isSoloed = !!trackData.isSoloed;
+            if (track.isMuted) trackElement.querySelector('.mute-btn').classList.add('active');
+            if (track.isSoloed) trackElement.querySelector('.solo-btn').classList.add('active');
+
+            // Restore EQ
+            if (trackData.eq) {
+                track.eqLow.frequency.value = trackData.eq.low.frequency;
+                track.eqLow.gain.value = trackData.eq.low.gain;
+                track.eqLow.Q.value = trackData.eq.low.Q;
+                track.eqLowMid.frequency.value = trackData.eq.lowMid.frequency;
+                track.eqLowMid.gain.value = trackData.eq.lowMid.gain;
+                track.eqLowMid.Q.value = trackData.eq.lowMid.Q;
+                track.eqMid.frequency.value = trackData.eq.mid.frequency;
+                track.eqMid.gain.value = trackData.eq.mid.gain;
+                track.eqMid.Q.value = trackData.eq.mid.Q;
+                track.eqHigh.frequency.value = trackData.eq.high.frequency;
+                track.eqHigh.gain.value = trackData.eq.high.gain;
+                track.eqHigh.Q.value = trackData.eq.high.Q;
+            }
+
+            // Restore compressor
+            if (trackData.compressor) {
+                track.compressor.threshold.value = trackData.compressor.threshold;
+                track.compressor.knee.value = trackData.compressor.knee;
+                track.compressor.ratio.value = trackData.compressor.ratio;
+                track.compressor.attack.value = trackData.compressor.attack;
+                track.compressor.release.value = trackData.compressor.release;
+            }
+
+            // Restore delay
+            if (trackData.delay) {
+                track.delayNode.delayTime.value = trackData.delay.time;
+                track.delayFeedback.gain.value = trackData.delay.feedback;
+                track.delayWet.gain.value = trackData.delay.wet;
+            }
+
+            // Restore reverb
+            if (trackData.reverb) {
+                track.reverbWet.gain.value = trackData.reverb.wet;
+            }
+
+            // Restore effect states
+            if (trackData.effectStates) {
+                Object.keys(trackData.effectStates).forEach(effect => {
+                    track.setEffectEnabled(effect, trackData.effectStates[effect]);
+                });
+            }
+
+            // Restore automation
+            if (trackData.automation) {
+                track.automation = trackData.automation;
+            }
+
+            // Restore regions
+            if (trackData.regions) {
+                for (const regionInfo of trackData.regions) {
+                    const bufferData = audioBuffers[regionInfo.bufferId];
+                    if (bufferData) {
+                        const audioBuffer = audioEngine.audioContext.createBuffer(
+                            bufferData.numberOfChannels,
+                            bufferData.length,
+                            bufferData.sampleRate
+                        );
+                        for (let ch = 0; ch < bufferData.numberOfChannels; ch++) {
+                            audioBuffer.copyToChannel(new Float32Array(bufferData.channels[ch]), ch);
+                        }
+
+                        track.buffer = audioBuffer; // ensure track has a buffer reference
+                        trackElement.classList.add('has-audio');
+
+                        const regionData = {
+                            buffer: audioBuffer,
+                            startTime: regionInfo.startTime,
+                            duration: regionInfo.duration,
+                            startOffset: regionInfo.startOffset,
+                            endOffset: regionInfo.endOffset,
+                            fadeInDuration: regionInfo.fadeInDuration || 0,
+                            fadeOutDuration: regionInfo.fadeOutDuration || 0,
+                            gain: regionInfo.gain !== undefined ? regionInfo.gain : 1.0,
+                            name: regionInfo.name || '',
+                            crossfade: regionInfo.crossfade || null
+                        };
+
+                        createRegionFromData(regionData, track, trackElement);
+                    }
+                }
+            }
+
+            // Update effect indicators
+            updateEffectIndicators(track, trackElement);
+        }
+
+        // Apply mute/solo state
+        updateSoloMuteStates();
+
+        // Update duration and UI
+        audioEngine.updateDuration();
+        updateTimelineZoom();
+        updateTimeDisplay();
+        updateLoopDisplay();
+
+    } finally {
+        isLoadingProject = false;
+    }
+}
+
+async function saveProjectToFile() {
+    try {
+        const projectData = serializeProject();
+        const audioBuffers = serializeAudioBuffers();
+
+        // Build binary packet
+        const metadataJson = JSON.stringify(projectData);
+        const metadataBytes = new TextEncoder().encode(metadataJson);
+
+        // Build buffer manifest with byte offsets
+        let audioDataSize = 0;
+        const bufferEntries = [];
+        for (const [id, buf] of Object.entries(audioBuffers)) {
+            const entry = {
+                id,
+                sampleRate: buf.sampleRate,
+                numberOfChannels: buf.numberOfChannels,
+                length: buf.length,
+                channelByteLengths: buf.channels.map(ch => ch.byteLength)
+            };
+            for (const ch of buf.channels) {
+                audioDataSize += ch.byteLength;
+            }
+            bufferEntries.push(entry);
+        }
+
+        const manifestJson = JSON.stringify(bufferEntries);
+        const manifestBytes = new TextEncoder().encode(manifestJson);
+
+        // Pack: [4 bytes metadata len][metadata][4 bytes manifest len][manifest][audio data]
+        const totalSize = 4 + metadataBytes.byteLength + 4 + manifestBytes.byteLength + audioDataSize;
+        const fileBuffer = new ArrayBuffer(totalSize);
+        const view = new DataView(fileBuffer);
+        let offset = 0;
+
+        // Metadata
+        view.setUint32(offset, metadataBytes.byteLength, true);
+        offset += 4;
+        new Uint8Array(fileBuffer, offset, metadataBytes.byteLength).set(metadataBytes);
+        offset += metadataBytes.byteLength;
+
+        // Manifest
+        view.setUint32(offset, manifestBytes.byteLength, true);
+        offset += 4;
+        new Uint8Array(fileBuffer, offset, manifestBytes.byteLength).set(manifestBytes);
+        offset += manifestBytes.byteLength;
+
+        // Audio data (write as raw bytes to avoid alignment issues)
+        for (const [id, buf] of Object.entries(audioBuffers)) {
+            for (const ch of buf.channels) {
+                const bytes = new Uint8Array(ch.buffer, ch.byteOffset, ch.byteLength);
+                new Uint8Array(fileBuffer, offset, ch.byteLength).set(bytes);
+                offset += ch.byteLength;
+            }
+        }
+
+        const blob = new Blob([fileBuffer], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `audio-studio-project-${Date.now()}.audiostudio`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        showNotification('Project saved to file');
+    } catch (err) {
+        console.error('Save to file failed:', err);
+        showNotification('Failed to save project: ' + err.message);
+    }
+}
+
+async function loadProjectFromFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.audiostudio';
+
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+            showNotification('Loading project...');
+            const arrayBuffer = await file.arrayBuffer();
+            const view = new DataView(arrayBuffer);
+            let offset = 0;
+
+            // Read metadata
+            const metadataLen = view.getUint32(offset, true);
+            offset += 4;
+            const metadataBytes = new Uint8Array(arrayBuffer, offset, metadataLen);
+            const projectData = JSON.parse(new TextDecoder().decode(metadataBytes));
+            offset += metadataLen;
+
+            // Read manifest
+            const manifestLen = view.getUint32(offset, true);
+            offset += 4;
+            const manifestBytes = new Uint8Array(arrayBuffer, offset, manifestLen);
+            const bufferManifest = JSON.parse(new TextDecoder().decode(manifestBytes));
+            offset += manifestLen;
+
+            // Read audio data
+            const audioBuffers = {};
+            for (const entry of bufferManifest) {
+                const channels = [];
+                for (const byteLen of entry.channelByteLengths) {
+                    const channelData = new Float32Array(arrayBuffer.slice(offset, offset + byteLen));
+                    channels.push(channelData);
+                    offset += byteLen;
+                }
+                audioBuffers[entry.id] = {
+                    channels,
+                    sampleRate: entry.sampleRate,
+                    numberOfChannels: entry.numberOfChannels,
+                    length: entry.length
+                };
+            }
+
+            await restoreProject(projectData, audioBuffers);
+            // Also save to IndexedDB for auto-restore on next visit
+            await saveProjectToIndexedDB();
+            showNotification('Project loaded from file');
+        } catch (err) {
+            console.error('Load from file failed:', err);
+            showNotification('Failed to load project: ' + err.message);
+        }
+    };
+
+    input.click();
+}
+
+async function clearProject() {
+    if (!confirm('Clear the current project? This will remove all tracks and audio. The auto-saved project will also be cleared.')) return;
+
+    if (audioEngine.isPlaying) {
+        audioEngine.stop();
+    }
+
+    // Clear IndexedDB
+    try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        store.delete('autosave');
+        await new Promise((resolve, reject) => {
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+        });
+        db.close();
+    } catch (err) {
+        console.warn('Failed to clear IndexedDB:', err);
+    }
+
+    // Clear all tracks
+    audioEngine.tracks.forEach(t => t.dispose());
+    audioEngine.tracks = [];
+    document.getElementById('tracksContainer').innerHTML = '';
+    selectedTrack = null;
+    selectedRegion = null;
+    trackCounter = 0;
+
+    // Reset settings
+    bpm = 120;
+    snapEnabled = true;
+    snapValue = 0.25;
+    zoomLevel = 1.0;
+    audioEngine.masterGain.gain.value = 0.8;
+    loopEnabled = false;
+    loopStart = 0;
+    loopEnd = 10;
+
+    document.getElementById('bpmInput').value = 120;
+    document.getElementById('snapEnabled').checked = true;
+    document.getElementById('snapValue').value = 0.25;
+    const masterVolumeSlider = document.getElementById('masterVolume');
+    masterVolumeSlider.value = 0.8;
+    updateSliderFill(masterVolumeSlider, 80);
+    document.getElementById('masterVolumeValue').textContent = '-2 dB';
+    document.getElementById('loopBtn').classList.remove('loop-active');
+
+    // Create default tracks
+    for (let i = 0; i < 4; i++) {
+        createTrack();
+    }
+
+    applyArrangementChange();
+    showNotification('Project cleared');
 }
