@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wood Filament Clog Simulator — 3D</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ── Top bar ── -->
+  <div class="top-bar">
+    <h1>Wood Filament Clog Simulator</h1>
+    <div class="tag-row">
+      <span>Poiseuille</span><span>Shear thin</span><span>Die swell</span>
+      <span>Melt</span><span>Moisture</span><span>Wear</span>
+    </div>
+    <button id="help-btn" class="help-btn" title="Know How">?</button>
+  </div>
+
+  <!-- ── Main layout ── -->
+  <div class="main-layout">
+    <!-- LEFT: 3D viewport + stats -->
+    <div class="left-panel">
+      <div id="viewport" class="viewport"></div>
+
+      <!-- Stats strip -->
+      <div id="stats-strip" class="stats-strip"></div>
+
+      <!-- Charts + Gauge -->
+      <div class="bottom-row">
+        <div id="charts" class="charts-panel"></div>
+        <div class="gauge-panel">
+          <div id="gauge"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Sidebar -->
+    <div id="sidebar" class="sidebar"></div>
+  </div>
+
+  <!-- ── Know-How Modal ── -->
+  <div id="knowhow-modal" class="modal-overlay">
+    <div class="modal-box" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h2>Know How</h2>
+        <button id="knowhow-close" class="modal-close">&times;</button>
+      </div>
+      <div id="knowhow-content" class="modal-content"></div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="three.min.js"></script>
+  <script src="js/constants.js"></script>
+  <script src="js/physics.js"></script>
+  <script src="js/nozzle.js"></script>
+  <script src="js/particles.js"></script>
+  <script src="js/filament.js"></script>
+  <script src="js/effects.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
