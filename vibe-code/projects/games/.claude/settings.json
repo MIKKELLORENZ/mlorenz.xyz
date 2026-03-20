@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:archive.org)",
+      "WebFetch(domain:gamesounds.xyz)",
+      "Bash(node -e \":*)",
+      "Read(//c/Users/mvlor/OneDrive/Documents/mlorenz.xyz/**)"
+    ]
+  }
+}

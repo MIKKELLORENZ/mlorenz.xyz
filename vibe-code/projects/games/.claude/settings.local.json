@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"let d='''''''';process.stdin.on\\(''''data'''',c=>d+=c\\);process.stdin.on\\(''''end'''',\\(\\)=>{const items=JSON.parse\\(d\\);if\\(Array.isArray\\(items\\)\\)items.filter\\(x=>x.type===''''file''''\\).forEach\\(x=>console.log\\(x.name\\)\\)}\\)\")",
+      "Bash(ffmpeg -version)",
+      "Bash(node -e \"console.log\\(process.version\\)\")",
+      "Bash(node download_sounds.js)"
+    ]
+  }
+}

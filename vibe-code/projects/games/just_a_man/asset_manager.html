@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Just a Man — Asset Manager</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+:root {
+    --bg: #0f0f13;
+    --bg2: #16161d;
+    --bg3: #1e1e28;
+    --bg4: #282835;
+    --border: #2a2a3a;
+    --border-light: #3a3a4e;
+    --text: #e0e0e8;
+    --text-dim: #7a7a90;
+    --accent: #e2b714;
+    --accent-dim: rgba(226,183,20,0.15);
+    --green: #44cc66;
+    --red: #cc4444;
+    --blue: #4488dd;
+    --pink: #dd4488;
+    --radius: 6px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* === NAV === */
+.nav {
+    display: flex; align-items: center; background: var(--bg2);
+    border-bottom: 1px solid var(--border); padding: 0 24px; height: 52px; gap: 8px;
+    position: sticky; top: 0; z-index: 100;
+}
+.nav-title { font-weight: 700; font-size: 14px; color: var(--accent); margin-right: 32px; letter-spacing: 1px; }
+.nav-tab {
+    padding: 14px 20px; font-size: 13px; font-weight: 500; color: var(--text-dim);
+    cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s;
+}
+.nav-tab:hover { color: var(--text); }
+.nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.nav-spacer { flex: 1; }
+.nav-stat { font-size: 11px; color: var(--text-dim); padding: 4px 10px; background: var(--bg3); border-radius: 12px; margin-left: 6px; }
+.nav-stat b { color: var(--green); }
+
+/* === PATH BAR === */
+.path-bar {
+    display: flex; align-items: center; gap: 12px; padding: 10px 24px;
+    background: var(--bg2); border-bottom: 1px solid var(--border); font-size: 11px;
+}
+.path-bar label { color: var(--text-dim); white-space: nowrap; }
+.path-bar code {
+    background: var(--bg4); padding: 4px 10px; border-radius: 4px;
+    color: var(--accent); font-family: monospace; font-size: 11px;
+}
+.path-bar .scan-btn {
+    padding: 4px 12px; font-size: 11px; background: var(--accent-dim); border: 1px solid var(--accent);
+    border-radius: 4px; color: var(--accent); cursor: pointer; margin-left: auto;
+}
+.path-bar .scan-btn:hover { background: var(--accent); color: var(--bg); }
+
+/* === PANELS === */
+.panel { display: none; padding: 24px; }
+.panel.active { display: block; }
+
+/* === TOOLBAR === */
+.toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.search-box {
+    flex: 1; min-width: 200px; padding: 8px 14px; background: var(--bg3);
+    border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);
+    font-size: 13px; outline: none;
+}
+.search-box:focus { border-color: var(--accent); }
+.filter-btn {
+    padding: 6px 14px; font-size: 12px; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text-dim); cursor: pointer; transition: all 0.15s;
+}
+.filter-btn:hover, .filter-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+/* === IMAGE GRID === */
+.image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+.image-card {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden; transition: border-color 0.2s;
+}
+.image-card:hover { border-color: var(--border-light); }
+.image-card.found { border-color: var(--green); }
+.image-card.found .card-status { color: var(--green); }
+
+.card-preview {
+    width: 100%; aspect-ratio: 16/9; background: var(--bg4);
+    display: flex; align-items: center; justify-content: center;
+    position: relative; cursor: pointer; overflow: hidden;
+}
+.card-preview.square { aspect-ratio: 1/1; max-height: 140px; }
+.card-preview img { width: 100%; height: 100%; object-fit: cover; }
+.card-preview .placeholder {
+    display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--text-dim);
+}
+.card-preview .plus { font-size: 32px; font-weight: 300; color: var(--border-light); line-height: 1; }
+.card-preview .plus-text { font-size: 10px; }
+.card-preview:hover .plus { color: var(--accent); }
+
+.card-info { padding: 10px 12px; }
+.card-title { font-size: 11px; font-weight: 600; color: var(--text); margin-bottom: 2px; word-break: break-all; }
+.card-category { font-size: 10px; color: var(--text-dim); margin-bottom: 4px; }
+.card-path { font-size: 9px; color: var(--text-dim); font-family: monospace; opacity: 0.6; margin-bottom: 6px; word-break: break-all; }
+.card-status { font-size: 10px; color: var(--text-dim); }
+.card-actions { display: flex; gap: 6px; margin-top: 6px; }
+.card-btn {
+    padding: 4px 10px; font-size: 10px; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text-dim); cursor: pointer; transition: all 0.15s;
+}
+.card-btn:hover { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+/* === AUDIO GRID === */
+.audio-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.audio-card {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 14px; display: flex; align-items: center; gap: 10px; transition: border-color 0.2s;
+}
+.audio-card:hover { border-color: var(--border-light); }
+.audio-card.found { border-color: var(--green); }
+.audio-icon {
+    width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; font-size: 14px; flex-shrink: 0; cursor: pointer; transition: all 0.2s;
+}
+.audio-icon.music { background: rgba(68,136,221,0.15); color: var(--blue); }
+.audio-icon.ambient { background: rgba(68,204,102,0.15); color: var(--green); }
+.audio-icon.sfx { background: rgba(221,68,136,0.15); color: var(--pink); }
+.audio-icon:hover { transform: scale(1.1); }
+.audio-icon.playing { animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+.audio-info { flex: 1; min-width: 0; }
+.audio-name { font-size: 11px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audio-type { font-size: 10px; color: var(--text-dim); }
+.audio-path { font-size: 9px; color: var(--text-dim); font-family: monospace; opacity: 0.6; }
+.audio-file-btn {
+    padding: 4px 10px; font-size: 10px; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text-dim); cursor: pointer; flex-shrink: 0;
+}
+.audio-file-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* === PROMPT TAB === */
+.prompt-grid { display: flex; flex-direction: column; gap: 16px; }
+.prompt-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.prompt-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; background: var(--bg3); cursor: pointer;
+}
+.prompt-title { font-size: 12px; font-weight: 600; }
+.prompt-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--accent-dim); color: var(--accent); }
+.prompt-body { padding: 16px; display: none; }
+.prompt-card.open .prompt-body { display: block; }
+.prompt-section { margin-bottom: 14px; }
+.prompt-label { font-size: 10px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+.prompt-text {
+    font-size: 12px; line-height: 1.7; color: var(--text); background: var(--bg4);
+    padding: 12px 14px; border-radius: 4px; border: 1px solid var(--border);
+    position: relative; white-space: pre-wrap;
+}
+.prompt-note { font-size: 11px; color: var(--text-dim); line-height: 1.6; padding: 8px 0; }
+.copy-btn {
+    position: absolute; top: 8px; right: 8px; padding: 4px 10px; font-size: 10px;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-dim); cursor: pointer;
+}
+.copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+.copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+/* toast */
+.toast {
+    position: fixed; bottom: 24px; right: 24px; padding: 10px 20px;
+    background: var(--bg3); border: 1px solid var(--green); border-radius: var(--radius);
+    color: var(--green); font-size: 12px; z-index: 200;
+    opacity: 0; transform: translateY(10px); transition: all 0.3s; pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+
+.hidden-input { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="nav">
+    <div class="nav-title">JUST A MAN</div>
+    <div class="nav-tab active" data-tab="images">Images</div>
+    <div class="nav-tab" data-tab="audio">Audio</div>
+    <div class="nav-tab" data-tab="prompts">Prompts</div>
+    <div class="nav-spacer"></div>
+    <div class="nav-stat" id="stat-images">Images: <b>0</b> / <span>0</span></div>
+    <div class="nav-stat" id="stat-audio">Audio: <b>0</b> / <span>0</span></div>
+</div>
+
+<div class="path-bar">
+    <label>Shared images:</label>
+    <code id="path-images">../../shared_assets/images/</code>
+    <label>Shared audio:</label>
+    <code id="path-audio">../../shared_assets/audio/</code>
+    <button class="scan-btn" onclick="scanAll()">Scan Files</button>
+</div>
+
+<div class="panel active" id="panel-images">
+    <div class="toolbar">
+        <input class="search-box" id="search-images" placeholder="Search scenes...">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="location">Locations</button>
+        <button class="filter-btn" data-filter="npc">NPCs</button>
+        <button class="filter-btn" data-filter="activity">Activities</button>
+        <button class="filter-btn" data-filter="event">Events</button>
+        <button class="filter-btn" data-filter="special">Special</button>
+        <button class="filter-btn" data-filter="casino">Casino</button>
+        <button class="filter-btn" data-filter="ui">UI</button>
+        <button class="filter-btn" data-filter="item">Items</button>
+        <button class="filter-btn" data-filter="found">Found</button>
+        <button class="filter-btn" data-filter="missing">Missing</button>
+    </div>
+    <div class="image-grid" id="image-grid"></div>
+</div>
+
+<div class="panel" id="panel-audio">
+    <div class="toolbar">
+        <input class="search-box" id="search-audio" placeholder="Search sounds...">
+        <button class="filter-btn active" data-filter-audio="all">All</button>
+        <button class="filter-btn" data-filter-audio="music">Music</button>
+        <button class="filter-btn" data-filter-audio="ambient">Ambient</button>
+        <button class="filter-btn" data-filter-audio="sfx">SFX</button>
+        <button class="filter-btn" data-filter-audio="found">Found</button>
+        <button class="filter-btn" data-filter-audio="missing">Missing</button>
+    </div>
+    <div class="audio-grid" id="audio-grid"></div>
+</div>
+
+<div class="panel" id="panel-prompts">
+    <div class="toolbar">
+        <input class="search-box" id="search-prompts" placeholder="Search prompts...">
+        <button class="filter-btn active" data-filter-prompt="all">All</button>
+        <button class="filter-btn" data-filter-prompt="scene">Scenes</button>
+        <button class="filter-btn" data-filter-prompt="item">Items</button>
+    </div>
+    <div class="prompt-grid" id="prompt-grid"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+<input type="file" class="hidden-input" id="file-picker-img" accept="image/*">
+<input type="file" class="hidden-input" id="file-picker-aud" accept="audio/*">
+
+<script>
+// ============================================
+// PATHS
+// ============================================
+const IMAGE_BASE = '../../shared_assets/images/';
+const AUDIO_BASE = '../../shared_assets/audio/';
+
+// ============================================
+// ASSET REGISTRIES
+// ============================================
+const SCENE_DATA = {
+    home_starter_morning: { cat:'location', label:'Home (Starter) - Morning' },
+    home_starter_noon: { cat:'location', label:'Home (Starter) - Noon' },
+    home_starter_night: { cat:'location', label:'Home (Starter) - Night' },
+    home_upgraded_morning: { cat:'location', label:'Home (Upgraded) - Morning' },
+    home_upgraded_noon: { cat:'location', label:'Home (Upgraded) - Noon' },
+    home_upgraded_night: { cat:'location', label:'Home (Upgraded) - Night' },
+    park_morning: { cat:'location', label:'Park - Morning' },
+    park_noon: { cat:'location', label:'Park - Noon' },
+    park_night: { cat:'location', label:'Park - Night' },
+    mall_noon: { cat:'location', label:'Mall - Daytime' },
+    mall_evening: { cat:'location', label:'Mall - Evening' },
+    cafe_morning: { cat:'location', label:'Cafe - Morning' },
+    cafe_noon: { cat:'location', label:'Cafe - Noon' },
+    cafe_night: { cat:'location', label:'Cafe - Night' },
+    subway_morning: { cat:'location', label:'Subway - Morning' },
+    subway_night: { cat:'location', label:'Subway - Night' },
+    downtown_morning: { cat:'location', label:'Downtown - Morning' },
+    downtown_noon: { cat:'location', label:'Downtown - Noon' },
+    downtown_night: { cat:'location', label:'Downtown - Night' },
+    pawnshop_interior: { cat:'location', label:"Vinnie's Pawn Shop" },
+    brokerage_floor: { cat:'location', label:'Bull & Bear Brokerage' },
+    carlot_daytime: { cat:'location', label:"Crazy Eddie's Car Lot" },
+    realestate_office: { cat:'location', label:'Chen & Associates Realty' },
+    nightclub_interior: { cat:'location', label:'Club Neon' },
+    restaurant_interior: { cat:'location', label:'La Bella Vita' },
+    casino_interior: { cat:'casino', label:'The Golden Ace' },
+    casino_slots: { cat:'casino', label:'Casino - Slots' },
+    casino_blackjack: { cat:'casino', label:'Casino - Blackjack' },
+    casino_roulette: { cat:'casino', label:'Casino - Roulette' },
+    casino_win: { cat:'casino', label:'Casino - Winner' },
+    casino_lose: { cat:'casino', label:'Casino - Loser' },
+    vinnie_first_meeting: { cat:'npc', label:'Vinnie - First Meeting' },
+    vinnie_showing_goods: { cat:'npc', label:'Vinnie - Showing Goods' },
+    vinnie_negotiating: { cat:'npc', label:'Vinnie - Negotiating' },
+    vinnie_friendly: { cat:'npc', label:'Vinnie - Friendly' },
+    vinnie_conspiratorial: { cat:'npc', label:'Vinnie - Conspiratorial' },
+    diana_first_sighting: { cat:'npc', label:'Diana - First Sighting' },
+    diana_first_conversation: { cat:'npc', label:'Diana - First Conversation' },
+    diana_coffee_date: { cat:'npc', label:'Diana - Coffee Date' },
+    diana_park_walk: { cat:'npc', label:'Diana - Park Walk' },
+    diana_dinner_date: { cat:'npc', label:'Diana - Dinner Date' },
+    diana_love_confession: { cat:'npc', label:'Diana - Love Confession' },
+    diana_proposal: { cat:'npc', label:'Diana - Proposal' },
+    diana_breakup: { cat:'npc', label:'Diana - Breakup' },
+    diana_win_ending: { cat:'npc', label:'Diana - Win Ending' },
+    marcus_first_meeting: { cat:'npc', label:'Marcus - First Meeting' },
+    marcus_brokerage_intro: { cat:'npc', label:'Marcus - Brokerage Intro' },
+    marcus_stock_tip: { cat:'npc', label:'Marcus - Stock Tip' },
+    marcus_betrayal_reveal: { cat:'npc', label:'Marcus - Betrayal' },
+    marcus_confession: { cat:'npc', label:'Marcus - Confession' },
+    ray_first_meeting: { cat:'npc', label:'Ray - First Meeting' },
+    ray_pitching_deal: { cat:'npc', label:'Ray - Pitching Deal' },
+    ray_deal_success: { cat:'npc', label:'Ray - Deal Success' },
+    ray_deal_failure: { cat:'npc', label:'Ray - Deal Failure' },
+    ray_family_crisis: { cat:'npc', label:'Ray - Family Crisis' },
+    ray_grateful: { cat:'npc', label:'Ray - Grateful' },
+    chen_office_intro: { cat:'npc', label:'Mrs. Chen - Intro' },
+    chen_showing_listings: { cat:'npc', label:'Mrs. Chen - Listings' },
+    chen_closing_deal: { cat:'npc', label:'Mrs. Chen - Closing Deal' },
+    chen_crown_jewel: { cat:'npc', label:'Mrs. Chen - Crown Jewel' },
+    tony_nightclub_intro: { cat:'npc', label:'Tony - Intro' },
+    tony_vip_chat: { cat:'npc', label:'Tony - VIP Chat' },
+    tony_partnership_offer: { cat:'npc', label:'Tony - Partnership' },
+    tony_major_deal: { cat:'npc', label:'Tony - Major Deal' },
+    tony_celebration: { cat:'npc', label:'Tony - Celebration' },
+    activity_mall_buying: { cat:'activity', label:'Mall Buying' },
+    activity_pawnshop_selling: { cat:'activity', label:'Pawn Selling' },
+    activity_stock_trading: { cat:'activity', label:'Stock Trading' },
+    activity_buying_car: { cat:'activity', label:'Buying Car' },
+    activity_signing_papers: { cat:'activity', label:'Signing Papers' },
+    activity_cherry_coke: { cat:'activity', label:'Cherry Coke' },
+    activity_boombox: { cat:'activity', label:'Boombox' },
+    activity_park_walk: { cat:'activity', label:'Park Walk' },
+    activity_food_court: { cat:'activity', label:'Food Court' },
+    activity_nightclub_dancing: { cat:'activity', label:'Dancing' },
+    event_found_wallet: { cat:'event', label:'Found Wallet' },
+    event_street_musician: { cat:'event', label:'Street Musician' },
+    event_mugging_attempt: { cat:'event', label:'Mugging' },
+    event_cherry_coke_sale: { cat:'event', label:'Cherry Coke Sale' },
+    event_ray_deal_handoff: { cat:'event', label:'Ray Deal Handoff' },
+    special_title_screen: { cat:'special', label:'Title Screen' },
+    special_day1_wakeup: { cat:'special', label:'Day 1 Wakeup' },
+    special_act1_to_act2: { cat:'special', label:'Act 1->2' },
+    special_act2_to_act3: { cat:'special', label:'Act 2->3' },
+    special_gameover_bankrupt: { cat:'special', label:'Game Over: Bankrupt' },
+    special_gameover_burnout: { cat:'special', label:'Game Over: Burnout' },
+    special_win_ending: { cat:'special', label:'Win Ending' },
+    special_credits_bg: { cat:'special', label:'Credits' },
+    special_narrator_intro: { cat:'special', label:'Narrator Intro' },
+    special_montage_hustling: { cat:'special', label:'Hustling Montage' },
+    event_newspaper_headline: { cat:'special', label:'Newspaper Headline' },
+    location_pawnshop_exterior: { cat:'ui', label:'Pawn Shop Exterior' },
+    location_nightclub_exterior: { cat:'ui', label:'Nightclub Exterior' },
+    location_brokerage_exterior: { cat:'ui', label:'Brokerage Exterior' },
+    ui_subway_map: { cat:'ui', label:'Subway Map' },
+    ui_inventory_panel: { cat:'ui', label:'Inventory Panel' },
+    ui_stock_portfolio: { cat:'ui', label:'Stock Portfolio' },
+    special_epilogue_slideshow: { cat:'ui', label:'Epilogue Slideshow' },
+};
+
+const ITEM_DATA = {
+    casio_watch:{cat:'item',label:'Casio Watch',size:32},busted_walkman:{cat:'item',label:'Busted Walkman',size:32},
+    leather_jacket:{cat:'item',label:'Leather Jacket',size:32},vhs_collection:{cat:'item',label:'VHS Collection',size:32},
+    boombox:{cat:'item',label:'Boombox',size:32},gold_chain:{cat:'item',label:'Gold Chain',size:32},
+    baseball_cards:{cat:'item',label:'Baseball Cards',size:32},typewriter:{cat:'item',label:'Typewriter',size:32},
+    guitar:{cat:'item',label:'Guitar',size:32},polaroid_camera:{cat:'item',label:'Polaroid Camera',size:32},
+    air_jordans:{cat:'item',label:'Air Jordans',size:32},record_player:{cat:'item',label:'Record Player',size:32},
+    comic_books:{cat:'item',label:'Comic Books',size:32},denim_jacket:{cat:'item',label:'Denim Jacket',size:32},
+    radio:{cat:'item',label:'Radio',size:32},roller_blades:{cat:'item',label:'Roller Blades',size:32},
+    flannel_shirt:{cat:'item',label:'Flannel Shirt',size:32},vhs_player:{cat:'item',label:'VHS Player',size:32},
+    board_game:{cat:'item',label:'Board Game',size:32},sunglasses:{cat:'item',label:'Sunglasses',size:32},
+    mixtape:{cat:'item',label:'Mixtape',size:32},whiskey_bottle:{cat:'item',label:'Whiskey (Gift)',size:32},
+    cherry_coke_can:{cat:'item',label:'Cherry Coke (Gift)',size:32},jazz_cd:{cat:'item',label:'Jazz CD (Gift)',size:32},
+    flowers:{cat:'item',label:'Flowers (Gift)',size:32},cigar:{cat:'item',label:'Cigar (Gift)',size:32},
+    leather_gloves:{cat:'item',label:'Leather Gloves (Gift)',size:32},tea_set:{cat:'item',label:'Tea Set (Gift)',size:32},
+    champagne_bottle:{cat:'item',label:'Champagne (Gift)',size:32},pager:{cat:'item',label:'Pager',size:32},
+    ring_box_closed:{cat:'item',label:'Ring Box (Closed)',size:64},ring_box_open:{cat:'item',label:'Ring Box (Open)',size:64},
+    wallet:{cat:'item',label:'Wallet',size:32},cash_envelope:{cat:'item',label:'Cash Envelope',size:32},
+    newspaper:{cat:'item',label:'Newspaper',size:32},icon_cash:{cat:'item',label:'UI: Cash',size:32},
+    icon_reputation:{cat:'item',label:'UI: Rep Star',size:32},icon_charm:{cat:'item',label:'UI: Charm Heart',size:32},
+    icon_stress:{cat:'item',label:'UI: Stress Bolt',size:32},
+};
+
+const AUDIO_DATA = {
+    music_title:{type:'music',label:'Title Music'},music_act1:{type:'music',label:'Act 1 Music'},
+    music_act2:{type:'music',label:'Act 2 Music'},music_act3:{type:'music',label:'Act 3 Music'},
+    music_gameover:{type:'music',label:'Game Over Music'},music_win:{type:'music',label:'Win Music'},
+    music_casino:{type:'music',label:'Casino Music'},
+    amb_morning:{type:'ambient',label:'Ambient: Morning'},amb_noon:{type:'ambient',label:'Ambient: Noon'},
+    amb_night:{type:'ambient',label:'Ambient: Night'},amb_cafe:{type:'ambient',label:'Ambient: Cafe'},
+    amb_mall:{type:'ambient',label:'Ambient: Mall'},amb_subway:{type:'ambient',label:'Ambient: Subway'},
+    amb_downtown:{type:'ambient',label:'Ambient: Downtown'},amb_park:{type:'ambient',label:'Ambient: Park'},
+    amb_pawnshop:{type:'ambient',label:'Ambient: Pawn Shop'},amb_nightclub:{type:'ambient',label:'Ambient: Nightclub'},
+    amb_brokerage:{type:'ambient',label:'Ambient: Brokerage'},amb_restaurant:{type:'ambient',label:'Ambient: Restaurant'},
+    amb_casino:{type:'ambient',label:'Ambient: Casino'},amb_rain:{type:'ambient',label:'Ambient: Rain'},
+    amb_home_night:{type:'ambient',label:'Ambient: Home Night'},
+    sfx_click:{type:'sfx',label:'Click'},sfx_cash_register:{type:'sfx',label:'Cash Register'},
+    sfx_coin:{type:'sfx',label:'Coin'},sfx_cash_gain:{type:'sfx',label:'Cash Gain'},
+    sfx_cash_lose:{type:'sfx',label:'Cash Lose'},sfx_dialog_open:{type:'sfx',label:'Dialog Open'},
+    sfx_dialog_choice:{type:'sfx',label:'Dialog Choice'},sfx_dialog_advance:{type:'sfx',label:'Dialog Advance'},
+    sfx_notify_good:{type:'sfx',label:'Notify Good'},sfx_notify_bad:{type:'sfx',label:'Notify Bad'},
+    sfx_deal_success:{type:'sfx',label:'Deal Success'},sfx_deal_fail:{type:'sfx',label:'Deal Fail'},
+    sfx_stock_buy:{type:'sfx',label:'Stock Buy'},sfx_stock_sell:{type:'sfx',label:'Stock Sell'},
+    sfx_car_engine:{type:'sfx',label:'Car Engine'},sfx_door_open:{type:'sfx',label:'Door Open'},
+    sfx_door_close:{type:'sfx',label:'Door Close'},sfx_paper_sign:{type:'sfx',label:'Paper Sign'},
+    sfx_cherry_coke:{type:'sfx',label:'Cherry Coke'},sfx_boombox_start:{type:'sfx',label:'Boombox Start'},
+    sfx_footsteps:{type:'sfx',label:'Footsteps'},sfx_subway_arrive:{type:'sfx',label:'Subway Arrive'},
+    sfx_champagne_pop:{type:'sfx',label:'Champagne Pop'},sfx_heartbeat:{type:'sfx',label:'Heartbeat'},
+    sfx_phone_ring:{type:'sfx',label:'Phone Ring'},sfx_typing:{type:'sfx',label:'Typing'},
+    sfx_sax_riff:{type:'sfx',label:'Sax Riff'},sfx_crowd_cheer:{type:'sfx',label:'Crowd Cheer'},
+    sfx_slot_spin:{type:'sfx',label:'Slot Spin'},sfx_slot_win:{type:'sfx',label:'Slot Win'},
+    sfx_slot_lose:{type:'sfx',label:'Slot Lose'},sfx_card_flip:{type:'sfx',label:'Card Flip'},
+    sfx_dice_roll:{type:'sfx',label:'Dice Roll'},sfx_roulette_spin:{type:'sfx',label:'Roulette Spin'},
+    sfx_win_fanfare:{type:'sfx',label:'Win Fanfare'},sfx_lose_sting:{type:'sfx',label:'Lose Sting'},
+};
+
+// ============================================
+// SCAN STATE: which files actually exist
+// ============================================
+let foundImages = {};   // id -> true/false
+let foundAudio = {};    // id -> true/false
+
+function getImagePath(id) {
+    return ITEM_DATA[id] ? IMAGE_BASE + 'items/' + id + '.png' : IMAGE_BASE + id + '.png';
+}
+function getAudioPath(id) { return AUDIO_BASE + id + '.mp3'; }
+
+// Probe a URL via fetch HEAD or Image load
+function probeImage(url) {
+    return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => resolve(true);
+        img.onerror = () => resolve(false);
+        img.src = url + '?t=' + Date.now();
+    });
+}
+function probeAudio(url) {
+    return new Promise(resolve => {
+        const a = new Audio();
+        a.preload = 'metadata';
+        a.onloadedmetadata = () => { a.src = ''; resolve(true); };
+        a.oncanplay = () => { a.src = ''; resolve(true); };
+        a.onerror = () => resolve(false);
+        a.src = url + '?t=' + Date.now();
+        // Timeout fallback in case neither event fires
+        setTimeout(() => resolve(false), 3000);
+    });
+}
+
+async function scanAll() {
+    document.querySelector('.scan-btn').textContent = 'Scanning...';
+    const imgProbes = Object.keys(SCENE_DATA).concat(Object.keys(ITEM_DATA)).map(async id => {
+        foundImages[id] = await probeImage(getImagePath(id));
+    });
+    const audProbes = Object.keys(AUDIO_DATA).map(async id => {
+        foundAudio[id] = await probeAudio(getAudioPath(id));
+    });
+    await Promise.all([...imgProbes, ...audProbes]);
+    document.querySelector('.scan-btn').textContent = 'Scan Files';
+    updateStats();
+    renderImageGrid(curImgFilter, curImgSearch);
+    renderAudioGrid(curAudFilter, curAudSearch);
+    toast('Scan complete');
+}
+
+// ============================================
+// PROMPT DATA
+// ============================================
+const STYLE_PREFIX = 'Pixel art, 16:9 aspect ratio, retro pixel art style reminiscent of early 1990s LucasArts adventure games. Limited but expressive color palette. Dithering for gradients. No anti-aliasing.';
+const PALETTES = {
+    'Warm Morning': 'Golden amber (#D4A03C), soft peach (#E8B87A), dusty rose (#C4826E). Shadow: muted olive (#6B6340), soft brown (#5A4A2A). Accent: pale sky blue (#8CB4D0), warm white (#F0E4C8).',
+    'Harsh Noon': 'Bright white (#F0F0E0), vivid blue sky (#4A90D0), hot yellow (#E8D040). Shadow: cool grey (#5A5A6A). Accent: red (#D04030), taxi yellow (#E8C020).',
+    'Moody Night': 'Deep navy (#0A0A2E), midnight blue (#1A1A3E), charcoal (#1A1A1A). Warm: amber streetlight (#D09030). Accent: cold TV blue (#6080C0), moonlight silver (#A0B0C0).',
+    'Neon Nightlife': 'Neon pink (#E040A0), electric blue (#4080E0), laser green (#40D060), purple (#8040D0). Base: black (#0A0A0A), dark purple (#2A0A3E). Accent: gold (#D0A020).',
+    'Desaturated/Drained': 'Washed grey (#8A8A8A), cold blue-grey (#6A7A8A), sickly green (#6A7A5A). Minimal warmth.',
+};
+const CHARACTERS = {
+    MC:'MC: Young man, early 20s, dark hair, sunglasses. Casual 90s attire or better dressed later.',
+    Diana:'Diana: Early 20s, auburn messy hair, headphones around neck, band tee, denim jacket.',
+    Vinnie:'Vinnie: 50s Italian, thick mustache going grey, rumpled button-down, rolled sleeves.',
+    Marcus:'Marcus: Early 30s, slicked hair, white shirt, suspenders, loosened tie, pager.',
+    Ray:'Ray: Late 20s, wiry, leather jacket, dark jeans, aviator sunglasses, toothpick.',
+    MrsChen:'Mrs. Chen: 40s Asian woman, navy blazer, pearl earrings, elegant glasses.',
+    Tony:'Tony: 40s, stocky, gold chains, open silk shirt, rings, broad smile.',
+};
+
+let scenePromptTexts = {};
+async function loadScenePrompts() {
+    try {
+        const text = await (await fetch('SCENE_PROMPTS.md')).text();
+        for (const block of text.split(/####\s+/)) {
+            const m = block.match(/`([a-z_]+)\.png`/);
+            if (!m) continue;
+            const id = m[1];
+            const p = block.match(/\*\*Image prompt\*\*:\s*([\s\S]*?)(?=\n\n\*\*|$)/);
+            const c = block.match(/\*\*Character note\*\*:\s*([\s\S]*?)(?=\n\n\*\*|$)/);
+            const mo = block.match(/\*\*Mood\/palette\*\*:\s*([\s\S]*?)(?=\n\n\*\*|$)/);
+            scenePromptTexts[id] = { prompt: p?p[1].trim():'', charNote: c?c[1].trim():'', moodNote: mo?mo[1].trim():'' };
+        }
+        // Item table rows
+        const rows = text.match(/\|\s*`([a-z_]+)\.png`\s*\|\s*([^|]+)\|/g) || [];
+        rows.forEach(row => {
+            const m2 = row.match(/`([a-z_]+)\.png`\s*\|\s*(.+)\|/);
+            if (m2) scenePromptTexts[m2[1]] = { prompt: m2[2].trim(), charNote:'', moodNote:'' };
+        });
+    } catch(e) { console.warn('SCENE_PROMPTS.md not found'); }
+}
+
+function guessMood(id) {
+    if (id.match(/night|_night/)) return 'Moody Night';
+    if (id.match(/morning/)) return 'Warm Morning';
+    if (id.match(/noon|daytime/)) return 'Harsh Noon';
+    if (id.match(/nightclub|casino|neon|celebration/)) return 'Neon Nightlife';
+    if (id.match(/gameover|burnout|bankrupt|breakup|betrayal|lose/)) return 'Desaturated/Drained';
+    if (id.match(/win|proposal|confession|success|grateful/)) return 'Warm Morning';
+    if (id.match(/evening/)) return 'Moody Night';
+    return 'Warm Morning';
+}
+function guessChars(id) {
+    const c = [];
+    if (id.match(/diana|coffee_date|dinner_date|proposal|win_ending/)) c.push('Diana');
+    if (id.match(/vinnie|pawnshop_selling/)) c.push('Vinnie');
+    if (id.match(/marcus|stock_t|brokerage_intro/)) c.push('Marcus');
+    if (id.match(/^ray_/)) c.push('Ray');
+    if (id.match(/chen/)) c.push('MrsChen');
+    if (id.match(/tony/)) c.push('Tony');
+    if (id.match(/activity_|special_day1|act\d_to|gameover|win_ending/)) c.push('MC');
+    return c;
+}
+
+function buildFullPrompt(id) {
+    const isItem = !!ITEM_DATA[id];
+    const raw = scenePromptTexts[id] || {};
+    if (isItem) {
+        const sz = ITEM_DATA[id].size;
+        const desc = raw.prompt || ITEM_DATA[id].label + ', pixel art sprite.';
+        const full = `Pixel art sprite, ${sz}x${sz} pixels, transparent background, retro 1990s game item icon style. ${desc}`;
+        return { full, sections: { 'Style': `Pixel art sprite, ${sz}x${sz}px, transparent bg`, 'Description': desc } };
+    }
+    const mood = guessMood(id);
+    const palette = PALETTES[mood] || '';
+    const desc = raw.prompt || (SCENE_DATA[id]||{}).label + ', 1990s aesthetic.';
+    const full = `${STYLE_PREFIX}\n\nColor palette (${mood}): ${palette}\n\n${desc}`;
+    const sections = { 'Style prefix': STYLE_PREFIX, 'Mood & palette': `${mood}: ${palette}`, 'Scene prompt': desc };
+    if (raw.charNote) sections['Character note (reference only)'] = raw.charNote;
+    const chars = guessChars(id);
+    return { full, sections, chars };
+}
+
+// ============================================
+// UI HELPERS
+// ============================================
+function toast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg; el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 2000);
+}
+function updateStats() {
+    const ti = Object.keys(SCENE_DATA).length + Object.keys(ITEM_DATA).length;
+    const fi = Object.values(foundImages).filter(Boolean).length;
+    const ta = Object.keys(AUDIO_DATA).length;
+    const fa = Object.values(foundAudio).filter(Boolean).length;
+    document.getElementById('stat-images').innerHTML = `Images: <b>${fi}</b> / <span>${ti}</span>`;
+    document.getElementById('stat-audio').innerHTML = `Audio: <b>${fa}</b> / <span>${ta}</span>`;
+}
+
+// ============================================
+// IMAGE TAB
+// ============================================
+let curImgFilter = 'all', curImgSearch = '';
+
+function renderImageGrid(filter, search) {
+    const grid = document.getElementById('image-grid');
+    grid.innerHTML = '';
+    const all = { ...SCENE_DATA, ...ITEM_DATA };
+    Object.entries(all).forEach(([id, data]) => {
+        const isFound = !!foundImages[id];
+        if (filter && filter !== 'all') {
+            if (filter === 'found' && !isFound) return;
+            if (filter === 'missing' && isFound) return;
+            if (!['found','missing'].includes(filter) && data.cat !== filter) return;
+        }
+        if (search && !data.label.toLowerCase().includes(search) && !id.includes(search)) return;
+
+        const isItem = !!ITEM_DATA[id];
+        const path = getImagePath(id);
+        const card = document.createElement('div');
+        card.className = 'image-card' + (isFound ? ' found' : '');
+        card.innerHTML = `
+            <div class="card-preview${isItem ? ' square' : ''}" onclick="pickAndCopyImage('${id}')">
+                ${isFound
+                    ? `<img src="${path}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt="${id}"><div class="placeholder" style="display:none"><span class="plus">+</span></div>`
+                    : `<div class="placeholder"><span class="plus">+</span><span class="plus-text">${isItem ? data.size+'x'+data.size : '1280x720'}</span></div>`}
+            </div>
+            <div class="card-info">
+                <div class="card-title">${id}.png</div>
+                <div class="card-category">${data.label}</div>
+                <div class="card-path">${path}</div>
+                <div class="card-status">${isFound ? 'Found on disk' : 'Missing — drop file at path above'}</div>
+                <div class="card-actions">
+                    <button class="card-btn" onclick="pickAndCopyImage('${id}')">+ Add file</button>
+                    <button class="card-btn" onclick="copyPath('${path}')">Copy path</button>
+                </div>
+            </div>`;
+        grid.appendChild(card);
+    });
+}
+
+// When user clicks +: they pick a file, we offer a download with the correct filename
+// so they can drop it into shared_assets/images/
+function pickAndCopyImage(id) {
+    const picker = document.getElementById('file-picker-img');
+    picker.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const isItem = !!ITEM_DATA[id];
+        const targetName = id + '.png';
+        const targetFolder = isItem ? 'shared_assets/images/items/' : 'shared_assets/images/';
+
+        // Create a download link with the correct filename
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = targetName;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        toast(`Saved as "${targetName}" — move it to ${targetFolder}`);
+        picker.value = '';
+
+        // Mark as found optimistically and show preview
+        foundImages[id] = true;
+        updateStats();
+        renderImageGrid(curImgFilter, curImgSearch);
+    };
+    picker.click();
+}
+
+function copyPath(path) {
+    navigator.clipboard.writeText(path).then(() => toast('Path copied'));
+}
+
+// ============================================
+// AUDIO TAB
+// ============================================
+let curAudFilter = 'all', curAudSearch = '';
+let playingAudio = null, playingId = null;
+
+function renderAudioGrid(filter, search) {
+    const grid = document.getElementById('audio-grid');
+    grid.innerHTML = '';
+    Object.entries(AUDIO_DATA).forEach(([id, data]) => {
+        const isFound = !!foundAudio[id];
+        if (filter && filter !== 'all') {
+            if (filter === 'found' && !isFound) return;
+            if (filter === 'missing' && isFound) return;
+            if (!['found','missing'].includes(filter) && data.type !== filter) return;
+        }
+        if (search && !data.label.toLowerCase().includes(search) && !id.includes(search)) return;
+
+        const path = getAudioPath(id);
+        const isPlaying = playingId === id;
+        const card = document.createElement('div');
+        card.className = 'audio-card' + (isFound ? ' found' : '');
+        card.innerHTML = `
+            <div class="audio-icon ${data.type} ${isPlaying?'playing':''}" onclick="togglePlay('${id}')" title="${isFound ? 'Play' : 'Not found'}">
+                ${isPlaying ? '&#9646;&#9646;' : data.type==='music' ? '&#9835;' : data.type==='ambient' ? '&#127754;' : '&#9654;'}
+            </div>
+            <div class="audio-info">
+                <div class="audio-name">${data.label}</div>
+                <div class="audio-type">${data.type}${isFound ? ' &middot; <span style="color:var(--green)">found</span>' : ''}</div>
+                <div class="audio-path">${path}</div>
+            </div>
+            <button class="audio-file-btn" onclick="pickAndCopyAudio('${id}')">+ Add</button>
+            <button class="audio-file-btn" onclick="copyPath('${path}')">Path</button>`;
+        grid.appendChild(card);
+    });
+}
+
+function togglePlay(id) {
+    if (playingId === id && playingAudio) {
+        playingAudio.pause(); playingAudio = null; playingId = null;
+        renderAudioGrid(curAudFilter, curAudSearch); return;
+    }
+    if (playingAudio) { playingAudio.pause(); playingAudio = null; }
+    const path = getAudioPath(id);
+    try {
+        playingAudio = new Audio(path);
+        playingId = id;
+        playingAudio.play().catch(() => { toast('Cannot play — file missing'); playingId = null; });
+        playingAudio.onended = () => { playingId = null; playingAudio = null; renderAudioGrid(curAudFilter, curAudSearch); };
+        renderAudioGrid(curAudFilter, curAudSearch);
+    } catch(e) { toast('Playback error'); }
+}
+
+function pickAndCopyAudio(id) {
+    const picker = document.getElementById('file-picker-aud');
+    picker.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const targetName = id + '.mp3';
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url; a.download = targetName; a.click();
+        URL.revokeObjectURL(url);
+        toast(`Saved as "${targetName}" — move it to shared_assets/audio/`);
+        picker.value = '';
+        foundAudio[id] = true;
+        updateStats();
+        renderAudioGrid(curAudFilter, curAudSearch);
+    };
+    picker.click();
+}
+
+// ============================================
+// PROMPT TAB
+// ============================================
+let curPrmFilter = 'all', curPrmSearch = '';
+
+function renderPromptGrid(filter, search) {
+    const grid = document.getElementById('prompt-grid');
+    grid.innerHTML = '';
+    const allIds = [...Object.keys(SCENE_DATA), ...Object.keys(ITEM_DATA)];
+    allIds.forEach(id => {
+        const isItem = !!ITEM_DATA[id];
+        const data = SCENE_DATA[id] || ITEM_DATA[id];
+        if (filter === 'scene' && isItem) return;
+        if (filter === 'item' && !isItem) return;
+        if (search && !data.label.toLowerCase().includes(search) && !id.includes(search)) return;
+
+        const { full, sections, chars } = buildFullPrompt(id);
+        let sectionsHtml = '';
+        Object.entries(sections).forEach(([label, text]) => {
+            const sid = `p_${id}_${label.replace(/\W/g,'_')}`;
+            sectionsHtml += `<div class="prompt-section"><div class="prompt-label">${label}</div><div class="prompt-text" id="${sid}">${text}<button class="copy-btn" onclick="copyEl(event,'${sid}')">Copy</button></div></div>`;
+        });
+        let charHtml = '';
+        if (chars && chars.length) {
+            charHtml = `<div class="prompt-section"><div class="prompt-label">Character refs (for steering — do not paste)</div><div class="prompt-note">${chars.map(c => CHARACTERS[c]||c).join('<br>')}</div></div>`;
+        }
+        const fid = `full_${id}`;
+        const card = document.createElement('div');
+        card.className = 'prompt-card';
+        card.innerHTML = `
+            <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+                <div class="prompt-title">${id}.png — ${data.label}</div>
+                <div class="prompt-badge">${isItem ? 'ITEM' : data.cat}</div>
+            </div>
+            <div class="prompt-body">
+                ${sectionsHtml}${charHtml}
+                <div class="prompt-section"><div class="prompt-label">Full prompt (copy this)</div><div class="prompt-text" id="${fid}">${full}<button class="copy-btn" onclick="copyEl(event,'${fid}')">Copy</button></div></div>
+            </div>`;
+        grid.appendChild(card);
+    });
+}
+
+function copyEl(e, elId) {
+    e.stopPropagation();
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const text = el.innerText.replace(/Copy(ed)?!?\s*$/,'').trim();
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = el.querySelector('.copy-btn');
+        btn.textContent = 'Copied!'; btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+    });
+}
+
+// ============================================
+// WIRING
+// ============================================
+document.querySelectorAll('.nav-tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.nav-tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('panel-' + t.dataset.tab).classList.add('active');
+}));
+document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('[data-filter]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); curImgFilter = b.dataset.filter; renderImageGrid(curImgFilter, curImgSearch);
+}));
+document.getElementById('search-images').addEventListener('input', e => { curImgSearch = e.target.value.toLowerCase(); renderImageGrid(curImgFilter, curImgSearch); });
+
+document.querySelectorAll('[data-filter-audio]').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('[data-filter-audio]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); curAudFilter = b.dataset.filterAudio; renderAudioGrid(curAudFilter, curAudSearch);
+}));
+document.getElementById('search-audio').addEventListener('input', e => { curAudSearch = e.target.value.toLowerCase(); renderAudioGrid(curAudFilter, curAudSearch); });
+
+document.querySelectorAll('[data-filter-prompt]').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('[data-filter-prompt]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); curPrmFilter = b.dataset.filterPrompt; renderPromptGrid(curPrmFilter, curPrmSearch);
+}));
+document.getElementById('search-prompts').addEventListener('input', e => { curPrmSearch = e.target.value.toLowerCase(); renderPromptGrid(curPrmFilter, curPrmSearch); });
+
+// ============================================
+// INIT
+// ============================================
+async function init() {
+    await loadScenePrompts();
+    renderImageGrid('all','');
+    renderAudioGrid('all','');
+    renderPromptGrid('all','');
+    updateStats();
+    // Auto-scan on load
+    scanAll();
+}
+init();
+</script>
+</body>
+</html>
