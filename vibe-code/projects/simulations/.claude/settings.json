@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(wc -l \"c:/Users/mvlor/OneDrive/Documents/mlorenz.xyz/vibe-code/projects/simulations/3d_printer_nozzle_sim/js/\"*.js \"c:/Users/mvlor/OneDrive/Documents/mlorenz.xyz/vibe-code/projects/simulations/3d_printer_nozzle_sim/index.html\" \"c:/Users/mvlor/OneDrive/Documents/mlorenz.xyz/vibe-code/projects/simulations/3d_printer_nozzle_sim/style.css\")",
-      "Bash(node -c js/constants.js)",
-      "Bash(node -c js/physics.js)"
-    ]
-  }
-}

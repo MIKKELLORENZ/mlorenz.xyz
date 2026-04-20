@@ -5,11 +5,11 @@ document.addEventListener('DOMContentLoaded', function() {
             id: "cosmo_lab",
             title: "Cosmo Lab",
             description: "An interactive simulation of particle interactions and physics.",
-            thumbnail: "../vibe-code/projects/simulations/cosmo_lab/thumbnail.jpg",
+            thumbnail: "../vibe-code/simulations/cosmo_lab/thumbnail.jpg",
             category: "simulations",
             tags: ["photons","physics","javascript","planets"],
             date: "2025-04-26",
-            path: "projects/simulations/cosmo_lab/index.html",
+            path: "simulations/cosmo_lab/index.html",
             type: "iframe" 
         },
 
@@ -17,11 +17,11 @@ document.addEventListener('DOMContentLoaded', function() {
             id: "moon_lander",
             title: "Moon Lander",
             description: "A game where you control a lunar module and try to land safely on the moon.",
-            thumbnail: "../vibe-code/projects/games/moon_lander/thumbnail.jpg",
+            thumbnail: "../vibe-code/games/moon_lander/thumbnail.jpg",
             category: "games",
             tags: ["space", "physics", "javascript"],
             date: "2024-05-20",
-            path: "projects/games/moon_lander/moon_lander.html",
+            path: "games/moon_lander/moon_lander.html",
             type: "iframe" // Explicitly set to load in iframe
         },
 
@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', function() {
             category: "games",
             tags: ["stocks", "trading", "simulation", "javascript"],
             date: "2026-04-20",
-            path: "projects/games/stockman/index.html",
+            path: "games/stockman/index.html",
             type: "iframe"
         },
 
@@ -41,11 +41,11 @@ document.addEventListener('DOMContentLoaded', function() {
             id: "craft_note",
             title: "Craft Note",
             description: "",
-            thumbnail: "../vibe-code/projects/utilities/craft_note/thumbnail.jpg",
+            thumbnail: "../vibe-code/utilities/craft_note/thumbnail.jpg",
             category: "utilities",
             tags: ["sticky notes", "productivity", "javascript", "utilities","note-taking","to-do", "to do"],
             date: "2025-07-17",
-            path: "projects/utilities/craft_note/index.html",
+            path: "utilities/craft_note/index.html",
             type: "iframe" // Explicitly set to load in iframe
         },
 
@@ -53,11 +53,11 @@ document.addEventListener('DOMContentLoaded', function() {
             id: "hdr_enhance",
             title: "HDR Enhance",
             description: "Enhance your images with simulated High Dynamic Range (HDR) processing.",
-            thumbnail: "../vibe-code/projects/utilities/hdr_enhance/thumbnail.jpg",
+            thumbnail: "../vibe-code/utilities/hdr_enhance/thumbnail.jpg",
             category: "utilities",
             tags: ["image processing", "hdr", "javascript"],
             date: "2025-06-29",
-            path: "projects/utilities/hdr_enhance/index.html",
+            path: "utilities/hdr_enhance/index.html",
             type: "iframe" // Explicitly set to load in iframe
         },
 
@@ -65,11 +65,11 @@ document.addEventListener('DOMContentLoaded', function() {
             id: "random_password_generator",
             title: "Random Password Generator",
             description: "Generate secure random passwords with customizable options.",
-            thumbnail: "../vibe-code/projects/utilities/random_password_generator/thumbnail.jpg",
+            thumbnail: "../vibe-code/utilities/random_password_generator/thumbnail.jpg",
             category: "utilities",
             tags: ["security", "passwords", "javascript"],
             date: "2025-05-03",
-            path: "projects/utilities/random_password_generator/index.html",
+            path: "utilities/random_password_generator/index.html",
             type: "iframe" // Explicitly set to load in iframe
         },
 
@@ -78,11 +78,11 @@ document.addEventListener('DOMContentLoaded', function() {
             id: "stick_balance",
             title: "Stick Balance",
             description: "Physics simulation of balancing a stick with reinforcement learning.",
-            thumbnail: "../vibe-code/projects/simulations/stick_balance/thumbnail.jpg",
+            thumbnail: "../vibe-code/simulations/stick_balance/thumbnail.jpg",
             category: "simulations",
             tags: ["physics", "balance", "reinforcement learning"],
             date: "2025-01-10",
-            path: "projects/simulations/stick_balance/index.html",
+            path: "simulations/stick_balance/index.html",
             type: "iframe"
         },
 
@@ -90,11 +90,11 @@ document.addEventListener('DOMContentLoaded', function() {
             id: "bayesian_optimization",
             title: "Bayesian Optimization (Interactive)",
             description: "Don't know Bayesian Optimization? Learn it by brewing coffee!",
-            thumbnail: "../vibe-code/projects/simulations/bayesian_optimization/thumbnail.jpg",
+            thumbnail: "../vibe-code/simulations/bayesian_optimization/thumbnail.jpg",
             category: "simulations",
             tags: ["bayesian optimization", "machine learning", "interactive","coffee","optimization"],
             date: "2025-07-23",
-            path: "projects/simulations/bayesian_optimization/index.html",
+            path: "simulations/bayesian_optimization/index.html",
             type: "iframe"
         },
 
@@ -102,11 +102,11 @@ document.addEventListener('DOMContentLoaded', function() {
             id: "laser_cut_puzzle_maker",
             title: "Laser Cut Puzzle Maker",
             description: "Create custom laser-cut ready puzzles from your images.",
-            thumbnail: "../vibe-code/projects/utilities/laser_cut_puzzle_maker/thumbnail.jpg",
+            thumbnail: "../vibe-code/utilities/laser_cut_puzzle_maker/thumbnail.jpg",
             category: "utilities",
             tags: ["laser cut", "puzzle", "image processing"],
             date: "2025-12-27",
-            path: "projects/utilities/laser_cut_puzzle_maker/index.html",
+            path: "utilities/laser_cut_puzzle_maker/index.html",
             type: "iframe"
         },
 
@@ -114,11 +114,11 @@ document.addEventListener('DOMContentLoaded', function() {
             id: "laser_cutter_studio",
             title: "Laser Cutter Studio",
             description: "Browser-based laser cutter / engraver with layers, dithering, GCode export and preview.",
-            thumbnail: "../vibe-code/projects/utilities/laser_cutter_studio/thumbnail.png",
+            thumbnail: "../vibe-code/utilities/laser_cutter_studio/thumbnail.png",
             category: "utilities",
             tags: ["laser cut", "engraver", "gcode", "grbl", "lightburn", "dithering", "svg", "pdf"],
             date: "2026-04-17",
-            path: "projects/utilities/laser_cutter_studio/index.html",
+            path: "utilities/laser_cutter_studio/index.html",
             type: "iframe"
         },
 
@@ -126,11 +126,11 @@ document.addEventListener('DOMContentLoaded', function() {
             id: "audio_studio",
             title: "Audio Studio",
             description: "A browser-based digital audio workstation with multi-track recording, EQ, compression, effects, and more.",
-            thumbnail: "../vibe-code/projects/utilities/audio_studio/thumbnail.png",
+            thumbnail: "../vibe-code/utilities/audio_studio/thumbnail.png",
             category: "utilities",
             tags: ["audio", "music", "DAW", "recording", "mixing", "EQ", "compressor", "effects"],
             date: "2026-04-04",
-            path: "projects/utilities/audio_studio/index.html",
+            path: "utilities/audio_studio/index.html",
             type: "iframe"
         },
 
@@ -277,7 +277,10 @@ document.addEventListener('DOMContentLoaded', function() {
         card.classList.add('card');
         card.innerHTML = `
             <div class="card-image">
-                <img src="${project.thumbnail}" alt="${project.title}">
+                <img src="${project.thumbnail}" alt="${project.title}" loading="lazy" onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
+                <div class="card-image-fallback" hidden>
+                    <span>${project.title}</span>
+                </div>
             </div>
             <div class="card-content">
                 <h3 class="card-title">${project.title}</h3>

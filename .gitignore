@@ -1,10 +1,10 @@
 *.keras
 *.pyc
-vibe-code/projects/games/mall_walk/generate-cert.ps1
-vibe-code/projects/games/mall_walk/key.pem
-vibe-code/projects/games/mall_walk/cert.pem
+vibe-code/games/mall_walk/generate-cert.ps1
+vibe-code/games/mall_walk/key.pem
+vibe-code/games/mall_walk/cert.pem
 
 # Sound candidates (bulk downloaded for selection)
-vibe-code/projects/shared_assets/audio/candidates/
+vibe-code/shared_assets/audio/candidates/
 
-vibe-code/projects/games/just_a_man/
+vibe-code/games/just_a_man/
