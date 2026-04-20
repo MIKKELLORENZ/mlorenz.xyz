@@ -62,6 +62,30 @@ document.addEventListener('DOMContentLoaded', function() {
         },
 
         {
+            id: "everdiff",
+            title: "EverDiff",
+            description: "A browser-based document diff tool with multi-pane comparison, exports, and granular word, character, line, or sentence diffs.",
+            thumbnail: "../vibe-code/utilities/everdiff/thumbnail.jpg",
+            category: "utilities",
+            tags: ["diff", "documents", "text comparison", "javascript", "export"],
+            date: "2026-04-20",
+            path: "utilities/everdiff/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "live_wallpaper",
+            title: "Matrix Live Wallpaper",
+            description: "A customizable Matrix-style live wallpaper with visual presets, color modes, performance controls, and screenshots.",
+            thumbnail: "../vibe-code/utilities/live_wallpaper/thumbnail.jpg",
+            category: "utilities",
+            tags: ["wallpaper", "matrix", "animation", "canvas", "customization"],
+            date: "2026-04-20",
+            path: "utilities/live_wallpaper/index.html",
+            type: "iframe"
+        },
+
+        {
             id: "random_password_generator",
             title: "Random Password Generator",
             description: "Generate secure random passwords with customizable options.",

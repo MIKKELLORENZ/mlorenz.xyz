@@ -45,10 +45,11 @@
         display:flex;
         align-items:center;
         margin:0 auto 2rem;
+        gap:.35rem;
     }
     #password{
         width:100%;
-        padding:.9rem 2.8rem .9rem 1rem; /* Added right padding */
+        padding:.9rem 1rem;
         font-size:clamp(.85rem,3vw,.95rem);
         border:none;
         border-radius:.8rem;
@@ -58,11 +59,22 @@
         font-weight:500;
     }
     #password:focus{outline:none;}
+    #password::placeholder{
+        color:rgba(228,255,254,.72);
+        letter-spacing:normal;
+    }
 
-    /* copy button */
-    #copyBtn{
+    .password-actions{
         position:absolute;
         right:.35rem;
+        display:flex;
+        align-items:center;
+        gap:.15rem;
+    }
+
+    /* action buttons */
+    #copyBtn,
+    #toggleVisibilityBtn{
         background:transparent;
         border:none;
         color:#fff;
@@ -71,10 +83,23 @@
         align-items:center;
         justify-content:center;
         padding:.45rem;
-        transition:transform .15s ease;
+        border-radius:.6rem;
+        transition:transform .15s ease, background .18s ease, opacity .18s ease;
     }
-    #copyBtn svg{width:1.1rem;height:1.1rem;pointer-events:none;}
-    #copyBtn:hover{transform:scale(1.15);}
+    #copyBtn svg,
+    #toggleVisibilityBtn svg{width:1.1rem;height:1.1rem;pointer-events:none;}
+    #copyBtn:hover,
+    #toggleVisibilityBtn:hover{
+        transform:scale(1.08);
+        background:rgba(255,255,255,.12);
+    }
+    #copyBtn:disabled,
+    #toggleVisibilityBtn:disabled{
+        cursor:not-allowed;
+        opacity:.45;
+        transform:none;
+        background:transparent;
+    }
 
     /* =====  SETTINGS  ===== */
     .settings{
@@ -162,20 +187,26 @@
     /* =====  Toast (copy feedback)  ===== */
     .toast{
         position:fixed;
-        bottom:1.4rem;
+        top:1.25rem;
         left:50%;
-        transform:translateX(-50%) translateY(120%);
-        background:#000a;
-        padding:.65rem 1.25rem;
-        border-radius:.7rem;
-        font-size:.85rem;
-        letter-spacing:.03em;
+        transform:translateX(-50%) translateY(-14px) scale(.96);
+        background:rgba(9,12,20,.82);
+        border:1px solid rgba(255,255,255,.14);
+        box-shadow:0 14px 32px rgba(5,8,16,.28);
+        backdrop-filter:blur(16px);
+        padding:.7rem 1rem;
+        border-radius:999px;
+        font-size:.82rem;
+        font-weight:500;
+        letter-spacing:.02em;
         opacity:0;
-        transition:opacity .3s ease,transform .3s ease;
+        pointer-events:none;
+        transition:opacity .2s ease,transform .2s ease;
+        z-index:20;
     }
     .toast.show{
         opacity:1;
-        transform:translateX(-50%) translateY(0);
+        transform:translateX(-50%) translateY(0) scale(1);
     }
 </style>
 </head>
@@ -186,12 +217,22 @@
 
     <!-- Password display & copy -->
     <div class="password-wrapper">
-        <input id="password" type="text" readonly>
-        <button id="copyBtn" aria-label="Copy password">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zM19 5H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/>
-            </svg>
-        </button>
+        <input id="password" type="password" readonly placeholder="Generating password...">
+        <div class="password-actions">
+            <button id="toggleVisibilityBtn" aria-label="Show password" aria-pressed="false">
+                <svg id="visibilityOnIcon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 5c5.23 0 9.27 3.11 11 7-1.73 3.89-5.77 7-11 7S2.73 15.89 1 12c1.73-3.89 5.77-7 11-7zm0 2C7.89 7 4.55 9.28 3.08 12 4.55 14.72 7.89 17 12 17s7.45-2.28 8.92-5C19.45 9.28 16.11 7 12 7zm0 2.5A2.5 2.5 0 1 1 9.5 12 2.5 2.5 0 0 1 12 9.5z"/>
+                </svg>
+                <svg id="visibilityOffIcon" viewBox="0 0 24 24" fill="currentColor" hidden>
+                    <path d="m3.28 2 18.44 18.44-1.41 1.41-3.03-3.03A11.78 11.78 0 0 1 12 20c-5.23 0-9.27-3.11-11-7a13.87 13.87 0 0 1 4.13-4.89L1.86 3.41 3.28 2zm4.7 7.53A4.5 4.5 0 0 0 12 16.5c.72 0 1.4-.17 2-.46l-1.61-1.61A2.5 2.5 0 0 1 9.57 11.6zM12 5c5.23 0 9.27 3.11 11 7a13.9 13.9 0 0 1-4.36 5l-1.45-1.45A11.1 11.1 0 0 0 20.92 12C19.45 9.28 16.11 7 12 7c-1 0-1.94.14-2.82.4L7.53 5.75A12.9 12.9 0 0 1 12 5zm-.36 3.02A4.5 4.5 0 0 1 15.98 12c0 .44-.06.87-.18 1.28l-4.44-4.44c.09-.28.19-.55.28-.82z"/>
+                </svg>
+            </button>
+            <button id="copyBtn" aria-label="Copy password">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zM19 5H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/>
+                </svg>
+            </button>
+        </div>
     </div>
 
     <!-- Settings -->
@@ -227,6 +268,9 @@ const sets = {
 /* ===== DOM SHORTCUTS ===== */
 const passEl       = document.getElementById('password'),
       copyBtn      = document.getElementById('copyBtn'),
+    toggleVisibilityBtn = document.getElementById('toggleVisibilityBtn'),
+    visibilityOnIcon = document.getElementById('visibilityOnIcon'),
+    visibilityOffIcon = document.getElementById('visibilityOffIcon'),
       lengthEl     = document.getElementById('length'),
       uppercaseEl  = document.getElementById('uppercase'),
       lowercaseEl  = document.getElementById('lowercase'),
@@ -235,6 +279,66 @@ const passEl       = document.getElementById('password'),
       // charsEl      = document.getElementById('characters'), // This element doesn't exist in the provided HTML
       toast        = document.getElementById('toast'),
       refreshBtn   = document.getElementById('refreshBtn'); // Added refresh button shortcut
+
+let toastTimer = null;
+
+function showToast(message){
+    toast.textContent = message;
+    toast.classList.add('show');
+
+    if (toastTimer) {
+        clearTimeout(toastTimer);
+    }
+
+    toastTimer = setTimeout(() => {
+        toast.classList.remove('show');
+    }, 1150);
+}
+
+function setPasswordVisibility(isVisible){
+    passEl.type = isVisible ? 'text' : 'password';
+    toggleVisibilityBtn.setAttribute('aria-label', isVisible ? 'Hide password' : 'Show password');
+    toggleVisibilityBtn.setAttribute('aria-pressed', String(isVisible));
+    visibilityOnIcon.hidden = isVisible;
+    visibilityOffIcon.hidden = !isVisible;
+}
+
+function updateActionState(enabled){
+    copyBtn.disabled = !enabled;
+    toggleVisibilityBtn.disabled = !enabled;
+}
+
+async function copyPasswordToClipboard(password, message){
+    if (!password) {
+        return false;
+    }
+
+    try {
+        await navigator.clipboard.writeText(password);
+        showToast(message);
+        return true;
+    } catch (error) {
+        const fallbackInput = document.createElement('textarea');
+        fallbackInput.value = password;
+        fallbackInput.setAttribute('readonly', '');
+        fallbackInput.style.position = 'absolute';
+        fallbackInput.style.left = '-9999px';
+        document.body.appendChild(fallbackInput);
+        fallbackInput.select();
+
+        try {
+            document.execCommand('copy');
+            showToast(message);
+            return true;
+        } catch (fallbackError) {
+            console.error('Failed to copy password:', fallbackError || error);
+            showToast('Clipboard unavailable');
+            return false;
+        } finally {
+            document.body.removeChild(fallbackInput);
+        }
+    }
+}
 
 function generatePassword(){
     let length = +lengthEl.value || 32; // Default to 32 if value is invalid
@@ -253,18 +357,14 @@ function generatePassword(){
 
     /* guard: at least one set must be selected */
     if(!pool){
-        passEl.value = "⚠️ Select at least 1 option";
-        // Disable copy button if no options selected
-        copyBtn.disabled = true;
-        copyBtn.style.cursor = 'not-allowed';
-        copyBtn.style.opacity = '0.5';
-        return;
-    } else {
-        // Re-enable copy button if options are selected
-        copyBtn.disabled = false;
-        copyBtn.style.cursor = 'pointer';
-        copyBtn.style.opacity = '1';
+        passEl.value = "";
+        passEl.placeholder = "Select at least 1 option";
+        updateActionState(false);
+        return null;
     }
+
+    updateActionState(true);
+    passEl.placeholder = "";
 
 
     let pass = "";
@@ -283,19 +383,16 @@ function generatePassword(){
         }
     }
     passEl.value = pass;
+    return pass;
 }
 
 /* Copy to clipboard + toast feedback */
 copyBtn.addEventListener('click',()=>{
-    if (passEl.value && !passEl.value.startsWith("⚠️")) { // Only copy if there's a valid password
-        navigator.clipboard.writeText(passEl.value).then(()=>{
-            toast.classList.add('show');
-            setTimeout(()=>toast.classList.remove('show'),1700);
-        }).catch(err => {
-            console.error('Failed to copy password: ', err);
-            // Optionally show an error toast here
-        });
-    }
+    copyPasswordToClipboard(passEl.value, 'Password copied');
+});
+
+toggleVisibilityBtn.addEventListener('click',()=>{
+    setPasswordVisibility(passEl.type === 'password');
 });
 
 /* Regenerate when settings change */
@@ -308,11 +405,17 @@ lengthEl.addEventListener('change', generatePassword);
 
 
 /* Regenerate when refresh button is clicked */
-refreshBtn.addEventListener('click', generatePassword);
+refreshBtn.addEventListener('click', async ()=>{
+    const password = generatePassword();
+    if (password) {
+        await copyPasswordToClipboard(password, 'New password copied');
+    }
+});
 
 
 /* First run – generate password on load */
 generatePassword();
+setPasswordVisibility(false);
 </script>
 
 </body>
