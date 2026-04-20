@@ -13,39 +13,50 @@ class RocketEngine {
         this.GRAVITY = 30;           // Pixels per second squared (reduced for better gameplay)
         this.SCALE = 1;              // 1 meter = 1 pixel (adjustable)
         this.AIR_RESISTANCE = 0.0005; // Drag coefficient (reduced)
-        
+
         // Simulation state
         this.rocket = null;
         this.level = null;
         this.time = 0;
         this.running = false;
         this.finished = false;
-        
+
+        // Time scale for speed controls
+        this.timeScale = 1;
+
         // Preview components (for launchpad view)
         this.previewComponents = [];
-        
+
         // Camera
         this.camera = {
             x: 0,
             y: 0,
             targetY: 0,
-            smoothing: 0.1
+            smoothing: 0.1,
+            zoom: 1,
+            targetZoom: 1
         };
-        
+
+        // Screen shake
+        this.screenShake = { intensity: 0, decay: 0.92 };
+
+        // Flash overlay
+        this.flashAlpha = 0;
+
         // Particles for effects
         this.particles = [];
-        
+
         // Trail for rocket path
         this.trail = [];
-        
+
         // Animation frame
         this.animationId = null;
         this.lastTime = 0;
-        
+
         // Orbit tracking
         this.orbitTime = 0;
         this.maxAltitudeReached = 0;
-        
+
         // Results callback
         this.onFinish = null;
         
@@ -319,6 +330,11 @@ class RocketEngine {
         // Reset camera to start position
         this.camera.y = 0;
         this.camera.targetY = 0;
+        this.camera.zoom = 1;
+        this.camera.targetZoom = 1;
+        this.screenShake.intensity = 0;
+        this.flashAlpha = 0;
+        this.timeScale = 1;
     }
     
     calculateFuelBonus(components) {
@@ -363,7 +379,12 @@ class RocketEngine {
     setLevel(level) {
         this.level = level;
     }
-    
+
+    // Set simulation speed
+    setTimeScale(scale) {
+        this.timeScale = Math.max(0.25, Math.min(4, scale));
+    }
+
     // Start simulation
     start() {
         this.running = true;
@@ -384,7 +405,8 @@ class RocketEngine {
         if (!this.running) return;
         
         const currentTime = performance.now();
-        const deltaTime = Math.min((currentTime - this.lastTime) / 1000, 0.05); // Cap at 50ms
+        const rawDt = Math.min((currentTime - this.lastTime) / 1000, 0.05); // Cap at 50ms
+        const deltaTime = rawDt * this.timeScale;
         this.lastTime = currentTime;
         
         this.update(deltaTime);
@@ -834,6 +856,11 @@ class RocketEngine {
         // The camera.y is a vertical offset that's subtracted during rendering
         this.camera.targetY = Math.min(0, -(rocketCenterY - this.canvas.height * 0.65));
         this.camera.y += (this.camera.targetY - this.camera.y) * this.camera.smoothing;
+
+        // Smooth zoom based on altitude
+        const altitude = this.groundY - this.rocket.y;
+        this.camera.targetZoom = Math.max(0.45, 1 - altitude / 2500);
+        this.camera.zoom += (this.camera.targetZoom - this.camera.zoom) * 0.03;
     }
     
     checkCollisions() {
@@ -955,7 +982,18 @@ class RocketEngine {
         const rocketHeight = this.rocket.components.filter(c => !c.separated).reduce((h, c) => h + (c.size?.height || 30) + 2, 0);
         const x = this.rocket.x;
         const y = this.rocket.y + rocketHeight / 2;  // Center of rocket
-        
+
+        // Screen shake
+        this.screenShake.intensity = 20;
+
+        // Flash overlay
+        this.flashAlpha = 0.8;
+
+        // Slow-motion effect on crash
+        const savedTimeScale = this.timeScale;
+        this.timeScale = 0.25;
+        setTimeout(() => { this.timeScale = savedTimeScale; }, 800);
+
         // Main fireball
         for (let i = 0; i < 80; i++) {
             const angle = Math.random() * Math.PI * 2;
@@ -1216,12 +1254,31 @@ class RocketEngine {
     // Rendering
     render() {
         const ctx = this.ctx;
-        
+
         // Clear canvas
         ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        
+
         // Save state and apply camera transform
         ctx.save();
+
+        // Apply zoom centered on canvas center
+        const zoom = this.camera.zoom;
+        if (zoom !== 1) {
+            ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
+            ctx.scale(zoom, zoom);
+            ctx.translate(-this.canvas.width / 2, -this.canvas.height / 2);
+        }
+
+        // Apply screen shake
+        if (this.screenShake.intensity > 0.5) {
+            const shakeX = (Math.random() - 0.5) * 2 * this.screenShake.intensity;
+            const shakeY = (Math.random() - 0.5) * 2 * this.screenShake.intensity;
+            ctx.translate(shakeX, shakeY);
+            this.screenShake.intensity *= this.screenShake.decay;
+        } else {
+            this.screenShake.intensity = 0;
+        }
+
         ctx.translate(0, this.camera.y);
         
         // Draw background gradient (sky layers)
@@ -1249,8 +1306,18 @@ class RocketEngine {
         if (this.rocket && !this.rocket.crashed) {
             this.drawRocket();
         }
-        
+
         ctx.restore();
+
+        // Flash overlay (drawn outside camera transform)
+        if (this.flashAlpha > 0.01) {
+            ctx.save();
+            ctx.globalAlpha = this.flashAlpha;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            ctx.restore();
+            this.flashAlpha *= 0.88;
+        }
     }
     
     drawSeparatedStages() {
@@ -1306,11 +1373,29 @@ class RocketEngine {
     
     drawTrail() {
         const ctx = this.ctx;
-        
+
+        // Draw gradient trail line connecting points
+        if (this.trail.length > 1) {
+            for (let i = 1; i < this.trail.length; i++) {
+                const prev = this.trail[i - 1];
+                const curr = this.trail[i];
+                const progress = i / this.trail.length;
+                ctx.strokeStyle = `rgba(0, 212, 255, ${curr.alpha * progress * 0.6})`;
+                ctx.lineWidth = 1 + progress * 2.5;
+                ctx.beginPath();
+                ctx.moveTo(prev.x, prev.y);
+                ctx.lineTo(curr.x, curr.y);
+                ctx.stroke();
+            }
+        }
+
+        // Glow dots at intervals
         this.trail.forEach((point, i) => {
-            ctx.fillStyle = `rgba(0, 212, 255, ${point.alpha * 0.5})`;
+            if (i % 3 !== 0) return;
+            const progress = i / this.trail.length;
+            ctx.fillStyle = `rgba(0, 212, 255, ${point.alpha * progress * 0.4})`;
             ctx.beginPath();
-            ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+            ctx.arc(point.x, point.y, 1.5 + progress * 2, 0, Math.PI * 2);
             ctx.fill();
         });
     }
@@ -1869,11 +1954,25 @@ class RocketEngine {
             }
         }
         
+        // Component activity data
+        const components = this.rocket.components.map(c => ({
+            name: c.name,
+            category: c.category,
+            active: c.active,
+            burned: c.burned,
+            separated: c.separated,
+            burnProgress: c.totalBurnTime > 0 ? 1 - (c.burnTimeRemaining / c.totalBurnTime) : 0,
+            burnTimeRemaining: c.burnTimeRemaining,
+            totalBurnTime: c.totalBurnTime
+        }));
+
         return {
             altitude: altitude + 'm',
             velocity: Math.round(speed) + ' m/s',
             time: this.time.toFixed(1) + 's',
-            distanceToTarget
+            distanceToTarget,
+            components,
+            timeScale: this.timeScale
         };
     }
 }

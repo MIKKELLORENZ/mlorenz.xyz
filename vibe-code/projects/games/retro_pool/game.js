@@ -184,13 +184,14 @@ class RetroPoolGame {
         this.player1Type = null; // 'solids' or 'stripes' (assigned on first legal pocket)
         this.player2Type = null;
         this.shotPower = 0;
-        this.isChargingShot = false;
+        this.aimState = 'idle'; // 'idle' | 'charging'
         this.gameStarted = false;
         this.pocketedThisTurn = false;
         this.turnMessage = '';
         this.turnMessageTimer = 0;
         this.firstBallPocketed = false;
         this._foulThisTurn = false;
+        this.lastPowerThreshold = 0;
 
         // Settings
         this.settings = {
@@ -232,10 +233,17 @@ class RetroPoolGame {
 
         // Aiming system
         this.aimingAngle = 0;
-        this.isAiming = false;
+        this._aimVelocity = 0; // current angular velocity for acceleration
+        this._keyAimHoldTime = 0; // how long A/D has been held (seconds)
+
+        // Top-down view
+        this.topDownActive = false;
+        this.topDownLerp = 0;
+        this.savedCameraForTopDown = null;
 
         // Mouse drag camera
         this.isDraggingCamera = false;
+        this._mouseButtonsDown = 0;
         this.lastMouseX = 0;
         this.lastMouseY = 0;
 
@@ -328,6 +336,8 @@ class RetroPoolGame {
 
         this.stopMenuAnimation();
         this.startGameView();
+        // Position camera behind the cue ball at game start
+        this.positionCameraBehindCue();
         this.showTurnMessage(`PLAYER ${this.currentPlayer}'S TURN`);
     }
 
@@ -373,7 +383,7 @@ class RetroPoolGame {
         if (el) {
             el.textContent = msg;
             el.classList.add('visible');
-            setTimeout(() => el.classList.remove('visible'), 2000);
+            setTimeout(() => el.classList.remove('visible'), 1500);
         }
     }
 
@@ -537,7 +547,7 @@ class RetroPoolGame {
         // Mouse wheel zoom
         document.addEventListener('wheel', (event) => {
             if (this.gameState !== 'playing') return;
-            if (this.povActive) return; // Don't zoom during POV
+            if (this.topDownActive) return;
             event.preventDefault();
             const delta = event.deltaY * 0.005 * this.settings.zoomSpeed;
             this.cameraRadiusTarget = Math.min(12, Math.max(2.5, this.cameraRadiusTarget + delta));
@@ -548,7 +558,13 @@ class RetroPoolGame {
 
         window.addEventListener('blur', () => {
             this.isDraggingCamera = false;
-            if (this.isChargingShot) this.takeShot();
+            this._mouseButtonsDown = 0;
+            if (this.aimState === 'charging') this.takeShot();
+        });
+
+        document.addEventListener('pointerleave', () => {
+            this.isDraggingCamera = false;
+            this._mouseButtonsDown = 0;
         });
 
         // Init audio on first user interaction
@@ -1343,6 +1359,29 @@ class RetroPoolGame {
                 isCueBall: index === 0
             };
 
+            // Add ball number sprite (skip cue ball)
+            if (cfg.number > 0) {
+                const numCanvas = document.createElement('canvas');
+                numCanvas.width = 32;
+                numCanvas.height = 32;
+                const ctx = numCanvas.getContext('2d');
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(16, 16, 12, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 18px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(String(cfg.number), 16, 17);
+                const tex = new THREE.CanvasTexture(numCanvas);
+                const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+                const sprite = new THREE.Sprite(spriteMat);
+                sprite.scale.set(r * 1.2, r * 1.2, 1);
+                sprite.position.set(0, r * 0.3, 0);
+                ball.add(sprite);
+            }
+
             this.scene.add(ball);
             this.balls.push(ball);
         });
@@ -1458,6 +1497,34 @@ class RetroPoolGame {
         this.aimLine.visible = false;
         this.aimLine.computeLineDistances();
         this.scene.add(this.aimLine);
+
+        // Ghost ball at predicted impact point
+        const ghostGeo = new THREE.SphereGeometry(this.physics.ballRadius, 8, 6);
+        const ghostMat = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.3,
+            wireframe: true
+        });
+        this.ghostBall = new THREE.Mesh(ghostGeo, ghostMat);
+        this.ghostBall.visible = false;
+        this.scene.add(this.ghostBall);
+
+        // Target ball trajectory line (shows where hit ball will go)
+        const targetMaterial = new THREE.LineDashedMaterial({
+            color: 0xff6644,
+            dashSize: 0.04,
+            gapSize: 0.04,
+            transparent: true,
+            opacity: 0.4
+        });
+        const targetGeometry = new THREE.BufferGeometry();
+        const targetPositions = new Float32Array(6);
+        targetGeometry.setAttribute('position', new THREE.BufferAttribute(targetPositions, 3));
+        this.targetLine = new THREE.Line(targetGeometry, targetMaterial);
+        this.targetLine.visible = false;
+        this.targetLine.computeLineDistances();
+        this.scene.add(this.targetLine);
     }
 
     // ── Camera ──────────────────────────────────────────────────────────────
@@ -1469,11 +1536,52 @@ class RetroPoolGame {
         const dtScale = this._deltaSec * 60;
         const damp = 1 - Math.pow(1 - this.cameraDamp, dtScale);
 
+        // Top-down view override
+        if (this.topDownActive || this.topDownLerp > 0.01) {
+            const targetLerp = this.topDownActive ? 1 : 0;
+            this.topDownLerp += (targetLerp - this.topDownLerp) * 0.10;
+            if (Math.abs(this.topDownLerp - targetLerp) < 0.005) this.topDownLerp = targetLerp;
+
+            const t = this.topDownLerp;
+
+            // Normal camera position
+            const normX = Math.cos(this.cameraAngle) * this.cameraRadius;
+            const normZ = Math.sin(this.cameraAngle) * this.cameraRadius;
+            const normY = this.cameraHeight;
+
+            // Top-down position
+            const topX = 0;
+            const topZ = 0.01; // slight offset to avoid gimbal lock
+            const topY = 10;
+
+            const camX = normX + (topX - normX) * t;
+            const camZ = normZ + (topZ - normZ) * t;
+            const camY = normY + (topY - normY) * t;
+
+            // FOV handling
+            if (this.camera && Math.abs(this.camera.fov - this.fovTarget) > 0.01) {
+                this.camera.fov += (this.fovTarget - this.camera.fov) * damp;
+                this.camera.updateProjectionMatrix();
+            }
+
+            this.camera.position.set(camX, camY, camZ);
+            this.camera.lookAt(this.cameraTarget);
+
+            // Still update underlying orbit angles when not fully top-down
+            if (t < 0.99) {
+                let adiff1 = ((this.cameraAngleTarget - this.cameraAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+                this.cameraAngle += adiff1 * damp;
+                this.cameraRadius += (this.cameraRadiusTarget - this.cameraRadius) * damp;
+                this.cameraHeight += (this.cameraHeightTarget - this.cameraHeight) * damp;
+            }
+            return;
+        }
+
         // If POV is active or restoring, blend between normal and POV views
         if (this.povActive || this.povLerp > 0.01) {
             // Lerp POV blend factor
             const targetLerp = this.povActive ? 1 : 0;
-            this.povLerp += (targetLerp - this.povLerp) * 0.06;
+            this.povLerp += (targetLerp - this.povLerp) * 0.10;
             if (Math.abs(this.povLerp - targetLerp) < 0.005) this.povLerp = targetLerp;
 
             // POV target: low behind the cue ball looking along the aim
@@ -1515,7 +1623,9 @@ class RetroPoolGame {
             }
         }
 
-        this.cameraAngle += (this.cameraAngleTarget - this.cameraAngle) * damp;
+        // Shortest-path angular interpolation (avoids spinning the long way around)
+        let angleDiff = ((this.cameraAngleTarget - this.cameraAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        this.cameraAngle += angleDiff * damp;
         this.cameraRadius += (this.cameraRadiusTarget - this.cameraRadius) * damp;
         this.cameraHeight += (this.cameraHeightTarget - this.cameraHeight) * damp;
 
@@ -1557,23 +1667,25 @@ class RetroPoolGame {
     }
 
     // ── Aiming ──────────────────────────────────────────────────────────────
-    startAiming() {
-        if (this.balls[0].userData.isMoving) return;
-        if (this.areBallsMoving()) return;
-
-        this.isAiming = true;
-        this.cue.visible = true;
-        if (this.aimLine) this.aimLine.visible = true;
-        this.updateCueAiming();
+    cancelAiming() {
+        this.aimState = 'idle';
+        this.shotPower = 0;
+        this.lastPowerThreshold = 0;
+        this.cue.visible = false;
+        if (this.aimLine) this.aimLine.visible = false;
+        if (this.ghostBall) this.ghostBall.visible = false;
+        if (this.targetLine) this.targetLine.visible = false;
+        this.povActive = false;
+        this.updateUI();
     }
 
     updateCueAiming() {
-        if (!this.isAiming) return;
-
         const cueBall = this.balls[0];
         if (!cueBall || cueBall.userData.isPocketed) return;
 
-        const distance = 0.15 + (this.isChargingShot ? this.shotPower * 0.003 : 0);
+        // Base distance: cue tip (at local x=0.92) must sit just behind the ball
+        // So origin needs to be ~1.0 behind ball center, plus pullback when charging
+        const distance = 1.0 + (this.aimState === 'charging' ? this.shotPower * 0.004 : 0);
 
         const x = cueBall.position.x - Math.cos(this.aimingAngle) * distance;
         const z = cueBall.position.z - Math.sin(this.aimingAngle) * distance;
@@ -1585,7 +1697,7 @@ class RetroPoolGame {
     }
 
     updateAimLine() {
-        if (!this.aimLine || !this.isAiming) return;
+        if (!this.aimLine) return;
 
         const cueBall = this.balls[0];
         const dir = new THREE.Vector3(
@@ -1671,13 +1783,26 @@ class RetroPoolGame {
         );
 
         let second = end.clone();
+        let hitBallRef = null;
         if (hitPoint && hitNormal) {
             if (hitType === 'cushion') {
                 const reflect = dir.clone().sub(hitNormal.clone().multiplyScalar(2 * dir.dot(hitNormal)));
                 second = hitPoint.clone().add(reflect.multiplyScalar(0.6));
             } else {
+                // Cue ball deflection after hitting target ball
                 const objectDir = hitNormal.clone().multiplyScalar(-1);
                 second = hitPoint.clone().add(objectDir.multiplyScalar(0.5));
+                // Find which ball was hit for target trajectory
+                for (let i = 1; i < this.balls.length; i++) {
+                    const ball = this.balls[i];
+                    if (ball.userData.isPocketed) continue;
+                    const dx = ball.position.x - hitPoint.x;
+                    const dz = ball.position.z - hitPoint.z;
+                    if (Math.sqrt(dx * dx + dz * dz) < this.physics.ballRadius * 2.5) {
+                        hitBallRef = ball;
+                        break;
+                    }
+                }
             }
         }
 
@@ -1697,6 +1822,39 @@ class RetroPoolGame {
         this.aimLine.geometry.attributes.position.needsUpdate = true;
         this.aimLine.computeLineDistances();
         this.aimLine.visible = true;
+
+        // Ghost ball at impact point
+        if (this.ghostBall) {
+            if (hitPoint && hitType === 'ball') {
+                this.ghostBall.position.set(hitPoint.x, y, hitPoint.z);
+                this.ghostBall.visible = true;
+            } else {
+                this.ghostBall.visible = false;
+            }
+        }
+
+        // Target ball trajectory line
+        if (this.targetLine) {
+            if (hitBallRef && hitPoint) {
+                const targetDir = new THREE.Vector3(
+                    hitBallRef.position.x - hitPoint.x,
+                    0,
+                    hitBallRef.position.z - hitPoint.z
+                ).normalize();
+                const tPos = this.targetLine.geometry.attributes.position.array;
+                tPos[0] = hitBallRef.position.x;
+                tPos[1] = y;
+                tPos[2] = hitBallRef.position.z;
+                tPos[3] = hitBallRef.position.x + targetDir.x * 0.8;
+                tPos[4] = y;
+                tPos[5] = hitBallRef.position.z + targetDir.z * 0.8;
+                this.targetLine.geometry.attributes.position.needsUpdate = true;
+                this.targetLine.computeLineDistances();
+                this.targetLine.visible = true;
+            } else {
+                this.targetLine.visible = false;
+            }
+        }
     }
 
     areBallsMoving() {
@@ -1708,48 +1866,56 @@ class RetroPoolGame {
         switch (event.code) {
             case 'Escape':
                 if (this.gameState === 'playing') {
-                    this.pauseGame();
+                    if (this.aimState === 'charging') {
+                        this.cancelAiming();
+                    } else {
+                        this.pauseGame();
+                    }
                 } else if (this.gameState === 'paused') {
                     this.resumeGame();
                 }
                 break;
 
             case 'Space':
-                if (this.gameState === 'playing' && !this.isChargingShot && !this.areBallsMoving()) {
+                if (this.gameState !== 'playing') break;
+                event.preventDefault();
+                if (this.aimState !== 'charging' && !this.areBallsMoving()) {
                     this.startChargingShot();
                 }
-                event.preventDefault();
                 break;
 
             case 'KeyR':
                 if (this.gameState === 'playing') this.resetCamera();
                 break;
 
-            case 'KeyA':
-            case 'ArrowLeft':
-                if (this.gameState === 'playing' && this.isAiming) {
-                    this.aimingAngle -= 0.03 * this.settings.aimSensitivity;
-                    this.updateCueAiming();
-                }
-                break;
-
-            case 'KeyD':
-            case 'ArrowRight':
-                if (this.gameState === 'playing' && this.isAiming) {
-                    this.aimingAngle += 0.03 * this.settings.aimSensitivity;
-                    this.updateCueAiming();
-                }
-                break;
+            // A/D aim handled continuously in animate loop (frame-rate independent)
 
             case 'KeyQ':
-                if (this.gameState === 'playing') {
+                if (this.gameState === 'playing' && !this.topDownActive) {
                     this.cameraAngleTarget -= 0.1 * this.settings.cameraSensitivity;
                 }
                 break;
 
             case 'KeyE':
-                if (this.gameState === 'playing') {
+                if (this.gameState === 'playing' && !this.topDownActive) {
                     this.cameraAngleTarget += 0.1 * this.settings.cameraSensitivity;
+                }
+                break;
+
+            case 'KeyT':
+                if (this.gameState === 'playing') {
+                    this.topDownActive = !this.topDownActive;
+                    if (this.topDownActive) {
+                        this.savedCameraForTopDown = {
+                            angle: this.cameraAngleTarget,
+                            radius: this.cameraRadiusTarget,
+                            height: this.cameraHeightTarget
+                        };
+                    } else if (this.savedCameraForTopDown) {
+                        this.cameraAngleTarget = this.savedCameraForTopDown.angle;
+                        this.cameraRadiusTarget = this.savedCameraForTopDown.radius;
+                        this.cameraHeightTarget = this.savedCameraForTopDown.height;
+                    }
                 }
                 break;
         }
@@ -1758,7 +1924,7 @@ class RetroPoolGame {
     handleKeyUp(event) {
         switch (event.code) {
             case 'Space':
-                if (this.gameState === 'playing' && this.isChargingShot) {
+                if (this.gameState === 'playing' && this.aimState === 'charging') {
                     this.takeShot();
                 }
                 event.preventDefault();
@@ -1770,31 +1936,39 @@ class RetroPoolGame {
         if (this.gameState !== 'playing') return;
         this.updateMousePosition(event);
 
-        if (this.isDraggingCamera) {
+        if (this.isDraggingCamera && !this.topDownActive) {
             const deltaX = event.clientX - this.lastMouseX;
             const deltaY = event.clientY - this.lastMouseY;
             this.lastMouseX = event.clientX;
             this.lastMouseY = event.clientY;
 
-            this.cameraAngleTarget -= deltaX * 0.005 * this.settings.cameraSensitivity;
+            // Cap deltas to prevent camera spinning from large jumps
+            const cappedDX = Math.max(-40, Math.min(40, deltaX));
+            const cappedDY = Math.max(-40, Math.min(40, deltaY));
+
+            this.cameraAngleTarget -= cappedDX * 0.008 * this.settings.cameraSensitivity;
             this.cameraHeightTarget = Math.min(
-                6,
-                Math.max(1.5, this.cameraHeightTarget + deltaY * 0.01 * this.settings.cameraSensitivity)
+                8,
+                Math.max(1.2, this.cameraHeightTarget + cappedDY * 0.015 * this.settings.cameraSensitivity)
             );
             return;
         }
 
+        // Always update aim when not dragging camera
         this.updateAimFromMouse();
     }
 
     handleMouseDown(event) {
+        this._mouseButtonsDown |= (1 << event.button);
         if (this.gameState !== 'playing') return;
 
         // Right-click or middle-click = orbit camera
         if (event.button === 2 || event.button === 1) {
-            this.isDraggingCamera = true;
-            this.lastMouseX = event.clientX;
-            this.lastMouseY = event.clientY;
+            if (!this.topDownActive) {
+                this.isDraggingCamera = true;
+                this.lastMouseX = event.clientX;
+                this.lastMouseY = event.clientY;
+            }
             return;
         }
 
@@ -1802,15 +1976,15 @@ class RetroPoolGame {
         if (this.areBallsMoving()) return;
         if (this.balls[0].userData.isPocketed) return;
 
+        // Single click+hold: start charging immediately
+        // (cue/aim are already visible from passive aiming)
         this.updateMousePosition(event);
-        this.isAiming = true;
-        this.cue.visible = true;
-        if (this.aimLine) this.aimLine.visible = true;
         this.updateAimFromMouse();
         this.startChargingShot();
     }
 
     handleMouseUp(event) {
+        this._mouseButtonsDown &= ~(1 << event.button);
         if (this.gameState !== 'playing') return;
 
         if (event.button === 2 || event.button === 1) {
@@ -1820,7 +1994,7 @@ class RetroPoolGame {
 
         if (event.button !== 0) return;
 
-        if (this.isChargingShot) {
+        if (this.aimState === 'charging') {
             this.takeShot();
         }
     }
@@ -1851,15 +2025,37 @@ class RetroPoolGame {
         if (this.raycaster.ray.intersectPlane(plane, hitPoint)) {
             const dx = hitPoint.x - cueBall.position.x;
             const dz = hitPoint.z - cueBall.position.z;
-            if (dx !== 0 || dz !== 0) {
+            if (dx * dx + dz * dz > 0.0001) {
                 const targetAngle = Math.atan2(dz, dx);
-                if (this.isAiming) {
-                    const t = Math.min(1, 0.18 * this.settings.aimSensitivity);
-                    this.aimingAngle = this.lerpAngle(this.aimingAngle, targetAngle, t);
-                    this.updateCueAiming();
-                } else {
+
+                // Calculate angular distance (shortest path)
+                let angleDelta = ((targetAngle - this.aimingAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+
+                // Non-linear response: small movements are very precise, large movements are faster
+                // Uses a power curve: tiny deltas (fine aim) are damped heavily,
+                // while large deltas (repositioning) respond more quickly
+                const absDelta = Math.abs(angleDelta);
+                const sign = angleDelta >= 0 ? 1 : -1;
+
+                // Sensitivity factor based on state
+                const sens = this.settings.aimSensitivity;
+                const baseSens = this.aimState === 'charging' ? 0.04 * sens : 0.12 * sens;
+
+                // Power curve: exponent > 1 makes small movements more precise
+                // At small deltas (<0.1 rad ≈ 6°): very gentle movement
+                // At large deltas (>0.5 rad ≈ 30°): proportionally faster
+                const normalizedDelta = Math.min(absDelta / Math.PI, 1);
+                const curved = Math.pow(normalizedDelta, 1.6); // 1.6 = fine-control exponent
+                const step = sign * curved * Math.PI * baseSens;
+
+                // Apply with clamping so we don't overshoot
+                if (Math.abs(step) > absDelta) {
                     this.aimingAngle = targetAngle;
+                } else {
+                    this.aimingAngle += step;
                 }
+
+                this.updateCueAiming();
             }
         }
     }
@@ -1869,14 +2065,11 @@ class RetroPoolGame {
         if (this.areBallsMoving()) return;
         if (this.balls[0].userData.isPocketed) return;
 
-        if (!this.isAiming) {
-            this.startAiming();
-        }
-
-        this.isChargingShot = true;
+        this.aimState = 'charging';
         this.shotPower = 0;
+        this.lastPowerThreshold = 0;
 
-        if (this.settings.povCloseup) {
+        if (this.settings.povCloseup && !this.topDownActive) {
             // Save current camera for POV transition
             this.savedCameraAngle = this.cameraAngle;
             this.savedCameraRadius = this.cameraRadius;
@@ -1892,20 +2085,21 @@ class RetroPoolGame {
     }
 
     takeShot() {
-        if (!this.isChargingShot) return;
+        if (this.aimState !== 'charging') return;
 
         const power = this.shotPower;
-        this.isChargingShot = false;
-        this.isAiming = false;
+        this.aimState = 'idle';
         this.cue.visible = false;
         if (this.aimLine) this.aimLine.visible = false;
+        if (this.ghostBall) this.ghostBall.visible = false;
+        if (this.targetLine) this.targetLine.visible = false;
         this.pocketedThisTurn = false;
         this._foulThisTurn = false;
 
         // Begin restoring camera from POV
         this.povActive = false;
 
-        if (power < 3) {
+        if (power < 1) {
             this.updateUI();
             return;
         }
@@ -1913,6 +2107,8 @@ class RetroPoolGame {
         this.sound.playHit(power / 100);
 
         const cueBall = this.balls[0];
+        // With realistic friction (low drag, dominant rolling), balls coast longer
+        // so we need slightly less initial force than before
         const force = power * 0.003;
 
         cueBall.userData.velocity.x = Math.cos(this.aimingAngle) * force;
@@ -1924,13 +2120,36 @@ class RetroPoolGame {
     }
 
     resetCamera() {
-        this.cameraAngle = Math.PI;
-        this.cameraRadius = 5;
-        this.cameraHeight = 3;
         this.cameraAngleTarget = Math.PI;
         this.cameraRadiusTarget = 5;
         this.cameraHeightTarget = 3;
         this.cameraTarget.set(0, 1, 0);
+    }
+
+    // Position camera behind the cue ball, looking along the aim direction
+    // Uses targets so the existing damping provides a smooth transition
+    positionCameraBehindCue() {
+        const cueBall = this.balls[0];
+        if (!cueBall || cueBall.userData.isPocketed) return;
+
+        // Calculate a point behind the cue ball (opposite to aim direction)
+        const behindDist = 3.0;
+        const behindX = cueBall.position.x - Math.cos(this.aimingAngle) * behindDist;
+        const behindZ = cueBall.position.z - Math.sin(this.aimingAngle) * behindDist;
+
+        // Camera angle from table center (0,0) to the behind-point
+        const targetAngle = Math.atan2(behindZ, behindX);
+
+        // Set targets — the damp system smoothly transitions
+        this.cameraAngleTarget = targetAngle;
+        this.cameraRadiusTarget = 5;
+        this.cameraHeightTarget = 3;
+        this.cameraTarget.set(0, 1, 0);
+
+        // Exit top-down if active
+        if (this.topDownActive) {
+            this.topDownActive = false;
+        }
     }
 
     // ── Game State Management ───────────────────────────────────────────────
@@ -1957,12 +2176,18 @@ class RetroPoolGame {
         this.firstBallPocketed = false;
         this.pocketedThisTurn = false;
         this._foulThisTurn = false;
-        this.isChargingShot = false;
-        this.isAiming = false;
+        this.aimState = 'idle';
         this.shotPower = 0;
+        this.lastPowerThreshold = 0;
+        this.topDownActive = false;
+        this.topDownLerp = 0;
+        this.povActive = false;
+        this.povLerp = 0;
 
         if (this.cue) this.cue.visible = false;
         if (this.aimLine) this.aimLine.visible = false;
+        if (this.ghostBall) this.ghostBall.visible = false;
+        if (this.targetLine) this.targetLine.visible = false;
 
         this.resetBalls();
         this.resumeGame();
@@ -1999,7 +2224,7 @@ class RetroPoolGame {
             const velocity = ball.userData.velocity;
             const speed = velocity.length();
 
-            if (speed > 0.0015) {
+            if (speed > 0.0005) {
                 anyBallMoving = true;
                 ball.userData.isMoving = true;
 
@@ -2007,14 +2232,28 @@ class RetroPoolGame {
                 ball.position.addScaledVector(velocity, dtScale);
 
                 // Visual roll
-                if (speed > 0.003) {
+                if (speed > 0.001) {
                     const rollAxis = new THREE.Vector3(-velocity.z, 0, velocity.x).normalize();
                     const rollAngle = speed / this.physics.ballRadius;
                     ball.rotateOnWorldAxis(rollAxis, rollAngle);
                 }
 
-                // Friction
-                velocity.multiplyScalar(Math.pow(this.physics.tableFriction, dtScale));
+                // Realistic friction model:
+                // 1. Rolling friction (dominant): constant deceleration from cloth
+                //    Real felt μ ≈ 0.2, gives decel ≈ 2 m/s². Scaled to game units:
+                //    ~0.0004 velocity units per frame at 60fps
+                // 2. Velocity drag (minor): air resistance + felt speed-dependent effects
+                //    Very light: 0.998/frame = 11% loss per second
+                const dragFriction = Math.pow(0.998, dtScale);
+                velocity.multiplyScalar(dragFriction);
+
+                // Constant rolling friction (the main stopping force)
+                const rollingDecel = 0.00035 * dtScale;
+                if (speed > rollingDecel) {
+                    velocity.multiplyScalar(1 - rollingDecel / speed);
+                } else {
+                    velocity.set(0, 0, 0);
+                }
 
                 // Collisions
                 this.checkTableBoundaries(ball);
@@ -2039,24 +2278,38 @@ class RetroPoolGame {
         const hh = this.physics.tableHeight / 2;
 
         let hitCushion = false;
+        const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
 
         if (pos.x - radius < -hw) {
             pos.x = -hw + radius;
-            vel.x = -vel.x * 0.75;
+            // Angle-dependent restitution: head-on loses more energy
+            const normalComp = speed > 0.001 ? Math.abs(vel.x) / speed : 0.5;
+            const restitution = 0.75 - 0.15 * normalComp;
+            vel.x = -vel.x * restitution;
+            vel.z *= (1 - 0.03 * normalComp); // slight cross-friction
             hitCushion = true;
         } else if (pos.x + radius > hw) {
             pos.x = hw - radius;
-            vel.x = -vel.x * 0.75;
+            const normalComp = speed > 0.001 ? Math.abs(vel.x) / speed : 0.5;
+            const restitution = 0.75 - 0.15 * normalComp;
+            vel.x = -vel.x * restitution;
+            vel.z *= (1 - 0.03 * normalComp);
             hitCushion = true;
         }
 
         if (pos.z - radius < -hh) {
             pos.z = -hh + radius;
-            vel.z = -vel.z * 0.75;
+            const normalComp = speed > 0.001 ? Math.abs(vel.z) / speed : 0.5;
+            const restitution = 0.75 - 0.15 * normalComp;
+            vel.z = -vel.z * restitution;
+            vel.x *= (1 - 0.03 * normalComp);
             hitCushion = true;
         } else if (pos.z + radius > hh) {
             pos.z = hh - radius;
-            vel.z = -vel.z * 0.75;
+            const normalComp = speed > 0.001 ? Math.abs(vel.z) / speed : 0.5;
+            const restitution = 0.75 - 0.15 * normalComp;
+            vel.z = -vel.z * restitution;
+            vel.x *= (1 - 0.03 * normalComp);
             hitCushion = true;
         }
 
@@ -2089,13 +2342,15 @@ class RetroPoolGame {
 
                 if (dvDotN <= 0) return; // Already separating
 
-                // Apply impulse (equal mass elastic collision)
-                ball1.userData.velocity.x -= dvDotN * nx;
-                ball1.userData.velocity.y -= dvDotN * ny;
-                ball1.userData.velocity.z -= dvDotN * nz;
-                ball2.userData.velocity.x += dvDotN * nx;
-                ball2.userData.velocity.y += dvDotN * ny;
-                ball2.userData.velocity.z += dvDotN * nz;
+                // Apply impulse (slightly inelastic: e=0.96, real pool balls ≈ 0.95-0.97)
+                // For equal mass: impulse factor = (1+e)/2 = 0.98
+                const restitution = 0.98;
+                ball1.userData.velocity.x -= dvDotN * nx * restitution;
+                ball1.userData.velocity.y -= dvDotN * ny * restitution;
+                ball1.userData.velocity.z -= dvDotN * nz * restitution;
+                ball2.userData.velocity.x += dvDotN * nx * restitution;
+                ball2.userData.velocity.y += dvDotN * ny * restitution;
+                ball2.userData.velocity.z += dvDotN * nz * restitution;
 
                 // Separate overlapping balls
                 const overlap = minDistance - distance;
@@ -2221,13 +2476,16 @@ class RetroPoolGame {
         if (this._foulThisTurn) {
             this.switchPlayer();
             this._foulThisTurn = false;
+            this.positionCameraBehindCue();
             return;
         }
 
         if (!this.pocketedThisTurn) {
             this.switchPlayer();
+            this.positionCameraBehindCue();
         } else {
             this.showTurnMessage(`PLAYER ${this.currentPlayer} SHOOTS AGAIN!`);
+            this.positionCameraBehindCue();
         }
     }
 
@@ -2255,6 +2513,9 @@ class RetroPoolGame {
             } else {
                 powerFill.style.background = 'linear-gradient(90deg, #ffff00, #ff4444)';
             }
+
+            const barEl = document.querySelector('.shot-power-bar');
+            if (barEl) barEl.classList.toggle('maxed', p >= 99);
         }
 
         const p1El = document.getElementById('player1Label');
@@ -2310,13 +2571,37 @@ class RetroPoolGame {
     }
 
     updateShotCharging(deltaSec = 1 / 60) {
-        if (this.isChargingShot) {
-            const ratePerSec = 72 * this.settings.chargeRate;
-            this.shotPower = Math.min(100, this.shotPower + ratePerSec * deltaSec);
+        if (this.aimState === 'charging') {
+            const baseRate = 50 * this.settings.chargeRate;
+            // Non-linear: slower at extremes, faster in the middle for precision
+            const powerFactor = 1.0 - 0.5 * Math.pow((this.shotPower - 50) / 50, 2);
+            this.shotPower = Math.min(100, this.shotPower + baseRate * powerFactor * deltaSec);
             this.updateUI();
 
-            if (this.isAiming) {
+            // Audio tick at power thresholds
+            const threshold = Math.floor(this.shotPower / 25);
+            if (threshold > this.lastPowerThreshold && this.shotPower < 100) {
+                this.lastPowerThreshold = threshold;
+                this.sound.playSelect();
+            }
+
+            this.updateCueAiming();
+        }
+
+        // Frame-rate independent keyboard aim with acceleration
+        if (this.gameState === 'playing' && !this.areBallsMoving()) {
+            let aimDelta = 0;
+            if (this.keys['KeyA'] || this.keys['ArrowLeft']) aimDelta -= 1;
+            if (this.keys['KeyD'] || this.keys['ArrowRight']) aimDelta += 1;
+            if (aimDelta !== 0) {
+                // Acceleration: starts at 0.3 rad/s, ramps to 2.5 rad/s over ~1.5 seconds
+                this._keyAimHoldTime = Math.min(1.5, this._keyAimHoldTime + deltaSec);
+                const t = this._keyAimHoldTime / 1.5; // 0..1 over 1.5 seconds
+                const speed = 0.3 + (2.2 * t * t); // quadratic ramp: 0.3 → 2.5 rad/s
+                this.aimingAngle += aimDelta * speed * this.settings.aimSensitivity * deltaSec;
                 this.updateCueAiming();
+            } else {
+                this._keyAimHoldTime = 0; // reset acceleration when keys released
             }
         }
     }
@@ -2345,6 +2630,28 @@ class RetroPoolGame {
             if (this.gameState === 'playing') {
                 this.updateShotCharging(deltaSec);
                 this.updatePhysics(dtScale);
+
+                // Passive aiming: always show cue + aim line when balls are stationary
+                const ballsMoving = this.areBallsMoving();
+                const cuePocketed = this.balls[0] && this.balls[0].userData.isPocketed;
+                const showPassiveAim = !ballsMoving && !cuePocketed;
+
+                if (showPassiveAim) {
+                    if (this.cue) this.cue.visible = true;
+                    if (this.aimLine) this.aimLine.visible = true;
+                    this.updateCueAiming();
+                } else if (this.aimState !== 'charging') {
+                    if (this.cue) this.cue.visible = false;
+                    if (this.aimLine) this.aimLine.visible = false;
+                    if (this.ghostBall) this.ghostBall.visible = false;
+                    if (this.targetLine) this.targetLine.visible = false;
+                }
+
+                // Safety: reset camera drag if no mouse button is actually held
+                // Safety: reset camera drag if neither RMB(2) nor MMB(1) is held
+                if (this.isDraggingCamera && !(this._mouseButtonsDown & 0b110)) {
+                    this.isDraggingCamera = false;
+                }
             }
 
             this.updateCameraPosition();

@@ -260,11 +260,11 @@ body {
 /* ── Turn Notification ─────────────────────────────────────────────────────── */
 .turn-notification {
     position: absolute;
-    top: 50%;
+    top: 80px;
     left: 50%;
-    transform: translate(-50%, -50%) scale(0.8);
+    transform: translateX(-50%) scale(0.8);
     font-family: 'Courier New', monospace;
-    font-size: 2rem;
+    font-size: 1.6rem;
     font-weight: bold;
     color: #00ff41;
     text-shadow:
@@ -278,13 +278,13 @@ body {
     opacity: 0;
     transition: opacity 0.3s, transform 0.3s;
     background: rgba(0, 0, 0, 0.6);
-    padding: 16px 32px;
+    padding: 12px 24px;
     border: 2px solid #00ff4160;
 }
 
 .turn-notification.visible {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translateX(-50%) scale(1);
 }
 
 /* ── Game UI ───────────────────────────────────────────────────────────────── */
@@ -411,6 +411,16 @@ body {
     background: linear-gradient(90deg, #00ff41, #44ff44);
     box-shadow: 0 0 8px rgba(0, 255, 65, 0.4);
     transition: width 0.05s linear;
+}
+
+.shot-power-bar.maxed {
+    border-color: #ff4444;
+    animation: powerMaxPulse 0.4s infinite alternate;
+}
+
+@keyframes powerMaxPulse {
+    0% { box-shadow: 0 0 6px #ff444440; }
+    100% { box-shadow: 0 0 16px #ff4444aa; }
 }
 
 .ui-bottom {

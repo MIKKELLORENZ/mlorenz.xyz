@@ -414,6 +414,8 @@ body {
     background: var(--cyan);
     pointer-events: none;
     box-shadow: 0 0 10px rgba(34, 211, 238, 0.5), 0 0 4px rgba(34, 211, 238, 0.3);
+    will-change: left;
+    contain: layout style;
 }
 
 .playhead::before {
@@ -426,7 +428,6 @@ body {
     border-left: 6px solid transparent;
     border-right: 6px solid transparent;
     border-top: 8px solid var(--cyan);
-    filter: drop-shadow(0 0 3px rgba(34, 211, 238, 0.5));
 }
 
 /* Tracks */
@@ -475,7 +476,6 @@ body {
     left: 0;
     z-index: 10;
     overflow: visible;
-    backdrop-filter: blur(4px);
 }
 
 .track-name-row {
@@ -486,7 +486,36 @@ body {
 
 .track-btns {
     display: flex;
-    gap: 2px;
+    gap: 3px;
+    align-items: center;
+}
+
+/* Record button sits on its own row for clarity */
+.track-record-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+}
+
+.track-record-row .record-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 0.85em;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.record-label {
+    font-size: 0.6em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+}
+
+.track.armed .record-label {
+    color: var(--red);
 }
 
 .track-name {
@@ -781,7 +810,8 @@ body {
     user-select: none;
     z-index: 2;
     transition: box-shadow 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
-    backdrop-filter: blur(1px);
+    contain: layout style;
+    will-change: left, width;
 }
 
 .audio-region:hover {
@@ -1481,8 +1511,8 @@ input[type="range"]:hover::-moz-range-thumb {
 
 .eq-bands-container {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
 }
 
 .eq-band {
@@ -1517,6 +1547,7 @@ input[type="range"]:hover::-moz-range-thumb {
 .eq-band-indicator.low { background: #ff6b6b; }
 .eq-band-indicator.lowmid { background: #4ecdc4; }
 .eq-band-indicator.mid { background: #ffa726; }
+.eq-band-indicator.highmid { background: #42a5f5; }
 .eq-band-indicator.high { background: #ab47bc; }
 
 .eq-band h4 {
@@ -2080,12 +2111,17 @@ input[type="range"]:hover::-moz-range-thumb {
         gap: 1px;
     }
     
-    .record-btn,
     .mute-btn,
     .solo-btn {
         width: 20px;
         height: 20px;
         font-size: 0.6em;
+    }
+
+    .track-record-row .record-btn {
+        width: 22px;
+        height: 22px;
+        font-size: 0.7em;
     }
 }
 
@@ -2254,4 +2290,416 @@ input[type="range"]:hover::-moz-range-thumb {
 
 .track-meter-bar.clipping {
     background: var(--red-strong);
+}
+
+/* Draggable EQ Points on Canvas */
+.eq-visualizer {
+    cursor: default;
+}
+
+.eq-visualizer.dragging {
+    cursor: grabbing;
+}
+
+/* Multiband Compressor - Professional Layout */
+
+/* Spectrum Visualizer */
+.mbcomp-visualizer {
+    width: 100%;
+    height: 180px;
+    background: linear-gradient(180deg, var(--surface-0) 0%, #0a0a0c 100%);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 10px;
+    cursor: default;
+}
+
+.mbcomp-visualizer canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.mbcomp-visualizer.dragging-xover {
+    cursor: ew-resize;
+}
+
+/* Crossover Row */
+.mbcomp-crossover-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--surface-3);
+    border-radius: var(--radius-sm);
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.mbcomp-xover-label {
+    font-size: 0.65em;
+    font-weight: 700;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-right: 6px;
+}
+
+.mbcomp-band-label {
+    font-size: 0.65em;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+}
+
+.mbcomp-xover-input {
+    width: 60px;
+    padding: 3px 6px;
+    background: var(--surface-0);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    font-size: 0.75em;
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    text-align: center;
+    font-weight: 600;
+}
+
+.mbcomp-xover-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+/* Band Strips */
+.mbcomp-strips {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+}
+
+.mbcomp-strip {
+    background: var(--surface-3);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    overflow: hidden;
+    transition: border-color 0.15s;
+}
+
+.mbcomp-strip:hover {
+    border-color: var(--border-strong);
+}
+
+.mbcomp-strip.soloed {
+    border-color: var(--yellow);
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.15);
+}
+
+.mbcomp-strip.bypassed {
+    opacity: 0.5;
+}
+
+.mbcomp-strip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    background: var(--surface-4);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.mbcomp-strip-name {
+    font-size: 0.72em;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+}
+
+.mbcomp-strip-btns {
+    display: flex;
+    gap: 3px;
+}
+
+.mbcomp-solo-btn,
+.mbcomp-bypass-btn {
+    padding: 1px 6px;
+    font-size: 0.6em;
+    font-weight: 700;
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+    background: var(--surface-3);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.12s;
+}
+
+.mbcomp-solo-btn:hover,
+.mbcomp-bypass-btn:hover {
+    background: var(--surface-5);
+    color: var(--text-primary);
+}
+
+.mbcomp-solo-btn.active {
+    background: rgba(251, 191, 36, 0.2);
+    color: var(--yellow);
+    border-color: rgba(251, 191, 36, 0.4);
+}
+
+.mbcomp-bypass-btn.active {
+    background: rgba(248, 113, 113, 0.2);
+    color: var(--red);
+    border-color: rgba(248, 113, 113, 0.4);
+}
+
+.mbcomp-strip-body {
+    display: flex;
+    padding: 8px;
+    gap: 8px;
+}
+
+/* Vertical GR Meter */
+.mbcomp-vert-meter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.mbcomp-vert-meter-track {
+    width: 14px;
+    height: 100px;
+    background: var(--surface-0);
+    border-radius: 3px;
+    border: 1px solid var(--border-subtle);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+}
+
+.mbcomp-vert-meter-bar {
+    width: 100%;
+    height: 0%;
+    background: linear-gradient(to top, var(--green), var(--yellow), var(--orange));
+    border-radius: 0 0 2px 2px;
+    transition: height 0.06s ease-out;
+}
+
+.mbcomp-vert-meter-value {
+    font-size: 0.55em;
+    color: var(--green);
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-weight: 700;
+    text-align: center;
+    min-width: 20px;
+}
+
+/* Strip Controls */
+.mbcomp-strip-controls {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.mbcomp-param {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.mbcomp-param label {
+    font-size: 0.6em;
+    color: var(--text-dim);
+    width: 30px;
+    flex-shrink: 0;
+    font-weight: 600;
+}
+
+.mbcomp-param input[type="range"] {
+    flex: 1;
+    height: 14px;
+}
+
+.mbcomp-param span {
+    font-size: 0.6em;
+    color: var(--accent);
+    min-width: 28px;
+    text-align: right;
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-weight: 600;
+}
+
+/* De-esser */
+.deesser-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+/* Side-chain */
+.sidechain-explanation {
+    margin-bottom: 16px;
+}
+
+.sidechain-flow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    justify-content: center;
+    padding: 12px;
+    background: var(--surface-0);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+}
+
+.sc-flow-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    min-width: 180px;
+}
+
+.sc-flow-box.sc-trigger {
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.sc-flow-box.sc-duck {
+    background: rgba(59, 158, 255, 0.1);
+    border: 1px solid rgba(59, 158, 255, 0.3);
+}
+
+.sc-flow-label {
+    font-size: 0.65em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}
+
+.sc-trigger .sc-flow-label { color: var(--yellow); }
+.sc-duck .sc-flow-label { color: var(--accent); }
+
+.sc-flow-desc {
+    font-size: 0.72em;
+    color: var(--text-dim);
+    text-align: center;
+}
+
+.sc-flow-arrow {
+    font-size: 1.5em;
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+
+.sc-flow-box select {
+    width: 100%;
+    padding: 5px 8px;
+    background: var(--surface-4);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.82em;
+    margin-top: 4px;
+}
+
+/* Sidechain GR Meter */
+.sidechain-meter-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    padding: 8px 12px;
+    background: var(--surface-0);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+}
+
+.sc-meter-label {
+    font-size: 0.7em;
+    color: var(--text-dim);
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 90px;
+}
+
+.sc-meter-track {
+    flex: 1;
+    height: 14px;
+    background: var(--surface-4);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+
+.sc-meter-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(to right, var(--accent), var(--cyan));
+    border-radius: 3px 0 0 3px;
+    transition: width 0.06s ease-out;
+}
+
+.sc-meter-value {
+    font-size: 0.7em;
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-weight: 600;
+    min-width: 45px;
+    text-align: right;
+}
+
+.sidechain-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+/* Effect Section Drag Reorder */
+.settings-section {
+    position: relative;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-section .drag-handle {
+    position: absolute;
+    top: 16px;
+    right: 70px;
+    cursor: grab;
+    color: var(--text-dim);
+    font-size: 1.1em;
+    opacity: 0.4;
+    transition: opacity 0.15s;
+    user-select: none;
+    padding: 2px 6px;
+}
+
+.settings-section .drag-handle:hover {
+    opacity: 0.8;
+    color: var(--text-primary);
+}
+
+.settings-section.dragging {
+    opacity: 0.6;
+    transform: scale(0.98);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    z-index: 100;
+}
+
+.settings-section.drag-over-top {
+    border-top: 2px solid var(--accent);
+}
+
+.settings-section.drag-over-bottom {
+    border-bottom: 2px solid var(--accent);
+}
+
+/* Wider modal for more content */
+.modal-content.wide {
+    max-width: 1200px;
 }

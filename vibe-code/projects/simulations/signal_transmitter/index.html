@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Light Signal Transmitter</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💡</text></svg>">
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Scene Canvas -->
+        <div class="scene-wrapper">
+            <canvas id="sceneCanvas"></canvas>
+        </div>
+
+        <!-- Controls Area -->
+        <div class="controls-area">
+            <!-- Hardware Configuration -->
+            <fieldset class="panel config-panel">
+                <legend>Configuration</legend>
+
+                <div class="control-group">
+                    <label for="connectionType">Connection</label>
+                    <select id="connectionType">
+                        <option value="white">Single White LED</option>
+                        <option value="rgb">RGB LEDs (Parallel)</option>
+                        <option value="infrared">Infrared (IR LED + TSOP)</option>
+                        <option value="laser">Red Laser Diode</option>
+                        <option value="fiber">Fiber Optic</option>
+                    </select>
+                    <span class="hint" id="connectionHint">Sends R, G, B channels sequentially — 3x slower</span>
+                </div>
+
+                <div class="control-group" id="sensorGroup">
+                    <label for="sensorType">Receiver Sensor</label>
+                    <select id="sensorType">
+                        <option value="photoresistor">Photoresistor (LDR)</option>
+                        <option value="photodiode">Photodiode</option>
+                    </select>
+                    <span class="hint" id="sensorHint">~20 samples/sec — slow response, higher noise</span>
+                </div>
+
+                <div class="control-group">
+                    <label for="encoding">Encoding Algorithm</label>
+                    <select id="encoding">
+                        <option value="analog8">Analog 8-bit (256 levels)</option>
+                        <option value="analog4">Analog 4-bit (16 levels)</option>
+                        <option value="binary">Binary (on/off per bit)</option>
+                        <option value="manchester">Manchester Encoding</option>
+                        <option value="hamming74">Hamming(7,4) ECC</option>
+                        <option value="ppm4">4-PPM (Pulse-Position)</option>
+                    </select>
+                    <span class="hint" id="encodingHint">Each sample encodes 8 bits via brightness level</span>
+                </div>
+
+                <div class="control-group" id="noiseGroup">
+                    <label for="noiseSlider">Noise Level: <span id="noiseValue">15%</span></label>
+                    <input type="range" id="noiseSlider" min="0" max="100" value="15">
+                </div>
+
+                <div class="control-group">
+                    <label for="simSpeed">Simulation Speed</label>
+                    <select id="simSpeed">
+                        <option value="1">1x (Real-time)</option>
+                        <option value="10">10x</option>
+                        <option value="100" selected>100x</option>
+                        <option value="1000">1000x</option>
+                    </select>
+                </div>
+
+                <div class="speed-summary" id="speedSummary">
+                    <span class="speed-label">Sensor rate:</span>
+                    <span class="speed-value" id="sensorRate">20 Hz</span>
+                    <span class="speed-label">Bits/sample:</span>
+                    <span class="speed-value" id="bitsPerSample">8</span>
+                    <span class="speed-label">Throughput:</span>
+                    <span class="speed-value" id="throughput">160 bps</span>
+                    <span class="speed-label">256x256 image:</span>
+                    <span class="speed-value" id="fullImageTime">~2.7 hrs</span>
+                </div>
+            </fieldset>
+
+            <!-- Transmission Panel (includes upload) -->
+            <fieldset class="panel transmission-panel">
+                <legend>Transmission</legend>
+
+                <div class="image-pair">
+                    <div class="image-box">
+                        <label>Source (Sender)</label>
+                        <div class="canvas-wrap" id="sourceWrap">
+                            <canvas id="sourceCanvas" width="256" height="256"></canvas>
+                            <div class="upload-overlay" id="uploadOverlay">
+                                <span class="upload-icon">+</span>
+                                <span>Click or drop file here</span>
+                                <span class="upload-hint">Images, text, PDF, etc.</span>
+                                <input type="file" id="fileInput" accept="image/*,.txt,.pdf,.json,.csv,.html,.xml">
+                            </div>
+                        </div>
+                        <span class="file-info" id="fileInfo"></span>
+                    </div>
+                    <div class="image-arrow" id="imageArrow">
+                        <svg width="40" height="24" viewBox="0 0 40 24"><path d="M0 12h32m0 0l-8-8m8 8l-8 8" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+                    </div>
+                    <div class="image-box">
+                        <label>Received (Decoder)</label>
+                        <div class="canvas-wrap">
+                            <canvas id="receivedCanvas" width="256" height="256"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="progress-area" id="progressArea">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <span class="progress-text" id="progressText">0%</span>
+                </div>
+
+                <div class="stats-grid" id="statsArea">
+                    <div class="stat">
+                        <span class="stat-label">Bytes</span>
+                        <span class="stat-value" id="statBytes">0 / 0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Errors</span>
+                        <span class="stat-value" id="statErrors">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Error Rate</span>
+                        <span class="stat-value" id="statErrorRate">0%</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">ETA</span>
+                        <span class="stat-value" id="statETA">--</span>
+                    </div>
+                </div>
+
+                <div class="transmit-controls">
+                    <button id="transmitBtn" class="btn btn-primary" disabled>Transmit</button>
+                    <button id="stopBtn" class="btn btn-danger" disabled>Stop</button>
+                </div>
+            </fieldset>
+        </div>
+    </div>
+
+    <script src="js/scene.js"></script>
+    <script src="js/transmission.js"></script>
+    <script src="js/cropper.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>

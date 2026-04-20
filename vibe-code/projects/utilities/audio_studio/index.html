@@ -199,6 +199,30 @@
                             </div>
                         </div>
                         
+                        <div class="eq-band" data-band="highMid">
+                            <div class="eq-band-header">
+                                <div class="eq-band-indicator highmid"></div>
+                                <h4>High-Mid</h4>
+                            </div>
+                            <div class="eq-band-controls">
+                                <div class="eq-control-row">
+                                    <label>Freq</label>
+                                    <input type="range" class="eq-freq" data-band="highMid" min="1000" max="8000" value="3000">
+                                    <span class="eq-value eq-freq-value">3000 Hz</span>
+                                </div>
+                                <div class="eq-control-row">
+                                    <label>Gain</label>
+                                    <input type="range" class="eq-gain" data-band="highMid" min="-24" max="24" step="0.5" value="0">
+                                    <span class="eq-value eq-gain-value">0 dB</span>
+                                </div>
+                                <div class="eq-control-row">
+                                    <label>Q</label>
+                                    <input type="range" class="eq-q" data-band="highMid" min="0.1" max="10" step="0.1" value="1">
+                                    <span class="eq-value eq-q-value">1.0</span>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="eq-band" data-band="high">
                             <div class="eq-band-header">
                                 <div class="eq-band-indicator high"></div>
@@ -290,6 +314,172 @@
                     </div>
                 </section>
                 
+                <!-- Multiband Compressor Section -->
+                <section class="settings-section mbcomp-section">
+                    <h3>Multiband Compressor <button type="button" class="effect-toggle" data-effect="multibandComp" aria-label="Enable Multiband Compressor">Enable</button></h3>
+
+                    <!-- Frequency Spectrum Visualizer with crossover handles -->
+                    <div class="mbcomp-visualizer" id="mbcompVisualizer">
+                        <canvas id="mbcompCanvas"></canvas>
+                    </div>
+
+                    <!-- Crossover Frequencies -->
+                    <div class="mbcomp-crossover-row">
+                        <span class="mbcomp-xover-label">XOVER</span>
+                        <span class="mbcomp-band-label">LOW</span>
+                        <input type="number" class="mbcomp-xover-input" data-xover="0" min="20" max="500" value="200">
+                        <span class="mbcomp-band-label">L-MID</span>
+                        <input type="number" class="mbcomp-xover-input" data-xover="1" min="200" max="4000" value="1000">
+                        <span class="mbcomp-band-label">H-MID</span>
+                        <input type="number" class="mbcomp-xover-input" data-xover="2" min="1000" max="16000" value="5000">
+                        <span class="mbcomp-band-label">HIGH</span>
+                    </div>
+
+                    <!-- Band strips: vertical meters + controls side by side -->
+                    <div class="mbcomp-strips">
+                        <div class="mbcomp-strip" data-band="low">
+                            <div class="mbcomp-strip-header">
+                                <span class="mbcomp-strip-name">LOW</span>
+                                <div class="mbcomp-strip-btns">
+                                    <button class="mbcomp-solo-btn" data-band="low" title="Solo this band">S</button>
+                                    <button class="mbcomp-bypass-btn" data-band="low" title="Bypass this band">Byp</button>
+                                </div>
+                            </div>
+                            <div class="mbcomp-strip-body">
+                                <div class="mbcomp-vert-meter">
+                                    <div class="mbcomp-vert-meter-track">
+                                        <div class="mbcomp-vert-meter-bar" data-band="low"></div>
+                                    </div>
+                                    <div class="mbcomp-vert-meter-value" data-band="low">0</div>
+                                </div>
+                                <div class="mbcomp-strip-controls">
+                                    <div class="mbcomp-param"><label>Thrsh</label><input type="range" class="mbcomp-threshold" data-band="low" min="-60" max="0" value="-24"><span class="mbcomp-threshold-value">-24</span></div>
+                                    <div class="mbcomp-param"><label>Ratio</label><input type="range" class="mbcomp-ratio" data-band="low" min="1" max="20" step="0.1" value="3"><span class="mbcomp-ratio-value">3:1</span></div>
+                                    <div class="mbcomp-param"><label>Atk</label><input type="range" class="mbcomp-attack" data-band="low" min="0" max="0.5" step="0.001" value="0.01"><span class="mbcomp-attack-value">10</span></div>
+                                    <div class="mbcomp-param"><label>Rel</label><input type="range" class="mbcomp-release" data-band="low" min="0.01" max="1" step="0.01" value="0.15"><span class="mbcomp-release-value">150</span></div>
+                                    <div class="mbcomp-param"><label>Gain</label><input type="range" class="mbcomp-gain" data-band="low" min="-12" max="12" step="0.5" value="0"><span class="mbcomp-gain-value">0.0</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mbcomp-strip" data-band="lowMid">
+                            <div class="mbcomp-strip-header">
+                                <span class="mbcomp-strip-name">L-MID</span>
+                                <div class="mbcomp-strip-btns">
+                                    <button class="mbcomp-solo-btn" data-band="lowMid" title="Solo this band">S</button>
+                                    <button class="mbcomp-bypass-btn" data-band="lowMid" title="Bypass this band">Byp</button>
+                                </div>
+                            </div>
+                            <div class="mbcomp-strip-body">
+                                <div class="mbcomp-vert-meter">
+                                    <div class="mbcomp-vert-meter-track">
+                                        <div class="mbcomp-vert-meter-bar" data-band="lowMid"></div>
+                                    </div>
+                                    <div class="mbcomp-vert-meter-value" data-band="lowMid">0</div>
+                                </div>
+                                <div class="mbcomp-strip-controls">
+                                    <div class="mbcomp-param"><label>Thrsh</label><input type="range" class="mbcomp-threshold" data-band="lowMid" min="-60" max="0" value="-22"><span class="mbcomp-threshold-value">-22</span></div>
+                                    <div class="mbcomp-param"><label>Ratio</label><input type="range" class="mbcomp-ratio" data-band="lowMid" min="1" max="20" step="0.1" value="3"><span class="mbcomp-ratio-value">3:1</span></div>
+                                    <div class="mbcomp-param"><label>Atk</label><input type="range" class="mbcomp-attack" data-band="lowMid" min="0" max="0.5" step="0.001" value="0.008"><span class="mbcomp-attack-value">8</span></div>
+                                    <div class="mbcomp-param"><label>Rel</label><input type="range" class="mbcomp-release" data-band="lowMid" min="0.01" max="1" step="0.01" value="0.12"><span class="mbcomp-release-value">120</span></div>
+                                    <div class="mbcomp-param"><label>Gain</label><input type="range" class="mbcomp-gain" data-band="lowMid" min="-12" max="12" step="0.5" value="0"><span class="mbcomp-gain-value">0.0</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mbcomp-strip" data-band="highMid">
+                            <div class="mbcomp-strip-header">
+                                <span class="mbcomp-strip-name">H-MID</span>
+                                <div class="mbcomp-strip-btns">
+                                    <button class="mbcomp-solo-btn" data-band="highMid" title="Solo this band">S</button>
+                                    <button class="mbcomp-bypass-btn" data-band="highMid" title="Bypass this band">Byp</button>
+                                </div>
+                            </div>
+                            <div class="mbcomp-strip-body">
+                                <div class="mbcomp-vert-meter">
+                                    <div class="mbcomp-vert-meter-track">
+                                        <div class="mbcomp-vert-meter-bar" data-band="highMid"></div>
+                                    </div>
+                                    <div class="mbcomp-vert-meter-value" data-band="highMid">0</div>
+                                </div>
+                                <div class="mbcomp-strip-controls">
+                                    <div class="mbcomp-param"><label>Thrsh</label><input type="range" class="mbcomp-threshold" data-band="highMid" min="-60" max="0" value="-20"><span class="mbcomp-threshold-value">-20</span></div>
+                                    <div class="mbcomp-param"><label>Ratio</label><input type="range" class="mbcomp-ratio" data-band="highMid" min="1" max="20" step="0.1" value="3"><span class="mbcomp-ratio-value">3:1</span></div>
+                                    <div class="mbcomp-param"><label>Atk</label><input type="range" class="mbcomp-attack" data-band="highMid" min="0" max="0.5" step="0.001" value="0.005"><span class="mbcomp-attack-value">5</span></div>
+                                    <div class="mbcomp-param"><label>Rel</label><input type="range" class="mbcomp-release" data-band="highMid" min="0.01" max="1" step="0.01" value="0.1"><span class="mbcomp-release-value">100</span></div>
+                                    <div class="mbcomp-param"><label>Gain</label><input type="range" class="mbcomp-gain" data-band="highMid" min="-12" max="12" step="0.5" value="0"><span class="mbcomp-gain-value">0.0</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mbcomp-strip" data-band="high">
+                            <div class="mbcomp-strip-header">
+                                <span class="mbcomp-strip-name">HIGH</span>
+                                <div class="mbcomp-strip-btns">
+                                    <button class="mbcomp-solo-btn" data-band="high" title="Solo this band">S</button>
+                                    <button class="mbcomp-bypass-btn" data-band="high" title="Bypass this band">Byp</button>
+                                </div>
+                            </div>
+                            <div class="mbcomp-strip-body">
+                                <div class="mbcomp-vert-meter">
+                                    <div class="mbcomp-vert-meter-track">
+                                        <div class="mbcomp-vert-meter-bar" data-band="high"></div>
+                                    </div>
+                                    <div class="mbcomp-vert-meter-value" data-band="high">0</div>
+                                </div>
+                                <div class="mbcomp-strip-controls">
+                                    <div class="mbcomp-param"><label>Thrsh</label><input type="range" class="mbcomp-threshold" data-band="high" min="-60" max="0" value="-18"><span class="mbcomp-threshold-value">-18</span></div>
+                                    <div class="mbcomp-param"><label>Ratio</label><input type="range" class="mbcomp-ratio" data-band="high" min="1" max="20" step="0.1" value="3"><span class="mbcomp-ratio-value">3:1</span></div>
+                                    <div class="mbcomp-param"><label>Atk</label><input type="range" class="mbcomp-attack" data-band="high" min="0" max="0.5" step="0.001" value="0.003"><span class="mbcomp-attack-value">3</span></div>
+                                    <div class="mbcomp-param"><label>Rel</label><input type="range" class="mbcomp-release" data-band="high" min="0.01" max="1" step="0.01" value="0.08"><span class="mbcomp-release-value">80</span></div>
+                                    <div class="mbcomp-param"><label>Gain</label><input type="range" class="mbcomp-gain" data-band="high" min="-12" max="12" step="0.5" value="0"><span class="mbcomp-gain-value">0.0</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- De-esser Section -->
+                <section class="settings-section deesser-section">
+                    <h3>De-esser <button type="button" class="effect-toggle" data-effect="deesser" aria-label="Enable De-esser">Enable</button></h3>
+                    <div class="deesser-controls">
+                        <div class="effect-control"><label>Frequency</label><input type="range" class="deesser-freq" min="2000" max="12000" value="6500"><span class="deesser-freq-value">6.5 kHz</span></div>
+                        <div class="effect-control"><label>Threshold</label><input type="range" class="deesser-threshold" min="-60" max="0" value="-30"><span class="deesser-threshold-value">-30 dB</span></div>
+                        <div class="effect-control"><label>Ratio</label><input type="range" class="deesser-ratio" min="1" max="20" step="0.1" value="8"><span class="deesser-ratio-value">8:1</span></div>
+                        <div class="effect-control"><label>Range</label><input type="range" class="deesser-range" min="0.5" max="8" step="0.1" value="2"><span class="deesser-range-value">Q 2.0</span></div>
+                    </div>
+                </section>
+
+                <!-- Side-chain Section -->
+                <section class="settings-section sidechain-section">
+                    <h3>Side-chain <button type="button" class="effect-toggle" data-effect="sidechain" aria-label="Enable Side-chain">Enable</button></h3>
+                    <div class="sidechain-explanation">
+                        <div class="sidechain-flow">
+                            <div class="sc-flow-box sc-trigger">
+                                <span class="sc-flow-label">TRIGGER</span>
+                                <span class="sc-flow-desc">When this track gets loud...</span>
+                                <select class="sidechain-source"></select>
+                            </div>
+                            <div class="sc-flow-arrow">&#10140;</div>
+                            <div class="sc-flow-box sc-duck">
+                                <span class="sc-flow-label">DUCKS</span>
+                                <span class="sc-flow-desc sc-duck-track-name">...this track dips in volume</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sidechain-meter-row">
+                        <div class="sc-meter-label">Gain Reduction</div>
+                        <div class="sc-meter-track">
+                            <div class="sc-meter-bar" id="scMeterBar"></div>
+                        </div>
+                        <div class="sc-meter-value" id="scMeterValue">0 dB</div>
+                    </div>
+                    <div class="sidechain-controls">
+                        <div class="effect-control"><label>Threshold</label><input type="range" class="sidechain-threshold" min="-60" max="0" value="-24"><span class="sidechain-threshold-value">-24 dB</span></div>
+                        <div class="effect-control"><label>Ratio</label><input type="range" class="sidechain-ratio" min="1" max="20" step="0.1" value="4"><span class="sidechain-ratio-value">4:1</span></div>
+                        <div class="effect-control"><label>Attack</label><input type="range" class="sidechain-attack" min="0.001" max="0.5" step="0.001" value="0.01"><span class="sidechain-attack-value">10 ms</span></div>
+                        <div class="effect-control"><label>Release</label><input type="range" class="sidechain-release" min="0.01" max="1" step="0.01" value="0.1"><span class="sidechain-release-value">100 ms</span></div>
+                        <div class="effect-control"><label>Amount</label><input type="range" class="sidechain-amount" min="0" max="1" step="0.01" value="1"><span class="sidechain-amount-value">100%</span></div>
+                    </div>
+                </section>
+
                 <!-- Effects Section -->
                 <section class="settings-section effects-section">
                     <h3>Effects</h3>

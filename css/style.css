@@ -1491,3 +1491,196 @@ main.container.interactive-mode {
 .contact-section .cta-button {
     margin-top: 15px;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   INVENTIONS SECTION
+   ═══════════════════════════════════════════════════════════════ */
+
+.inventions-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    margin-top: 28px;
+}
+
+.invention-card {
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.invention-card:hover .card-title {
+    color: var(--accent);
+}
+
+.invention-card .card-image {
+    height: 160px;
+}
+
+.invention-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    color: var(--accent);
+    font-size: 2.5rem;
+    opacity: 0.3;
+}
+
+/* ── Back button ── */
+.invention-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-family: var(--font-primary);
+    cursor: pointer;
+    transition: var(--transition);
+    margin-bottom: 32px;
+}
+
+.invention-back-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* ── Article styling ── */
+.invention-article {
+    max-width: 720px;
+}
+
+.invention-article h1 {
+    font-size: 2.4rem;
+    font-weight: 800;
+    letter-spacing: -1px;
+    margin-bottom: 16px;
+    line-height: 1.2;
+}
+
+.invention-article h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-top: 40px;
+    margin-bottom: 12px;
+    color: var(--text-primary);
+}
+
+.invention-article h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-top: 28px;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+.invention-article p {
+    color: var(--text-secondary);
+    line-height: 1.85;
+    margin-bottom: 18px;
+    font-size: 1.02rem;
+}
+
+.invention-article ul,
+.invention-article ol {
+    color: var(--text-secondary);
+    padding-left: 24px;
+    margin-bottom: 18px;
+    line-height: 1.8;
+}
+
+.invention-article li {
+    margin-bottom: 6px;
+}
+
+.invention-article strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.invention-article em {
+    font-style: italic;
+}
+
+.invention-article code {
+    font-family: var(--font-mono);
+    background: var(--bg-secondary);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.88em;
+    border: 1px solid var(--border-subtle);
+}
+
+.invention-article blockquote {
+    border-left: 3px solid var(--accent);
+    padding: 12px 20px;
+    margin: 20px 0;
+    background: var(--bg-secondary);
+    border-radius: 0 8px 8px 0;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.invention-article hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 36px 0;
+}
+
+.invention-article a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.invention-article a:hover {
+    text-decoration: underline;
+}
+
+/* ── Figures / images ── */
+.invention-figure {
+    margin: 28px 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.invention-figure img {
+    width: 100%;
+    display: block;
+}
+
+.invention-figure figcaption {
+    padding: 10px 16px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    text-align: center;
+}
+
+/* ── Responsive: inventions grid ── */
+@media (max-width: 1100px) {
+    .inventions-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 800px) {
+    .inventions-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 500px) {
+    .inventions-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .invention-article h1 {
+        font-size: 1.8rem;
+    }
+}

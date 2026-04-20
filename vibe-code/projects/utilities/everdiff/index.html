@@ -3,24 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EverDiff - Infinite Split Notes</title>
+    <title>EverDiff - Document Diff Tool</title>
     <link rel="stylesheet" href="styles.css">
-    <!-- CDN Dependencies -->
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/diff@5.1.0/dist/diff.min.js"></script>
 </head>
 <body>
-    <!-- Main app container -->
     <div id="app">
-        <!-- Top-right overflow menu -->
-        <div id="overflow-menu" class="overflow-menu">
-            <button id="menu-trigger" class="menu-trigger" aria-label="Menu">⋯</button>
-            <div id="menu-dropdown" class="menu-dropdown hidden">
-                <button data-action="export-doc">Export Document</button>
-                <button data-action="export-all">Export All as ZIP</button>
-                <button data-action="import-json">Import JSON</button>
-                <button data-action="toggle-sequence">Toggle Sequence Panel</button>
-                <button data-action="show-palette">Command Palette</button>
+        <!-- Top toolbar -->
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <span class="app-logo">⟷</span>
+                <span class="app-title">EverDiff</span>
+                <div class="toolbar-divider"></div>
+                <button class="tool-btn" data-action="new-pane" title="New pane (Ctrl+N)">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    <span>New</span>
+                </button>
+                <button class="tool-btn" data-action="diff-adjacent" title="Diff adjacent panes (Ctrl+D)">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 3h5M8 3h5M1 7h5M8 7h5M1 11h5M8 11h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    <span>Diff</span>
+                </button>
+                <button class="tool-btn" data-action="swap-panes" title="Swap two panes">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 4h10M8 1l3 3-3 3M13 10H3M6 7l-3 3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Swap</span>
+                </button>
+            </div>
+            <div class="toolbar-center">
+                <div class="diff-mode-group" title="Diff granularity">
+                    <button class="diff-mode-btn active" data-diff-mode="words">Words</button>
+                    <button class="diff-mode-btn" data-diff-mode="chars">Chars</button>
+                    <button class="diff-mode-btn" data-diff-mode="lines">Lines</button>
+                    <button class="diff-mode-btn" data-diff-mode="sentences">Sentences</button>
+                </div>
+            </div>
+            <div class="toolbar-right">
+                <button class="tool-btn" data-action="toggle-sequence" title="Sequence panel">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="5" height="3" rx="0.5" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="5.5" width="5" height="3" rx="0.5" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="10" width="5" height="3" rx="0.5" stroke="currentColor" stroke-width="1.2"/><path d="M8 2.5h5M8 7h5M8 11.5h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                </button>
+                <button class="tool-btn" data-action="show-palette" title="Command palette (Ctrl+K)">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M4 1L1 7l3 6M10 1l3 6-3 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button class="tool-btn" data-action="toggle-theme" title="Toggle theme">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="4" stroke="currentColor" stroke-width="1.3"/><path d="M7 1v1M7 12v1M1 7h1M12 7h1M3.05 3.05l.7.7M10.25 10.25l.7.7M3.05 10.95l.7-.7M10.25 3.75l.7-.7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+                </button>
+                <div class="toolbar-divider"></div>
+                <button class="tool-btn menu-trigger-btn" id="menu-trigger" aria-label="More actions">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="3" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="11" cy="7" r="1.2" fill="currentColor"/></svg>
+                </button>
+                <div id="menu-dropdown" class="menu-dropdown hidden">
+                    <button data-action="export-doc">Export Active Document</button>
+                    <button data-action="export-all">Export All as ZIP</button>
+                    <button data-action="import-json">Import JSON</button>
+                    <button data-action="import-file">Import Text File</button>
+                    <hr>
+                    <button data-action="clear-all">Clear All Panes</button>
+                </div>
             </div>
         </div>
 
@@ -30,44 +68,63 @@
         <!-- Sequence panel (initially hidden) -->
         <div id="sequence-panel" class="sequence-panel hidden">
             <div class="sequence-header">
-                <h3>Document Sequence</h3>
-                <button id="close-sequence" class="close-btn">×</button>
+                <h3>Documents</h3>
+                <button id="close-sequence" class="close-btn" aria-label="Close">×</button>
             </div>
             <div id="sequence-list" class="sequence-list"></div>
             <div class="sequence-actions">
-                <button id="diff-selected">Diff Selected</button>
+                <button id="diff-selected" disabled>Diff Selected</button>
                 <button id="multi-diff">Multi-Diff All</button>
             </div>
         </div>
 
         <!-- Command palette -->
         <div id="command-palette" class="command-palette hidden">
-            <input id="palette-input" type="text" placeholder="Type command..." autocomplete="off">
+            <div class="palette-header">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.5"/><path d="M9.5 9.5L13 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                <input id="palette-input" type="text" placeholder="Type a command..." autocomplete="off" spellcheck="false">
+            </div>
             <div id="palette-results" class="palette-results"></div>
         </div>
 
-        <!-- Diff viewer -->
+        <!-- Diff viewer modal -->
         <div id="diff-viewer" class="diff-viewer hidden">
             <div class="diff-header">
                 <h3 id="diff-title">Document Diff</h3>
-                <button id="close-diff" class="close-btn">×</button>
+                <div class="diff-toolbar">
+                    <button id="copy-diff" class="tool-btn small" title="Copy diff to clipboard">Copy</button>
+                    <button id="close-diff" class="close-btn" aria-label="Close">×</button>
+                </div>
             </div>
+            <div class="diff-stats" id="diff-stats"></div>
             <div id="diff-content" class="diff-content"></div>
         </div>
+
+        <!-- Find bar (per-pane, cloned dynamically) -->
+        <!-- Toast container -->
+        <div id="toast-container" class="toast-container"></div>
 
         <!-- SVG overlay for arrows -->
         <svg id="arrow-overlay" class="arrow-overlay">
             <defs>
-                <marker id="arrowhead" markerWidth="10" markerHeight="7" 
-                        refX="9" refY="3.5" orient="auto">
-                    <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+                <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                    <polygon points="0 0, 8 3, 0 6" fill="var(--text-muted)" />
                 </marker>
             </defs>
         </svg>
+
+        <!-- Drop overlay -->
+        <div id="drop-overlay" class="drop-overlay hidden">
+            <div class="drop-message">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><path d="M24 4v28M14 22l10 10 10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 36v4a4 4 0 004 4h32a4 4 0 004-4v-4" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+                <span>Drop file to create a new pane</span>
+            </div>
+        </div>
     </div>
 
-    <!-- Hidden file input for imports -->
-    <input type="file" id="import-input" accept=".json" style="display: none;">
+    <!-- Hidden file inputs -->
+    <input type="file" id="import-json-input" accept=".json" style="display: none;">
+    <input type="file" id="import-file-input" accept=".txt,.md,.csv,.log,.xml,.html,.css,.js,.ts,.py,.json,.yml,.yaml,.toml,.ini,.cfg,.sh,.bat,.sql,.diff,.patch" style="display: none;" multiple>
 
     <script src="app.js"></script>
 </body>

@@ -9,91 +9,122 @@
 </head>
 <body>
     <div class="app-container">
-        <!-- Header with controls -->
         <header class="header">
-            <div class="logo">
-                <i class="fas fa-sticky-note"></i>
-                <h1>Craft Notes</h1>
-            </div>
-            
-            <div class="board-controls">
-                <select id="boardSelect" class="board-select">
-                    <option value="default">Default Board (0)</option>
-                </select>
-                <select id="themeSelect" class="board-select">
-                    <option value="default">Default Theme</option>
-                    <option value="gray-office">Gray Office</option>
-                    <option value="dark-mode">Dark Mode</option>
-                    <option value="deep-blue">Deep Blue</option>
-                    <option value="silent-forest">Silent Forest</option>
-                </select>
-                <button id="newBoardBtn" class="btn btn-primary">
-                    <i class="fas fa-plus"></i> New Board
-                </button>
-                <button id="deleteBoardBtn" class="btn btn-danger">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </div>
-            
-            <div class="note-controls">
-                <button id="newNoteBtn" class="btn btn-success">
-                    <i class="fas fa-plus"></i> New Note
-                </button>
-                <div class="color-picker-wrapper">
-                    <button id="colorPickerBtn" class="btn btn-secondary color-picker-btn">
-                        <div class="color-preview" id="colorPreview"></div>
-                        <span>Default Color</span>
+            <div class="header-left">
+                <div class="logo">
+                    <i class="fas fa-sticky-note"></i>
+                    <h1>Craft Notes</h1>
+                </div>
+                <div class="search-wrapper">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="searchInput" class="search-input" placeholder="Search notes...">
+                    <button id="clearSearchBtn" class="search-clear" style="display:none;">
+                        <i class="fas fa-times"></i>
                     </button>
-                    <div class="color-dropdown" id="colorDropdown">
-                        <div class="color-grid">
-                            <div class="color-swatch" data-color="#fff740" style="background: #fff740;" title="Classic Yellow"></div>
-                            <div class="color-swatch" data-color="#ff6b6b" style="background: #ff6b6b;" title="Coral Red"></div>
-                            <div class="color-swatch" data-color="#27ae60" style="background: #27ae60;" title="Forest Green"></div>
-                            <div class="color-swatch" data-color="#6c5ce7" style="background: #6c5ce7;" title="Deep Purple"></div>
-                            <div class="color-swatch" data-color="#3498db" style="background: #3498db;" title="Sky Blue"></div>
-                            <div class="color-swatch" data-color="#fd79a8" style="background: #fd79a8;" title="Rose Pink"></div>
-                            <div class="color-swatch" data-color="#e17055" style="background: #e17055;" title="Warm Orange"></div>
-                            <div class="color-swatch" data-color="#f8f9fa" style="background: #f8f9fa; border: 2px solid #dee2e6;" title="Light Gray"></div>
-                            <div class="color-swatch dark-note" data-color="#2d3436" style="background: #2d3436;" title="Dark Note"></div>
+                </div>
+            </div>
+
+            <div class="header-center">
+                <div class="board-controls">
+                    <select id="boardSelect" class="board-select">
+                        <option value="default">Default Board (0)</option>
+                    </select>
+                    <button id="newBoardBtn" class="btn btn-primary" title="New Board">
+                        <i class="fas fa-plus"></i><span class="btn-label"> Board</span>
+                    </button>
+                    <button id="deleteBoardBtn" class="btn btn-danger" title="Delete Board">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                    <div class="separator"></div>
+                    <select id="themeSelect" class="board-select">
+                        <option value="default">Default Theme</option>
+                        <option value="gray-office">Gray Office</option>
+                        <option value="dark-mode">Dark Mode</option>
+                        <option value="deep-blue">Deep Blue</option>
+                        <option value="silent-forest">Silent Forest</option>
+                        <option value="warm-sunset">Warm Sunset</option>
+                        <option value="rose-garden">Rose Garden</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="header-right">
+                <div class="note-controls">
+                    <button id="newNoteBtn" class="btn btn-success" title="New Note (Ctrl+N)">
+                        <i class="fas fa-plus"></i><span class="btn-label"> Note</span>
+                    </button>
+                    <div class="color-picker-wrapper">
+                        <button id="colorPickerBtn" class="btn btn-secondary color-picker-btn" title="Default Color">
+                            <div class="color-preview" id="colorPreview"></div>
+                        </button>
+                        <div class="color-dropdown" id="colorDropdown">
+                            <div class="color-grid">
+                                <div class="color-swatch" data-color="#fff740" style="background: #fff740;" title="Classic Yellow"></div>
+                                <div class="color-swatch" data-color="#ff6b6b" style="background: #ff6b6b;" title="Coral Red"></div>
+                                <div class="color-swatch" data-color="#27ae60" style="background: #27ae60;" title="Forest Green"></div>
+                                <div class="color-swatch" data-color="#6c5ce7" style="background: #6c5ce7;" title="Deep Purple"></div>
+                                <div class="color-swatch" data-color="#3498db" style="background: #3498db;" title="Sky Blue"></div>
+                                <div class="color-swatch" data-color="#fd79a8" style="background: #fd79a8;" title="Rose Pink"></div>
+                                <div class="color-swatch" data-color="#e17055" style="background: #e17055;" title="Warm Orange"></div>
+                                <div class="color-swatch" data-color="#00cec9" style="background: #00cec9;" title="Teal"></div>
+                                <div class="color-swatch" data-color="#f8f9fa" style="background: #f8f9fa; border: 2px solid #dee2e6;" title="Light Gray"></div>
+                                <div class="color-swatch dark-note" data-color="#2d3436" style="background: #2d3436;" title="Dark Note"></div>
+                            </div>
                         </div>
                     </div>
+                    <div class="separator"></div>
+                    <button id="autoAlignBtn" class="btn btn-secondary" title="Auto Align">
+                        <i class="fas fa-th"></i>
+                    </button>
+                    <button id="snapBtn" class="btn btn-secondary" data-snap="false" title="Toggle Snap to Grid">
+                        <i class="fas fa-magnet"></i>
+                    </button>
+                    <button id="gridToggleBtn" class="btn btn-secondary" title="Toggle Grid">
+                        <i class="fas fa-border-all"></i>
+                    </button>
+                    <button id="autoGroupBtn" class="btn btn-secondary" title="Group by Color">
+                        <i class="fas fa-layer-group"></i>
+                    </button>
+                    <div class="separator"></div>
+                    <button id="undoBtn" class="btn btn-secondary" disabled title="Undo (Ctrl+Z)">
+                        <i class="fas fa-undo"></i>
+                    </button>
+                    <button id="downloadBtn" class="btn btn-secondary" disabled title="Download as Text">
+                        <i class="fas fa-download"></i>
+                    </button>
+                    <button id="exportBtn" class="btn btn-secondary" title="Export JSON Backup">
+                        <i class="fas fa-file-export"></i>
+                    </button>
+                    <button id="importBtn" class="btn btn-secondary" title="Import JSON Backup">
+                        <i class="fas fa-file-import"></i>
+                    </button>
+                    <input type="file" id="importFileInput" accept=".json" style="display:none;">
+                    <button id="clearAllBtn" class="btn btn-danger" title="Clear All Notes">
+                        <i class="fas fa-broom"></i>
+                    </button>
+                    <button id="shortcutsBtn" class="btn btn-secondary" title="Keyboard Shortcuts">
+                        <i class="fas fa-keyboard"></i>
+                    </button>
                 </div>
-                <button id="autoAlignBtn" class="btn btn-secondary">
-                    <i class="fas fa-th"></i> Align
-                </button>
-                <button id="gridToggleBtn" class="btn btn-secondary">
-                    <i class="fas fa-border-all"></i> Hide Grid
-                </button>
-                <button id="snapBtn" class="btn btn-secondary" data-snap="false">
-                    <i class="fas fa-grip"></i> Snap: OFF
-                </button>
-                <button id="autoGroupBtn" class="btn btn-secondary">
-                    <i class="fas fa-layer-group"></i> Group by Color
-                </button>
-                <button id="undoBtn" class="btn btn-warning" disabled>
-                    <i class="fas fa-undo"></i> Undo
-                </button>
-                <button id="downloadBtn" class="btn btn-info" disabled>
-                    <i class="fas fa-download"></i> Download
-                </button>
-                <button id="clearAllBtn" class="btn btn-danger">
-                    <i class="fas fa-broom"></i> Clear All
-                </button>
             </div>
         </header>
 
-        <!-- Main workspace -->
         <div class="workspace" id="workspace">
             <div class="drop-zone" id="dropZone">
-                <button id="dropZoneNewNoteBtn" class="btn btn-success btn-large">
-                    <i class="fas fa-plus"></i> New Note
-                </button>
+                <div class="drop-zone-content">
+                    <i class="fas fa-sticky-note drop-zone-icon"></i>
+                    <p class="drop-zone-title">No notes yet</p>
+                    <p class="drop-zone-subtitle">Create a note or drop an image here</p>
+                    <button id="dropZoneNewNoteBtn" class="btn btn-success btn-large">
+                        <i class="fas fa-plus"></i> New Note
+                    </button>
+                </div>
             </div>
             <div class="grid-overlay active" id="gridOverlay"></div>
             <div class="selection-box" id="selectionBox"></div>
         </div>
 
-        <!-- Color picker modal -->
+        <!-- Color picker modal for individual notes -->
         <div class="color-picker-modal" id="colorPickerModal">
             <div class="color-options">
                 <div class="color-option" data-color="#fff740" style="background: #fff740;"></div>
@@ -103,6 +134,7 @@
                 <div class="color-option" data-color="#3498db" style="background: #3498db;"></div>
                 <div class="color-option" data-color="#fd79a8" style="background: #fd79a8;"></div>
                 <div class="color-option" data-color="#e17055" style="background: #e17055;"></div>
+                <div class="color-option" data-color="#00cec9" style="background: #00cec9;"></div>
                 <div class="color-option" data-color="#f8f9fa" style="background: #f8f9fa; border: 2px solid #dee2e6;"></div>
                 <div class="color-option dark-note" data-color="#2d3436" style="background: #2d3436;"></div>
             </div>
@@ -116,18 +148,42 @@
             </div>
         </div>
 
-        <!-- Note modal -->
+        <!-- Note modal (fullscreen edit) -->
         <div class="note-modal" id="noteModal">
             <div class="note-modal-content">
                 <div class="note-modal-header">
                     <h3>Edit Note</h3>
-                    <button class="modal-close-btn" id="closeNoteModal">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    <div class="note-modal-actions">
+                        <span class="note-modal-timestamp" id="modalTimestamp"></span>
+                        <button class="modal-close-btn" id="closeNoteModal">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
                 </div>
                 <div class="note-modal-body">
                     <img id="modalNoteImage" class="modal-note-image" style="display: none;" alt="Note image">
                     <textarea id="modalNoteTextarea" class="modal-note-textarea" placeholder="Type your note here..."></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Keyboard shortcuts modal -->
+        <div class="shortcuts-modal" id="shortcutsModal">
+            <div class="shortcuts-modal-content">
+                <div class="shortcuts-header">
+                    <h3>Keyboard Shortcuts</h3>
+                    <button class="modal-close-btn" id="closeShortcutsModal">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="shortcuts-body">
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>N</kbd><span>New note</span></div>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Z</kbd><span>Undo</span></div>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>A</kbd><span>Select all notes</span></div>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>F</kbd><span>Focus search</span></div>
+                    <div class="shortcut-row"><kbd>Delete</kbd><span>Delete selected notes</span></div>
+                    <div class="shortcut-row"><kbd>Escape</kbd><span>Clear selection / close modal</span></div>
+                    <div class="shortcut-row"><kbd>?</kbd><span>Toggle this panel</span></div>
                 </div>
             </div>
         </div>

@@ -5,7 +5,9 @@
       "Bash(do node:*)",
       "Bash(echo \"$f OK\")",
       "Bash(echo \"$f FAILED\")",
-      "Bash(done)"
+      "Bash(done)",
+      "Read(//mnt/c/Users/mvlor/OneDrive/Documents/mlorenz.xyz/vibe-code/**)",
+      "Bash(xargs wc:*)"
     ]
   }
 }

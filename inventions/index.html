@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventions — Mikkel Lorenz</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="dark-mode">
+
+    <div class="grain-overlay" aria-hidden="true"></div>
+
+    <nav class="navbar">
+        <div class="container">
+            <div class="logo">MLORENZ<span class="logo-dot">.</span>XYZ</div>
+            <div class="nav-items">
+                <a href="../index.html">Home</a>
+                <a href="../vibe-code/index.html">Vibe Code</a>
+                <a href="index.html" class="active">Inventions</a>
+                <a href="../consultancy/index.html">Consultancy</a>
+            </div>
+            <button id="theme-toggle" aria-label="Toggle dark mode">☀️</button>
+        </div>
+    </nav>
+
+    <!-- ═══════════════ CARD GRID VIEW ═══════════════ -->
+    <main class="container" id="inventions-grid-view">
+        <section class="section">
+            <h2 class="section-title">Inventions</h2>
+            <p class="section-subtitle">
+                Ideas that turned into prototypes. Some practical, some experimental,
+                all built because I couldn't stop thinking about them.
+            </p>
+            <div class="inventions-grid" id="inventions-grid">
+                <!-- Cards injected by JS -->
+            </div>
+        </section>
+    </main>
+
+    <!-- ═══════════════ ARTICLE VIEW ═══════════════ -->
+    <main class="container" id="inventions-article-view" style="display: none;">
+        <section class="section">
+            <button class="invention-back-btn" onclick="showGrid()">
+                <i class="fas fa-arrow-left"></i> Back to Inventions
+            </button>
+            <article class="invention-article" id="invention-article">
+                <!-- Article content injected by JS -->
+            </article>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 — Mikkel Lorenz · Built with caffeine and questionable time management</p>
+        </div>
+    </footer>
+
+    <script src="../js/darkmode.js"></script>
+    <script src="../js/main.js"></script>
+    <script>
+    // ── Minimal Markdown → HTML parser ──
+    function parseMarkdown(md, baseUrl) {
+        let html = md;
+
+        // Normalize line endings
+        html = html.replace(/\r\n/g, '\n');
+
+        // Images: ![alt](path) → resolve relative to invention folder
+        html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
+            const resolvedSrc = src.startsWith('http') ? src : baseUrl + '/' + src;
+            return `<figure class="invention-figure"><img src="${resolvedSrc}" alt="${alt}" loading="lazy"><figcaption>${alt}</figcaption></figure>`;
+        });
+
+        // Links
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+        // Headings (process line by line to avoid mid-paragraph matches)
+        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+        // Bold & italic
+        html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+        // Inline code
+        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+        // Horizontal rule
+        html = html.replace(/^---$/gm, '<hr>');
+
+        // Unordered lists
+        html = html.replace(/^(?:- (.+)\n?)+/gm, (match) => {
+            const items = match.trim().split('\n').map(line =>
+                `<li>${line.replace(/^- /, '')}</li>`
+            ).join('');
+            return `<ul>${items}</ul>`;
+        });
+
+        // Ordered lists
+        html = html.replace(/^(?:\d+\. (.+)\n?)+/gm, (match) => {
+            const items = match.trim().split('\n').map(line =>
+                `<li>${line.replace(/^\d+\. /, '')}</li>`
+            ).join('');
+            return `<ol>${items}</ol>`;
+        });
+
+        // Blockquotes
+        html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+
+        // Paragraphs: wrap remaining loose text blocks
+        html = html.split('\n\n').map(block => {
+            block = block.trim();
+            if (!block) return '';
+            // Don't wrap blocks that are already HTML elements
+            if (/^<(h[1-6]|ul|ol|blockquote|figure|hr|div|table)/.test(block)) return block;
+            return `<p>${block.replace(/\n/g, '<br>')}</p>`;
+        }).join('\n');
+
+        return html;
+    }
+
+    // ── State ──
+    let inventionsData = [];
+
+    // ── Load manifest and render cards ──
+    async function loadInventions() {
+        try {
+            const resp = await fetch('inventions.json');
+            inventionsData = await resp.json();
+            renderCards(inventionsData);
+
+            // Check URL hash for deep linking
+            const hash = window.location.hash.slice(1);
+            if (hash) {
+                const invention = inventionsData.find(i => i.slug === hash);
+                if (invention) showArticle(invention.slug);
+            }
+        } catch (e) {
+            document.getElementById('inventions-grid').innerHTML =
+                '<p style="color: var(--text-secondary);">No inventions yet. Add one to <code>inventions/inventions.json</code>!</p>';
+        }
+    }
+
+    function renderCards(items) {
+        const grid = document.getElementById('inventions-grid');
+        grid.innerHTML = items.map(item => `
+            <a class="card invention-card" href="#${item.slug}" onclick="showArticle('${item.slug}'); return false;">
+                ${item.cover
+                    ? `<div class="card-image"><img src="${item.slug}/${item.cover}" alt="${item.title}"></div>`
+                    : `<div class="card-image invention-placeholder"><i class="fas fa-lightbulb"></i></div>`
+                }
+                <div class="card-content">
+                    <h3 class="card-title">${item.title}</h3>
+                    <p class="card-description">${item.summary}</p>
+                    <div class="card-tags">
+                        ${(item.tags || []).map(t => `<span class="tag">${t}</span>`).join('')}
+                    </div>
+                </div>
+            </a>
+        `).join('');
+    }
+
+    // ── Show single article ──
+    async function showArticle(slug) {
+        const invention = inventionsData.find(i => i.slug === slug);
+        if (!invention) return;
+
+        window.location.hash = slug;
+
+        try {
+            const resp = await fetch(`${slug}/article.md`);
+            if (!resp.ok) throw new Error('Not found');
+            const md = await resp.text();
+            const articleHtml = parseMarkdown(md, slug);
+
+            document.getElementById('invention-article').innerHTML = articleHtml;
+            document.getElementById('inventions-grid-view').style.display = 'none';
+            document.getElementById('inventions-article-view').style.display = 'block';
+            window.scrollTo(0, 0);
+        } catch (e) {
+            document.getElementById('invention-article').innerHTML =
+                `<p style="color: var(--text-secondary);">Could not load article for "${invention.title}".</p>`;
+            document.getElementById('inventions-grid-view').style.display = 'none';
+            document.getElementById('inventions-article-view').style.display = 'block';
+        }
+    }
+
+    // ── Back to grid ──
+    function showGrid() {
+        window.location.hash = '';
+        document.getElementById('inventions-grid-view').style.display = 'block';
+        document.getElementById('inventions-article-view').style.display = 'none';
+        window.scrollTo(0, 0);
+    }
+
+    // ── Handle browser back/forward ──
+    window.addEventListener('hashchange', () => {
+        const hash = window.location.hash.slice(1);
+        if (hash) {
+            showArticle(hash);
+        } else {
+            showGrid();
+        }
+    });
+
+    // ── Init ──
+    loadInventions();
+    </script>
+</body>
+</html>

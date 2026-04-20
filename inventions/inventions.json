@@ -1,0 +1,9 @@
+[
+    {
+        "slug": "example-invention",
+        "title": "Self-Watering Planter",
+        "summary": "A 3D-printed planter with a capillary wick system that keeps plants alive even when you forget. Designed for desk use.",
+        "cover": "cover.jpg",
+        "tags": ["3D Printing", "Design", "Prototype"]
+    }
+]

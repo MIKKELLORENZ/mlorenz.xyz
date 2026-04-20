@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laser Cutter Studio</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Roboto&family=Montserrat&family=Playfair+Display&family=Lobster&family=Oswald&family=Bangers&family=Dancing+Script&family=Pacifico&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/imagetracerjs@1.2.6/imagetracer_v1.2.6.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+    <div class="app">
+
+        <!-- TOP TOOLBAR -->
+        <header class="topbar">
+            <div class="brand">
+                <i data-lucide="zap" class="brand-icon"></i>
+                <span>Laser Cutter Studio</span>
+            </div>
+            <div class="toolbar-group">
+                <button class="tbtn" id="tb-import" title="Import (I)">
+                    <i data-lucide="upload"></i><span>Import</span>
+                </button>
+                <input type="file" id="file-input" accept="image/*,.svg,.pdf" style="display:none" multiple>
+                <button class="tbtn" id="tb-export" title="Export GCode (E)">
+                    <i data-lucide="download"></i><span>Export</span>
+                </button>
+            </div>
+            <div class="toolbar-sep"></div>
+            <div class="toolbar-group">
+                <button class="tbtn icon-only" id="tb-undo" title="Undo (Ctrl+Z)"><i data-lucide="undo-2"></i></button>
+                <button class="tbtn icon-only" id="tb-redo" title="Redo (Ctrl+Y)"><i data-lucide="redo-2"></i></button>
+            </div>
+            <div class="toolbar-sep"></div>
+            <div class="toolbar-group zoom-group">
+                <button class="tbtn icon-only" id="tb-zoom-out" title="Zoom Out"><i data-lucide="minus"></i></button>
+                <span class="zoom-label" id="zoom-label">100%</span>
+                <button class="tbtn icon-only" id="tb-zoom-in" title="Zoom In"><i data-lucide="plus"></i></button>
+                <button class="tbtn icon-only" id="tb-zoom-fit" title="Fit to view (F)"><i data-lucide="maximize"></i></button>
+            </div>
+            <div class="toolbar-sep"></div>
+            <div class="toolbar-group">
+                <button class="tbtn icon-only" id="tb-align-left" title="Align Left"><i data-lucide="align-start-vertical"></i></button>
+                <button class="tbtn icon-only" id="tb-align-cx" title="Align Center H"><i data-lucide="align-center-vertical"></i></button>
+                <button class="tbtn icon-only" id="tb-align-right" title="Align Right"><i data-lucide="align-end-vertical"></i></button>
+                <button class="tbtn icon-only" id="tb-align-top" title="Align Top"><i data-lucide="align-start-horizontal"></i></button>
+                <button class="tbtn icon-only" id="tb-align-cy" title="Align Center V"><i data-lucide="align-center-horizontal"></i></button>
+                <button class="tbtn icon-only" id="tb-align-bottom" title="Align Bottom"><i data-lucide="align-end-horizontal"></i></button>
+            </div>
+            <div class="toolbar-group">
+                <button class="tbtn icon-only" id="tb-dist-h" title="Distribute Horizontally"><i data-lucide="columns-3"></i></button>
+                <button class="tbtn icon-only" id="tb-dist-v" title="Distribute Vertically"><i data-lucide="rows-3"></i></button>
+            </div>
+            <div class="toolbar-sep"></div>
+            <div class="toolbar-group">
+                <button class="tbtn icon-only" id="tb-grid-toggle" title="Toggle Grid (G)"><i data-lucide="grid-3x3"></i></button>
+                <button class="tbtn icon-only" id="tb-snap-toggle" title="Toggle Snap (S)"><i data-lucide="magnet"></i></button>
+                <button class="tbtn icon-only" id="tb-theme-toggle" title="Toggle theme"><i data-lucide="sun-moon"></i></button>
+                <button class="tbtn" id="tb-settings" title="Settings">
+                    <i data-lucide="settings"></i><span>Settings</span>
+                </button>
+            </div>
+            <div class="toolbar-spacer"></div>
+            <div class="toolbar-group">
+                <button class="tbtn primary" id="tb-generate" title="Generate GCode">
+                    <i data-lucide="play"></i><span>Generate GCode</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- LEFT TOOLBAR -->
+        <aside class="tools">
+            <button class="tool active" data-tool="select" title="Select (V)"><i data-lucide="mouse-pointer-2"></i></button>
+            <button class="tool" data-tool="rect" title="Rectangle (R)"><i data-lucide="square"></i></button>
+            <button class="tool" data-tool="circle" title="Ellipse (C)"><i data-lucide="circle"></i></button>
+            <button class="tool" data-tool="line" title="Line (L)"><i data-lucide="slash"></i></button>
+            <button class="tool" data-tool="text" title="Text (T)"><i data-lucide="type"></i></button>
+            <button class="tool" data-tool="pen" title="Pen (P)"><i data-lucide="pen-tool"></i></button>
+            <button class="tool" data-tool="node" title="Node Edit (N)"><i data-lucide="spline"></i></button>
+            <button class="tool" data-tool="image" title="Image (drag & drop anywhere)"><i data-lucide="image"></i></button>
+            <div class="tools-spacer"></div>
+            <button class="tool danger" id="tool-delete" title="Delete (Del)"><i data-lucide="trash-2"></i></button>
+        </aside>
+
+        <!-- CANVAS AREA -->
+        <main class="stage">
+            <div class="ruler-corner" id="ruler-corner">
+                <span id="cursor-coords">0.0, 0.0 mm</span>
+            </div>
+            <div class="ruler ruler-x" id="ruler-x"></div>
+            <div class="ruler ruler-y" id="ruler-y"></div>
+            <div class="canvas-wrap" id="canvas-wrap">
+                <canvas id="main-canvas"></canvas>
+                <canvas id="overlay-canvas"></canvas>
+            </div>
+            <div class="drop-hint" id="drop-hint">
+                <i data-lucide="upload-cloud"></i>
+                <p>Drop image, SVG, or PDF to import</p>
+            </div>
+
+            <!-- GCode preview strip -->
+            <div class="preview-strip" id="preview-strip">
+                <button class="tbtn icon-only" id="pv-play" title="Play"><i data-lucide="play"></i></button>
+                <button class="tbtn icon-only" id="pv-pause" title="Pause" style="display:none"><i data-lucide="pause"></i></button>
+                <button class="tbtn icon-only" id="pv-stop" title="Stop"><i data-lucide="square"></i></button>
+                <div class="pv-speeds">
+                    <button class="pv-speed active" data-speed="1">1×</button>
+                    <button class="pv-speed" data-speed="5">5×</button>
+                    <button class="pv-speed" data-speed="10">10×</button>
+                    <button class="pv-speed" data-speed="20">20×</button>
+                </div>
+                <input type="range" id="pv-seek" min="0" max="1000" value="0" step="1">
+                <span class="pv-time" id="pv-time">00:00 / 00:00</span>
+                <button class="tbtn icon-only" id="pv-close" title="Close preview"><i data-lucide="x"></i></button>
+            </div>
+        </main>
+
+        <!-- RIGHT PANEL -->
+        <aside class="panel">
+            <div class="panel-tabs">
+                <button class="panel-tab active" data-tab="layers">Layers</button>
+                <button class="panel-tab" data-tab="props">Properties</button>
+                <button class="panel-tab" data-tab="machine">Machine</button>
+            </div>
+            <div class="panel-body">
+
+                <!-- LAYERS -->
+                <div class="panel-pane active" data-pane="layers">
+                    <div class="pane-head">
+                        <span>Layers</span>
+                        <button class="ghost-btn" id="add-layer-btn" title="Add Layer">
+                            <i data-lucide="plus"></i>
+                        </button>
+                    </div>
+                    <div class="layer-list" id="layer-list"></div>
+                    <div class="layer-editor" id="layer-editor">
+                        <div class="row">
+                            <label>Name</label>
+                            <input type="text" id="layer-name">
+                        </div>
+                        <div class="row">
+                            <label>Color</label>
+                            <input type="color" id="layer-color">
+                        </div>
+                        <div class="row">
+                            <label>Operation</label>
+                            <select id="layer-optype">
+                                <option value="cut">Cut</option>
+                                <option value="engrave">Engrave</option>
+                                <option value="score">Score</option>
+                            </select>
+                        </div>
+                        <div class="row">
+                            <label>Power (%)</label>
+                            <div class="slider-group">
+                                <input type="range" id="layer-power" min="0" max="100" value="80">
+                                <span class="slider-value" id="layer-power-val">80</span>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <label>Speed (mm/min)</label>
+                            <input type="number" id="layer-speed" min="1" max="30000" value="1500">
+                        </div>
+                        <div class="row">
+                            <label>Passes</label>
+                            <input type="number" id="layer-passes" min="1" max="20" value="1">
+                        </div>
+                        <div class="row check">
+                            <input type="checkbox" id="layer-airassist">
+                            <label for="layer-airassist">Air assist</label>
+                        </div>
+                        <button class="btn-danger" id="delete-layer-btn">
+                            <i data-lucide="trash-2"></i> Delete Layer
+                        </button>
+                    </div>
+                </div>
+
+                <!-- PROPERTIES -->
+                <div class="panel-pane" data-pane="props">
+                    <div class="pane-head"><span>Properties</span></div>
+                    <div id="props-empty" class="pane-empty">Select an object to edit properties.</div>
+
+                    <div id="props-common" class="props-group" style="display:none">
+                        <div class="row">
+                            <label>X (mm)</label>
+                            <input type="number" id="p-x" step="0.1">
+                        </div>
+                        <div class="row">
+                            <label>Y (mm)</label>
+                            <input type="number" id="p-y" step="0.1">
+                        </div>
+                        <div class="row">
+                            <label>Width (mm)</label>
+                            <input type="number" id="p-w" step="0.1">
+                        </div>
+                        <div class="row">
+                            <label>Height (mm)</label>
+                            <input type="number" id="p-h" step="0.1">
+                        </div>
+                        <div class="row">
+                            <label>Rotation (°)</label>
+                            <input type="number" id="p-rot" step="1">
+                        </div>
+                        <div class="row">
+                            <label>Layer</label>
+                            <select id="p-layer"></select>
+                        </div>
+                        <div class="row">
+                            <label>Operation override</label>
+                            <select id="p-optype">
+                                <option value="">(from layer)</option>
+                                <option value="cut">Cut</option>
+                                <option value="engrave">Engrave</option>
+                                <option value="score">Score</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- image-specific -->
+                    <div id="props-image" class="props-group" style="display:none">
+                        <div class="pane-sub">Image Processing</div>
+                        <div class="row">
+                            <label>Mode</label>
+                            <select id="img-mode">
+                                <option value="grayscale">Grayscale</option>
+                                <option value="threshold">B&amp;W Threshold (alpha)</option>
+                                <option value="dither">Dither</option>
+                            </select>
+                        </div>
+                        <div class="row" id="img-dither-row">
+                            <label>Algorithm</label>
+                            <select id="img-dither-algo">
+                                <option value="floyd">Floyd-Steinberg</option>
+                                <option value="atkinson">Atkinson</option>
+                                <option value="jarvis">Jarvis-Judice-Ninke</option>
+                                <option value="stucki">Stucki</option>
+                                <option value="burkes">Burkes</option>
+                                <option value="sierra">Sierra</option>
+                                <option value="bayer4">Bayer 4×4</option>
+                                <option value="bayer8">Bayer 8×8</option>
+                            </select>
+                        </div>
+                        <div class="row">
+                            <label>Threshold</label>
+                            <div class="slider-group">
+                                <input type="range" id="img-threshold" min="0" max="255" value="128">
+                                <span class="slider-value" id="img-threshold-val">128</span>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <label>Contrast</label>
+                            <div class="slider-group">
+                                <input type="range" id="img-contrast" min="-100" max="100" value="0">
+                                <span class="slider-value" id="img-contrast-val">0</span>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <label>Brightness</label>
+                            <div class="slider-group">
+                                <input type="range" id="img-brightness" min="-100" max="100" value="0">
+                                <span class="slider-value" id="img-brightness-val">0</span>
+                            </div>
+                        </div>
+                        <div class="row check">
+                            <input type="checkbox" id="img-invert">
+                            <label for="img-invert">Invert</label>
+                        </div>
+                        <button class="btn-secondary" id="img-trace-btn">
+                            <i data-lucide="spline"></i> Trace to Vector
+                        </button>
+                    </div>
+
+                    <!-- text-specific -->
+                    <div id="props-text" class="props-group" style="display:none">
+                        <div class="pane-sub">Text</div>
+                        <div class="row">
+                            <label>Content</label>
+                            <textarea id="t-content" rows="2"></textarea>
+                        </div>
+                        <div class="row">
+                            <label>Font</label>
+                            <select id="t-font">
+                                <option value="Inter">Inter</option>
+                                <option value="Roboto">Roboto</option>
+                                <option value="Montserrat">Montserrat</option>
+                                <option value="Playfair Display">Playfair Display</option>
+                                <option value="Lobster">Lobster</option>
+                                <option value="Oswald">Oswald</option>
+                                <option value="Bangers">Bangers</option>
+                                <option value="Dancing Script">Dancing Script</option>
+                                <option value="Pacifico">Pacifico</option>
+                                <option value="Arial">Arial</option>
+                                <option value="Georgia">Georgia</option>
+                                <option value="Courier New">Courier New</option>
+                            </select>
+                        </div>
+                        <div class="row">
+                            <label>Size (mm)</label>
+                            <input type="number" id="t-size" min="1" max="500" step="0.5" value="20">
+                        </div>
+                        <div class="row">
+                            <label>Weight</label>
+                            <select id="t-weight">
+                                <option value="normal">Normal</option>
+                                <option value="bold">Bold</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MACHINE -->
+                <div class="panel-pane" data-pane="machine">
+                    <div class="pane-head"><span>Machine</span></div>
+                    <div class="row">
+                        <label>Bed Width (mm)</label>
+                        <input type="number" id="m-bw" min="10" max="2000" value="400">
+                    </div>
+                    <div class="row">
+                        <label>Bed Height (mm)</label>
+                        <input type="number" id="m-bh" min="10" max="2000" value="400">
+                    </div>
+                    <div class="row">
+                        <label>Origin</label>
+                        <select id="m-origin">
+                            <option value="bottom-left">Bottom-Left (GRBL default)</option>
+                            <option value="top-left">Top-Left</option>
+                            <option value="center">Center</option>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <label>Dialect</label>
+                        <select id="m-dialect">
+                            <option value="grbl">GRBL (M4 dynamic)</option>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <label>Travel feed (mm/min)</label>
+                        <input type="number" id="m-travel" min="100" max="30000" value="3000">
+                    </div>
+                    <div class="row">
+                        <label>Raster line interval (mm)</label>
+                        <input type="number" id="m-interval" min="0.05" max="2" step="0.05" value="0.1">
+                    </div>
+                    <div class="row">
+                        <label>Max S value</label>
+                        <input type="number" id="m-smax" min="1" max="10000" value="1000">
+                    </div>
+                    <div class="row">
+                        <label>Grid spacing (mm)</label>
+                        <input type="number" id="m-grid" min="1" max="100" value="10">
+                    </div>
+                    <div class="row">
+                        <label>Snap tolerance (px)</label>
+                        <input type="number" id="m-snap" min="0" max="30" value="6">
+                    </div>
+                </div>
+
+            </div>
+        </aside>
+    </div>
+
+    <!-- GCODE EXPORT MODAL -->
+    <div class="modal" id="export-modal">
+        <div class="modal-panel">
+            <div class="modal-head">
+                <h3>Export GCode</h3>
+                <button class="ghost-btn" id="export-close"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <label>Filename</label>
+                    <input type="text" id="export-name" value="job">
+                </div>
+                <div class="row">
+                    <label>Extension</label>
+                    <select id="export-ext">
+                        <option value=".nc">.nc</option>
+                        <option value=".gcode">.gcode</option>
+                        <option value=".txt">.txt</option>
+                    </select>
+                </div>
+                <div class="row check">
+                    <input type="checkbox" id="export-comments" checked>
+                    <label for="export-comments">Include layer/comment headers</label>
+                </div>
+                <div class="row">
+                    <label>Preview (first 40 lines)</label>
+                    <pre id="export-preview" class="gcode-preview"></pre>
+                </div>
+                <div class="row">
+                    <label>Stats</label>
+                    <div id="export-stats" class="stats"></div>
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn-secondary" id="export-svg-btn"><i data-lucide="file-code"></i> Also export .svg</button>
+                <button class="btn-primary" id="export-download"><i data-lucide="download"></i> Download</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PROGRESS MODAL -->
+    <div class="modal" id="progress-modal">
+        <div class="modal-panel small">
+            <div class="modal-head"><h3 id="progress-title">Working...</h3></div>
+            <div class="modal-body">
+                <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+                <p id="progress-detail" class="muted"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

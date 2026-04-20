@@ -26,6 +26,18 @@ document.addEventListener('DOMContentLoaded', function() {
         },
 
         {
+            id: "stockman",
+            title: "Stockman",
+            description: "A stock trading simulation game.",
+            thumbnail: "https://github.com/MIKKELLORENZ/stockman/blob/main/menu_wallpaper.png?raw=true",
+            category: "games",
+            tags: ["stocks", "trading", "simulation", "javascript"],
+            date: "2026-04-20",
+            path: "projects/games/stockman/index.html",
+            type: "iframe"
+        },
+
+        {
             id: "craft_note",
             title: "Craft Note",
             description: "",
@@ -96,8 +108,30 @@ document.addEventListener('DOMContentLoaded', function() {
             date: "2025-12-27",
             path: "projects/utilities/laser_cut_puzzle_maker/index.html",
             type: "iframe"
+        },
 
-                
+        {
+            id: "laser_cutter_studio",
+            title: "Laser Cutter Studio",
+            description: "Browser-based laser cutter / engraver with layers, dithering, GCode export and preview.",
+            thumbnail: "../vibe-code/projects/utilities/laser_cutter_studio/thumbnail.png",
+            category: "utilities",
+            tags: ["laser cut", "engraver", "gcode", "grbl", "lightburn", "dithering", "svg", "pdf"],
+            date: "2026-04-17",
+            path: "projects/utilities/laser_cutter_studio/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "audio_studio",
+            title: "Audio Studio",
+            description: "A browser-based digital audio workstation with multi-track recording, EQ, compression, effects, and more.",
+            thumbnail: "../vibe-code/projects/utilities/audio_studio/thumbnail.png",
+            category: "utilities",
+            tags: ["audio", "music", "DAW", "recording", "mixing", "EQ", "compressor", "effects"],
+            date: "2026-04-04",
+            path: "projects/utilities/audio_studio/index.html",
+            type: "iframe"
         },
 
 

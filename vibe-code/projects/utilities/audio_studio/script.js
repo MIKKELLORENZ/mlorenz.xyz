@@ -24,12 +24,27 @@ let snapValue = 0.25; // quarter note
 let bpm = 120;
 let settingsInitialized = false;
 
+// Debounce helpers for expensive visual updates
+let _zoomRafId = null;
+let _waveformDebounceId = null;
+
+function debouncedUpdateAllRegions() {
+    if (_waveformDebounceId) cancelAnimationFrame(_waveformDebounceId);
+    _waveformDebounceId = requestAnimationFrame(() => {
+        _waveformDebounceId = null;
+        updateAllRegions();
+    });
+}
+
 // Project save/load
 let autoSaveTimeout = null;
 let isLoadingProject = false;
 const DB_NAME = 'AudioStudioDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'projects';
+
+// Region z-index counter (cheaper than String(++_regionZCounter))
+let _regionZCounter = 100;
 
 // Undo/Redo system
 let undoStack = [];
@@ -92,6 +107,8 @@ function setupEventListeners() {
             stopRecording();
         }
         audioEngine.stop();
+        stopSidechainProcessing();
+        stopPlaybackUILoop();
         updateTimeDisplay();
         updatePlayhead();
         updatePlayPauseButton();
@@ -175,15 +192,9 @@ function setupEventListeners() {
     // Timeline click (on ruler)
     document.querySelector('.timeline-ruler').addEventListener('click', handleTimelineClick);
     
-    // Global region dragging
-    document.addEventListener('mousemove', handleRegionDrag);
-    document.addEventListener('mouseup', handleRegionDragEnd);
-    document.addEventListener('mousemove', handleRegionResize);
-    document.addEventListener('mouseup', handleRegionResizeEnd);
-    document.addEventListener('mousemove', handleRegionFadeAdjust);
-    document.addEventListener('mouseup', handleRegionFadeAdjustEnd);
-    document.addEventListener('mousemove', handleRegionGainAdjust);
-    document.addEventListener('mouseup', handleRegionGainAdjustEnd);
+    // Global region dragging — single consolidated handler for each event type
+    document.addEventListener('mousemove', handleGlobalMouseMove);
+    document.addEventListener('mouseup', handleGlobalMouseUp);
     
     // Scrolling and Zooming
     const tracksWrapper = document.querySelector('.tracks-wrapper');
@@ -193,10 +204,15 @@ function setupEventListeners() {
     // Keyboard shortcuts
     document.addEventListener('keydown', handleKeyPress);
 
-    // Keep layout vars in sync
+    // Keep layout vars in sync — debounced to avoid resize thrashing
+    let _resizeRafId = null;
     window.addEventListener('resize', () => {
-        updateTrackControlsWidthVar();
-        updateTimelineZoom();
+        if (_resizeRafId) cancelAnimationFrame(_resizeRafId);
+        _resizeRafId = requestAnimationFrame(() => {
+            _resizeRafId = null;
+            updateTrackControlsWidthVar();
+            updateTimelineZoom();
+        });
     });
 }
 
@@ -428,8 +444,12 @@ function togglePlayPause() {
             stopRecording();
         }
         audioEngine.pause();
+        stopSidechainProcessing();
+        stopPlaybackUILoop();
     } else {
         audioEngine.play();
+        startSidechainProcessing();
+        startPlaybackUILoop();
     }
     updatePlayPauseButton();
 }
@@ -506,7 +526,7 @@ async function startRecording() {
         if (inputAnalyser && inputAnalyser._stream && inputAnalyser._stream.active) {
             // Reuse the existing stream from input metering
             recordingStream = inputAnalyser._stream;
-            console.log('Reusing input metering stream for recording, active:', recordingStream.active);
+            // Reusing existing input metering stream
         } else {
             // Create new stream and set up metering at the same time
             recordingStream = await navigator.mediaDevices.getUserMedia({ 
@@ -516,7 +536,7 @@ async function startRecording() {
                     autoGainControl: false
                 }
             });
-            console.log('Created new stream for recording');
+            // Created new stream for recording
             
             // Also set up input metering with this stream
             await setupInputMeteringWithStream(recordingStream, armedTrack.id);
@@ -539,24 +559,20 @@ async function startRecording() {
         }
     }
     
-    console.log('Using MIME type:', mimeType || 'browser default');
-    
     const options = mimeType ? { mimeType } : {};
     mediaRecorder = new MediaRecorder(recordingStream, options);
     recordingChunks = [];
     
     mediaRecorder.ondataavailable = (e) => {
-        console.log('Recording chunk received:', e.data.size, 'bytes');
         if (e.data.size > 0) {
             recordingChunks.push(e.data);
         }
     };
-    
+
     mediaRecorder.onstop = async () => {
-        console.log('Recording stopped, total chunks:', recordingChunks.length);
         await processRecording();
     };
-    
+
     mediaRecorder.onerror = (e) => {
         console.error('MediaRecorder error:', e);
         showNotification('Recording error: ' + e.error?.message || 'Unknown error');
@@ -574,6 +590,7 @@ async function startRecording() {
     // Automatically start playback when recording starts
     if (!audioEngine.isPlaying) {
         audioEngine.play();
+        startPlaybackUILoop();
         updatePlayPauseButton();
     }
     
@@ -620,29 +637,16 @@ async function processRecording() {
     isProcessingRecording = true;
 
     try {
-    console.log('processRecording called');
-    console.log('recordingChunks.length:', recordingChunks.length);
-    console.log('recordingTrack:', recordingTrack?.id);
-    
-    if (recordingChunks.length === 0) {
-        console.log('No recording chunks to process');
+    if (recordingChunks.length === 0 || !recordingTrack) {
+        recordingChunks = [];
+        recordingTrack = null;
         return;
     }
-    
-    if (!recordingTrack) {
-        console.log('No recording track set');
-        return;
-    }
-    
+
     const savedTrack = recordingTrack;
     const savedStartTime = recordingStartTime;
-    
-    // Create blob from chunks
-    const totalSize = recordingChunks.reduce((acc, chunk) => acc + chunk.size, 0);
-    console.log('Total chunks size:', totalSize);
-    
+
     const blob = new Blob(recordingChunks, { type: recordingChunks[0]?.type || 'audio/webm' });
-    console.log('Recording blob size:', blob.size, 'type:', blob.type);
     
     if (blob.size === 0) {
         showNotification('Recording was empty. Please try again.');
@@ -653,35 +657,15 @@ async function processRecording() {
     
     // Decode audio
     try {
-        console.log('AudioContext state:', audioEngine.audioContext.state);
-        
-        // Resume audio context if needed
         if (audioEngine.audioContext.state === 'suspended') {
             await audioEngine.audioContext.resume();
         }
-        
+
         const arrayBuffer = await blob.arrayBuffer();
-        console.log('ArrayBuffer size:', arrayBuffer.byteLength);
-        
         const audioBuffer = await audioEngine.audioContext.decodeAudioData(arrayBuffer);
-        console.log('Decoded audio buffer:', audioBuffer.duration, 'seconds, channels:', audioBuffer.numberOfChannels);
-        
-        // Analyze the actual recorded audio levels
-        const channelData = audioBuffer.getChannelData(0);
-        let maxSample = 0;
-        let sumSquares = 0;
-        for (let i = 0; i < channelData.length; i++) {
-            const abs = Math.abs(channelData[i]);
-            if (abs > maxSample) maxSample = abs;
-            sumSquares += channelData[i] * channelData[i];
-        }
-        const rms = Math.sqrt(sumSquares / channelData.length);
-        console.log('Recorded audio analysis - Peak:', maxSample.toFixed(4), 'RMS:', rms.toFixed(4), 'Peak dB:', (20 * Math.log10(maxSample)).toFixed(1));
-        
-        // Create region on the armed track
+
         const trackElement = document.querySelector(`.track[data-track-id="${savedTrack.id}"]`);
-        console.log('Track element found:', !!trackElement);
-        
+
         if (trackElement && audioBuffer) {
             const regionData = {
                 buffer: audioBuffer,
@@ -691,8 +675,7 @@ async function processRecording() {
                 endOffset: audioBuffer.duration,
                 name: `Recording ${new Date().toLocaleTimeString()}`
             };
-            
-            console.log('Creating region with data:', { startTime: savedStartTime, duration: audioBuffer.duration });
+
             createRegionFromData(regionData, savedTrack, trackElement);
             
             applyArrangementChange();
@@ -730,8 +713,6 @@ async function startInputMetering(trackId) {
             }
         });
         
-        console.log('Got microphone stream:', stream.active, stream.getAudioTracks());
-        
         await setupInputMeteringWithStream(stream, trackId);
         
     } catch (err) {
@@ -744,7 +725,7 @@ async function setupInputMeteringWithStream(stream, trackId) {
     // Resume audio context if needed
     if (audioEngine.audioContext.state === 'suspended') {
         await audioEngine.audioContext.resume();
-        console.log('Audio context resumed');
+        // Audio context resumed
     }
     
     // Stop existing metering (but don't stop the stream)
@@ -757,9 +738,9 @@ async function setupInputMeteringWithStream(stream, trackId) {
         inputSource = null;
     }
     
-    // Create analyser node
+    // Create analyser node — 512 is sufficient for level metering (2048 was overkill)
     inputAnalyser = audioEngine.audioContext.createAnalyser();
-    inputAnalyser.fftSize = 2048;
+    inputAnalyser.fftSize = 512;
     inputAnalyser.smoothingTimeConstant = 0.5;
     
     // Connect stream to analyser
@@ -775,7 +756,7 @@ async function setupInputMeteringWithStream(stream, trackId) {
     meterLogCounter = 0;
     updateInputMeter();
     
-    console.log('Input metering started for track:', trackId, 'stream active:', stream.active);
+    // Input metering started
 }
 
 function stopInputMetering() {
@@ -808,13 +789,17 @@ function stopInputMetering() {
 }
 
 let meterLogCounter = 0;
+let _inputMeterDataArray = null; // Reused across frames to avoid GC pressure
 
 function updateInputMeter() {
     if (!inputAnalyser) return;
-    
-    // Use time domain data for more accurate level metering
+
+    // Reuse buffer instead of allocating a new Uint8Array every frame
     const bufferLength = inputAnalyser.fftSize;
-    const dataArray = new Uint8Array(bufferLength);
+    if (!_inputMeterDataArray || _inputMeterDataArray.length !== bufferLength) {
+        _inputMeterDataArray = new Uint8Array(bufferLength);
+    }
+    const dataArray = _inputMeterDataArray;
     inputAnalyser.getByteTimeDomainData(dataArray);
     
     // Calculate peak level from waveform (centered around 128)
@@ -834,38 +819,23 @@ function updateInputMeter() {
     const peakLevel = (maxDeviation / 128) * 100;
     const avgLevel = (avgDeviation / 128) * 100;
     
-    // Log every 60 frames (about once per second)
     meterLogCounter++;
-    if (meterLogCounter % 60 === 0) {
-        // Also log the first few raw samples to see actual values
-        const sampleValues = Array.from(dataArray.slice(0, 10));
-        console.log('Input meter - peak:', peakLevel.toFixed(1), '% avg:', avgLevel.toFixed(2), '% samples:', sampleValues);
-    }
-    
+
     // Update meter bars for armed tracks
     const trackId = activeInputMeterTrackId || inputAnalyser._trackId;
     const meterBar = document.querySelector(`.input-meter-bar[data-track-id="${trackId}"]`);
     const meterPeak = document.querySelector(`.input-meter-peak[data-track-id="${trackId}"]`);
 
-    // Ensure only the active track reflects input meter movement
-    document.querySelectorAll('.input-meter-bar').forEach(bar => {
-        if (bar.dataset.trackId !== trackId) {
-            bar.style.width = '0%';
-        }
-    });
-    document.querySelectorAll('.input-meter-peak').forEach(peak => {
-        if (peak.dataset.trackId !== trackId) {
-            peak.style.left = '0%';
-        }
-    });
-    
-    // Log element state occasionally
-    if (meterLogCounter % 120 === 1) {
-        console.log('Meter elements found:', { meterBar: !!meterBar, meterPeak: !!meterPeak, trackId });
-        const track = document.querySelector(`.track[data-track-id="${trackId}"]`);
-        console.log('Track has armed class:', track?.classList.contains('armed'));
+    // Reset non-active meters only occasionally to reduce DOM writes
+    if (meterLogCounter % 30 === 0) {
+        document.querySelectorAll('.input-meter-bar').forEach(bar => {
+            if (bar.dataset.trackId !== trackId) bar.style.width = '0%';
+        });
+        document.querySelectorAll('.input-meter-peak').forEach(peak => {
+            if (peak.dataset.trackId !== trackId) peak.style.left = '0%';
+        });
     }
-    
+
     if (meterBar) {
         // Scale for good visibility - peak level * 3 gives good range
         const displayLevel = Math.min(peakLevel * 3, 100);
@@ -976,12 +946,31 @@ function updateSliderFill(slider, percentage) {
     slider.style.setProperty('--fill', `${percentage}%`);
 }
 
+function computeSliderFillPercent(slider) {
+    const min = parseFloat(slider.min) || 0;
+    const max = parseFloat(slider.max) || 100;
+    const val = parseFloat(slider.value) || 0;
+    return ((val - min) / (max - min)) * 100;
+}
+
 function initializeSliderFills() {
     // Initialize master volume slider fill
     const masterVolume = document.getElementById('masterVolume');
     if (masterVolume) {
         updateSliderFill(masterVolume, parseFloat(masterVolume.value) * 100);
     }
+
+    // Initialize ALL range inputs
+    document.querySelectorAll('input[type="range"]').forEach(slider => {
+        updateSliderFill(slider, computeSliderFillPercent(slider));
+    });
+
+    // Global listener: keep fill in sync on any range input change
+    document.addEventListener('input', (e) => {
+        if (e.target.type === 'range') {
+            updateSliderFill(e.target, computeSliderFillPercent(e.target));
+        }
+    });
 }
 
 function getTimelineContentWidth() {
@@ -1089,40 +1078,42 @@ function updateTimelineZoom() {
     }
     
     updateTimelineRuler();
-    updateAllRegions(); // Changed from updateAllWaveforms
+    debouncedUpdateAllRegions(); // Debounced — avoids canvas thrashing during rapid zoom
     updateTimelineGrid();
     updatePlayhead();
 }
 
 function updateAllRegions() {
-    // Update all audio regions position, width, and waveforms based on current zoom level
+    // Update all audio regions position, width, and waveforms based on current zoom level.
+    // Uses viewport culling: only redraw waveforms for regions visible on screen.
     const duration = audioEngine.duration || 60;
     const totalWidth = duration * pixelsPerSecond * zoomLevel;
-    
-    document.querySelectorAll('.audio-region').forEach(region => {
-        const canvas = region.querySelector('canvas');
-        if (canvas && canvas.audioBuffer) {
-            // Get region data from parent track
-            const trackElement = region.closest('.track');
-            const trackId = trackElement.dataset.trackId;
-            const track = audioEngine.tracks.find(t => t.id === trackId);
-            
-            if (track && track.regions) {
-                const regionData = track.regions.find(r => r.element === region);
-                if (regionData) {
-                    // Recalculate position and width
-                    const left = (regionData.startTime / duration) * totalWidth;
-                    const width = (regionData.duration / duration) * totalWidth;
-                    
-                    region.style.left = `${left}px`;
-                    region.style.width = `${width}px`;
-                    
-                    // Redraw waveform with new dimensions
-                    drawRegionWaveform(canvas, regionData.buffer, regionData.startOffset, regionData.endOffset);
-                    updateRegionFadeVisuals(regionData);
-                }
+
+    // Determine visible scroll range for culling
+    const tracksWrapper = document.querySelector('.tracks-wrapper');
+    const scrollLeft = tracksWrapper ? tracksWrapper.scrollLeft : 0;
+    const viewportWidth = tracksWrapper ? tracksWrapper.clientWidth : totalWidth;
+    const visibleLeft = scrollLeft - 200;  // small buffer outside viewport
+    const visibleRight = scrollLeft + viewportWidth + 200;
+
+    audioEngine.tracks.forEach(track => {
+        if (!track.regions) return;
+        track.regions.forEach(regionData => {
+            if (!regionData.element) return;
+            const canvas = regionData.element.querySelector('canvas');
+
+            // Recalculate position and width (always, it's cheap)
+            const left = (regionData.startTime / duration) * totalWidth;
+            const width = (regionData.duration / duration) * totalWidth;
+            regionData.element.style.left = `${left}px`;
+            regionData.element.style.width = `${width}px`;
+
+            // Only redraw canvas for regions that overlap the visible viewport
+            if (canvas && canvas.audioBuffer && left + width >= visibleLeft && left <= visibleRight) {
+                drawRegionWaveform(canvas, regionData.buffer, regionData.startOffset, regionData.endOffset);
             }
-        }
+            updateRegionFadeVisuals(regionData);
+        });
     });
 }
 
@@ -1160,16 +1151,33 @@ function snapToGrid(timeInSeconds) {
     return Math.round(timeInSeconds / snapDuration) * snapDuration;
 }
 
+let _playbackRafId = null;
+
 function setupTimeline() {
     updateTimelineRuler();
     updateTimelineZoom();
-    
-    setInterval(() => {
-        if (audioEngine.isPlaying) {
-            updateTimeDisplay();
-            updatePlayhead();
+}
+
+// Called when playback starts — runs a RAF loop that stops itself when paused/stopped
+function startPlaybackUILoop() {
+    if (_playbackRafId) return; // already running
+    function tick() {
+        if (!audioEngine.isPlaying) {
+            _playbackRafId = null;
+            return;
         }
-    }, 50);
+        updateTimeDisplay();
+        updatePlayhead();
+        _playbackRafId = requestAnimationFrame(tick);
+    }
+    _playbackRafId = requestAnimationFrame(tick);
+}
+
+function stopPlaybackUILoop() {
+    if (_playbackRafId) {
+        cancelAnimationFrame(_playbackRafId);
+        _playbackRafId = null;
+    }
 }
 
 function updateTimelineRuler() {
@@ -1202,62 +1210,49 @@ function updateTimelineRuler() {
 }
 
 function updateTimelineGrid() {
-    // Add/update vertical grid lines on all track timelines
+    // Use CSS repeating-linear-gradient instead of N DOM elements per track.
+    // This reduces thousands of DOM nodes to a single background-image per timeline.
     const duration = audioEngine.duration || 60;
     const totalWidth = duration * pixelsPerSecond * zoomLevel;
-    
-    document.querySelectorAll('.track-timeline').forEach(timeline => {
-        // Remove existing grid
-        const existingGrid = timeline.querySelector('.timeline-grid');
-        if (existingGrid) existingGrid.remove();
-        
-        // Create new grid container with explicit width to match timeline
-        const grid = document.createElement('div');
-        grid.className = 'timeline-grid';
-        grid.style.cssText = `
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: ${totalWidth}px;
-            height: 100%;
-            pointer-events: none;
-            z-index: 1;
-            overflow: visible;
-        `;
-        
-        // Calculate grid interval based on snap settings or zoom level
-        let gridInterval;
-        if (snapEnabled) {
-            const beatDuration = 60.0 / bpm;
-            gridInterval = beatDuration * snapValue * 4; // Use snap value for grid
-        } else {
-            // Default grid intervals based on zoom
-            if (zoomLevel > 5) gridInterval = 1;
-            else if (zoomLevel > 2) gridInterval = 2;
-            else if (zoomLevel < 0.5) gridInterval = 10;
-            else gridInterval = 5;
-        }
-        
-        const numLines = Math.ceil(duration / gridInterval);
-        
-        for (let i = 0; i <= numLines; i++) {
-            const time = i * gridInterval;
-            const isMajor = (i % 4 === 0);
-            const line = document.createElement('div');
-            line.className = 'timeline-grid-line' + (isMajor ? ' major' : '');
-            line.style.cssText = `
-                position: absolute;
-                left: ${(time / duration) * totalWidth}px;
-                top: 0;
-                width: 1px;
-                height: 100%;
-                background: ${isMajor ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)'};
-            `;
-            
-            grid.appendChild(line);
-        }
-        
-        timeline.insertBefore(grid, timeline.firstChild);
+
+    let gridInterval;
+    if (snapEnabled) {
+        const beatDuration = 60.0 / bpm;
+        gridInterval = beatDuration * snapValue * 4;
+    } else {
+        if (zoomLevel > 5) gridInterval = 1;
+        else if (zoomLevel > 2) gridInterval = 2;
+        else if (zoomLevel < 0.5) gridInterval = 10;
+        else gridInterval = 5;
+    }
+
+    const minorPx = (gridInterval / duration) * totalWidth;
+    const majorPx = minorPx * 4;
+
+    // Skip grid if lines would be sub-pixel
+    if (minorPx < 2) {
+        document.querySelectorAll('.track-timeline').forEach(tl => {
+            tl.style.backgroundImage = 'none';
+        });
+        return;
+    }
+
+    // Build two repeating gradients: minor (thin) + major (brighter) lines
+    const minor = `repeating-linear-gradient(90deg, rgba(255,255,255,0.15) 0px, rgba(255,255,255,0.15) 1px, transparent 1px, transparent ${minorPx}px)`;
+    const major = majorPx > 4
+        ? `repeating-linear-gradient(90deg, rgba(255,255,255,0.3) 0px, rgba(255,255,255,0.3) 1px, transparent 1px, transparent ${majorPx}px)`
+        : '';
+
+    const bg = major ? `${major}, ${minor}` : minor;
+
+    document.querySelectorAll('.track-timeline').forEach(tl => {
+        // Remove old DOM-based grid if present (migration cleanup)
+        const oldGrid = tl.querySelector('.timeline-grid');
+        if (oldGrid) oldGrid.remove();
+
+        tl.style.backgroundImage = bg;
+        tl.style.backgroundSize = `${totalWidth}px 100%`;
+        tl.style.backgroundRepeat = 'no-repeat';
     });
 }
 
@@ -1340,10 +1335,13 @@ function createTrack(options) {
             <div class="track-name-row">
                 <input type="text" class="track-name" value="${trackName}" data-track-id="${trackId}">
                 <div class="track-btns">
-                    <button class="record-btn" data-track-id="${trackId}" title="Arm for recording">●</button>
                     <button class="mute-btn" data-track-id="${trackId}" title="Mute (M)">M</button>
                     <button class="solo-btn" data-track-id="${trackId}" title="Solo (S)">S</button>
                 </div>
+            </div>
+            <div class="track-record-row">
+                <button class="record-btn" data-track-id="${trackId}" title="Arm for recording">●</button>
+                <span class="record-label">REC</span>
             </div>
             <div class="track-controls-row">
                 <div class="control-group">
@@ -1832,7 +1830,7 @@ function setupRegionInteraction(region, regionData, track, trackElement) {
         
         region.classList.add('selected');
         selectedRegion = region;
-        region.style.zIndex = Date.now().toString();
+        region.style.zIndex = String(++_regionZCounter);
 
         const owner = findRegionOwner(regionData) || { track, trackElement, regionData };
         const activeTrack = owner.track;
@@ -1937,8 +1935,23 @@ function updateRegionDragGhost(targetTrackElement, leftPx) {
     dragGhost.style.left = `${Math.max(0, leftPx)}px`;
 }
 
+// Consolidated global mouse handlers — avoids 8 separate listeners firing on every pixel move
+function handleGlobalMouseMove(e) {
+    if (isDraggingRegion) handleRegionDrag(e);
+    else if (isResizingRegion) handleRegionResize(e);
+    else if (isAdjustingFade) handleRegionFadeAdjust(e);
+    else if (isAdjustingRegionGain) handleRegionGainAdjust(e);
+}
+
+function handleGlobalMouseUp(e) {
+    if (isDraggingRegion) handleRegionDragEnd(e);
+    if (isResizingRegion) handleRegionResizeEnd(e);
+    if (isAdjustingFade) handleRegionFadeAdjustEnd(e);
+    if (isAdjustingRegionGain) handleRegionGainAdjustEnd(e);
+}
+
 function handleRegionDrag(e) {
-    if (isResizingRegion || isAdjustingFade || isAdjustingRegionGain || !isDraggingRegion || !selectedRegion) return;
+    if (!isDraggingRegion || !selectedRegion) return;
     
     selectedRegion.classList.add('dragging');
     
@@ -1975,7 +1988,7 @@ function handleRegionDrag(e) {
 }
 
 function handleRegionDragEnd(e) {
-    if (isResizingRegion || isAdjustingFade || isAdjustingRegionGain || !isDraggingRegion || !selectedRegion) return;
+    if (!isDraggingRegion || !selectedRegion) return;
     
     isDraggingRegion = false;
     selectedRegion.classList.remove('dragging');
@@ -2117,7 +2130,7 @@ function startRegionResize(e, direction, regionData, track, trackElement) {
     isResizingRegion = true;
     selectedRegion = regionData.element;
     selectedRegion.classList.add('selected');
-    selectedRegion.style.zIndex = Date.now().toString();
+    selectedRegion.style.zIndex = String(++_regionZCounter);
 
     resizeState = {
         direction,
@@ -2421,46 +2434,47 @@ function createRegionFromData(regionData, track, trackElement) {
 }
 
 function drawRegionWaveform(canvas, buffer, startOffset = 0, endOffset = null) {
+    const parent = canvas.parentElement;
+    const width = parent.offsetWidth;
+    const height = parent.offsetHeight;
+
+    // Skip drawing for zero-size or invisible regions
+    if (width < 1 || height < 1) return;
+
+    // Avoid unnecessary canvas reset if dimensions haven't changed
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+
     const ctx = canvas.getContext('2d');
-    
-    // Get actual dimensions from parent element
-    const width = canvas.parentElement.offsetWidth;
-    const height = canvas.parentElement.offsetHeight;
-    
-    // Set canvas resolution to match display size
-    canvas.width = width;
-    canvas.height = height;
-    
     ctx.clearRect(0, 0, width, height);
-    
+
     const data = buffer.getChannelData(0);
     const actualEndOffset = endOffset || buffer.duration;
     const startSample = Math.floor(startOffset * buffer.sampleRate);
     const endSample = Math.floor(actualEndOffset * buffer.sampleRate);
     const sampleCount = endSample - startSample;
-    
+
     const step = Math.ceil(sampleCount / width);
     const amp = height / 2;
-    
+    const dataLen = data.length;
+
     ctx.fillStyle = 'rgba(100, 150, 255, 0.6)';
-    ctx.strokeStyle = 'rgba(150, 200, 255, 0.9)';
-    
+
     for (let i = 0; i < width; i++) {
         let min = 1.0;
         let max = -1.0;
-        
-        for (let j = 0; j < step; j++) {
-            const sampleIndex = startSample + (i * step) + j;
-            if (sampleIndex < data.length) {
-                const datum = data[sampleIndex] || 0;
-                if (datum < min) min = datum;
-                if (datum > max) max = datum;
-            }
+        const base = startSample + (i * step);
+        const end = Math.min(base + step, dataLen);
+
+        for (let j = base; j < end; j++) {
+            const datum = data[j];
+            if (datum < min) min = datum;
+            if (datum > max) max = datum;
         }
-        
+
         const yMin = (1 + min) * amp;
         const yMax = (1 + max) * amp;
-        
+
         ctx.fillRect(i, yMin, 1, Math.max(1, yMax - yMin));
     }
 }
@@ -3042,30 +3056,99 @@ function openTrackSettings(track, trackElement) {
 }
 
 function loadTrackSettingsValues(track) {
-    // EQ - 4 bands
+    // EQ - 5 bands
     document.querySelector('.eq-freq[data-band="low"]').value = track.eqLow.frequency.value;
     document.querySelector('.eq-gain[data-band="low"]').value = track.eqLow.gain.value;
     document.querySelector('.eq-q[data-band="low"]').value = track.eqLow.Q.value;
-    
+
     document.querySelector('.eq-freq[data-band="lowMid"]').value = track.eqLowMid.frequency.value;
     document.querySelector('.eq-gain[data-band="lowMid"]').value = track.eqLowMid.gain.value;
     document.querySelector('.eq-q[data-band="lowMid"]').value = track.eqLowMid.Q.value;
-    
+
     document.querySelector('.eq-freq[data-band="mid"]').value = track.eqMid.frequency.value;
     document.querySelector('.eq-gain[data-band="mid"]').value = track.eqMid.gain.value;
     document.querySelector('.eq-q[data-band="mid"]').value = track.eqMid.Q.value;
-    
+
+    document.querySelector('.eq-freq[data-band="highMid"]').value = track.eqHighMid.frequency.value;
+    document.querySelector('.eq-gain[data-band="highMid"]').value = track.eqHighMid.gain.value;
+    document.querySelector('.eq-q[data-band="highMid"]').value = track.eqHighMid.Q.value;
+
     document.querySelector('.eq-freq[data-band="high"]').value = track.eqHigh.frequency.value;
     document.querySelector('.eq-gain[data-band="high"]').value = track.eqHigh.gain.value;
     document.querySelector('.eq-q[data-band="high"]').value = track.eqHigh.Q.value;
-    
+
     // Compression
     document.querySelector('.comp-threshold').value = track.compressor.threshold.value;
     document.querySelector('.comp-knee').value = track.compressor.knee.value;
     document.querySelector('.comp-ratio').value = track.compressor.ratio.value;
     document.querySelector('.comp-attack').value = track.compressor.attack.value;
     document.querySelector('.comp-release').value = track.compressor.release.value;
-    
+    const makeupSlider = document.querySelector('.comp-makeup');
+    if (makeupSlider) {
+        const makeupDb = 20 * Math.log10(Math.max(0.001, track.makeupGain.gain.value));
+        makeupSlider.value = Math.max(0, makeupDb);
+    }
+
+    // Multiband compressor (4 bands)
+    const mbBandMap = {
+        low: { comp: track.mbCompLow, gain: track.mbCompLowGain },
+        lowMid: { comp: track.mbCompLowMid, gain: track.mbCompLowMidGain },
+        highMid: { comp: track.mbCompHighMid, gain: track.mbCompHighMidGain },
+        high: { comp: track.mbCompHigh, gain: track.mbCompHighGain }
+    };
+    ['low', 'lowMid', 'highMid', 'high'].forEach(band => {
+        const compNode = mbBandMap[band].comp;
+        const gainNode = mbBandMap[band].gain;
+        const th = document.querySelector(`.mbcomp-threshold[data-band="${band}"]`);
+        const ra = document.querySelector(`.mbcomp-ratio[data-band="${band}"]`);
+        const at = document.querySelector(`.mbcomp-attack[data-band="${band}"]`);
+        const re = document.querySelector(`.mbcomp-release[data-band="${band}"]`);
+        const ga = document.querySelector(`.mbcomp-gain[data-band="${band}"]`);
+        if (th) th.value = compNode.threshold.value;
+        if (ra) ra.value = compNode.ratio.value;
+        if (at) at.value = compNode.attack.value;
+        if (re) re.value = compNode.release.value;
+        if (ga) ga.value = 20 * Math.log10(Math.max(0.001, gainNode.gain.value));
+    });
+
+    // Load crossover frequencies
+    const xoverInputs = document.querySelectorAll('.mbcomp-xover-input');
+    if (xoverInputs.length >= 3) {
+        xoverInputs[0].value = Math.round(track.mbCompLowFilter.frequency.value);
+        xoverInputs[1].value = Math.round(track.mbCompHighMidFilterHP.frequency.value);
+        xoverInputs[2].value = Math.round(track.mbCompHighFilter.frequency.value);
+    }
+
+    // Reset solo/bypass buttons
+    document.querySelectorAll('.mbcomp-solo-btn, .mbcomp-bypass-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.mbcomp-strip').forEach(s => s.classList.remove('soloed', 'bypassed'));
+
+    // Draw MB comp canvas
+    setTimeout(() => drawMbCompCanvas(), 60);
+
+    // De-esser
+    const deFreq = document.querySelector('.deesser-freq');
+    const deTh = document.querySelector('.deesser-threshold');
+    const deRatio = document.querySelector('.deesser-ratio');
+    const deRange = document.querySelector('.deesser-range');
+    if (deFreq) deFreq.value = track.deesserFilter.frequency.value;
+    if (deTh) deTh.value = track.deesserCompressor.threshold.value;
+    if (deRatio) deRatio.value = track.deesserCompressor.ratio.value;
+    if (deRange) deRange.value = track.deesserFilter.Q.value;
+
+    // Side-chain
+    loadSidechainSourceOptions(track);
+    const scTh = document.querySelector('.sidechain-threshold');
+    const scRatio = document.querySelector('.sidechain-ratio');
+    const scAtk = document.querySelector('.sidechain-attack');
+    const scRel = document.querySelector('.sidechain-release');
+    const scAmt = document.querySelector('.sidechain-amount');
+    if (scTh) scTh.value = track.sidechainSettings.threshold;
+    if (scRatio) scRatio.value = track.sidechainSettings.ratio;
+    if (scAtk) scAtk.value = track.sidechainSettings.attack;
+    if (scRel) scRel.value = track.sidechainSettings.release;
+    if (scAmt) scAmt.value = track.sidechainSettings.amount;
+
     // Effects
     document.querySelector('.delay-time').value = track.delayNode.delayTime.value;
     document.querySelector('.delay-feedback').value = track.delayFeedback.gain.value;
@@ -3074,19 +3157,49 @@ function loadTrackSettingsValues(track) {
 
     document.querySelectorAll('.effect-toggle').forEach(btn => {
         const effect = btn.dataset.effect;
-        const enabled = track.isEffectEnabled(effect);
+        let enabled;
+        if (effect === 'sidechain') {
+            enabled = track.sidechainSettings.enabled;
+        } else {
+            enabled = track.isEffectEnabled(effect);
+        }
         btn.classList.toggle('active', enabled);
         btn.textContent = enabled ? 'Enabled' : 'Enable';
     });
-    
+
     // Update displays
     updateAllSettingsDisplays();
-    
+
     // Update knob visuals
     updateKnobVisuals();
-    
+
+    // Refresh all slider fills in the modal
+    const modal = document.getElementById('trackSettingsModal');
+    modal.querySelectorAll('input[type="range"]').forEach(slider => {
+        updateSliderFill(slider, computeSliderFillPercent(slider));
+    });
+
     // Draw EQ curve (with slight delay to ensure canvas is ready)
     setTimeout(() => drawEQCurve(), 50);
+}
+
+function loadSidechainSourceOptions(track) {
+    const select = document.querySelector('.sidechain-source');
+    if (!select) return;
+    select.innerHTML = '<option value="">-- Select trigger track --</option>';
+    audioEngine.tracks.forEach(t => {
+        if (t.id === track.id) return;
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.name || t.id;
+        if (track.sidechainSettings.sourceTrackId === t.id) opt.selected = true;
+        select.appendChild(opt);
+    });
+    // Update the "this track dips" label
+    const duckDesc = document.querySelector('.sc-duck-track-name');
+    if (duckDesc) {
+        duckDesc.textContent = `...${track.name || track.id} dips in volume`;
+    }
 }
 
 function setupSettingsControls() {
@@ -3100,24 +3213,48 @@ function setupSettingsControls() {
     
     // Auto-save when any setting in the modal changes
     modal.addEventListener('input', () => scheduleAutoSave());
-    
+
     // EQ Controls
     setupEQControls(modal);
-    
+
+    // Draggable EQ points on canvas
+    setupEQDrag(modal);
+
     // Compression Controls (with knobs)
     setupCompressionControls(modal);
-    
+
     // Setup drag-to-rotate knob interaction
     setupKnobInteraction();
-    
+
     // Effects Controls
     setupEffectsControls(modal);
+
+    // Multiband Compressor Controls
+    setupMultibandCompControls(modal);
+
+    // De-esser Controls
+    setupDeesserControls(modal);
+
+    // Side-chain Controls
+    setupSidechainControls(modal);
+
+    // Effect section drag reorder
+    setupEffectSectionReorder(modal);
 
     // Effect on/off toggles
     modal.querySelectorAll('.effect-toggle').forEach(btn => {
         btn.addEventListener('click', () => {
             if (!currentTrack) return;
             const effect = btn.dataset.effect;
+            if (effect === 'sidechain') {
+                currentTrack.sidechainSettings.enabled = !currentTrack.sidechainSettings.enabled;
+                const nextState = currentTrack.sidechainSettings.enabled;
+                btn.classList.toggle('active', nextState);
+                btn.textContent = nextState ? 'Enabled' : 'Enable';
+                updateEffectIndicators(currentTrack, getCurrentTrackElement());
+                scheduleAutoSave();
+                return;
+            }
             const nextState = !currentTrack.isEffectEnabled(effect);
             currentTrack.setEffectEnabled(effect, nextState);
             btn.classList.toggle('active', nextState);
@@ -3306,8 +3443,42 @@ function startGRMeter() {
         }
         
         valueDisplay.textContent = reduction < -0.1 ? `${reduction.toFixed(1)} dB` : '0 dB';
+
+        // Multiband compressor GR meters (vertical)
+        if (currentTrack && currentTrack.isEffectEnabled('multibandComp')) {
+            const mbBands = {
+                low: currentTrack.mbCompLow,
+                lowMid: currentTrack.mbCompLowMid,
+                highMid: currentTrack.mbCompHighMid,
+                high: currentTrack.mbCompHigh
+            };
+            Object.entries(mbBands).forEach(([band, comp]) => {
+                const grBar = document.querySelector(`.mbcomp-vert-meter-bar[data-band="${band}"]`);
+                const grVal = document.querySelector(`.mbcomp-vert-meter-value[data-band="${band}"]`);
+                if (!grBar || !grVal) return;
+                const red = comp.reduction;
+                const absRed = Math.abs(red);
+                grBar.style.height = `${Math.min(100, (absRed / 24) * 100)}%`;
+                grVal.textContent = red < -0.1 ? red.toFixed(1) : '0';
+                grVal.style.color = absRed > 12 ? 'var(--orange)' : absRed > 3 ? 'var(--yellow)' : 'var(--green)';
+            });
+        } else {
+            document.querySelectorAll('.mbcomp-vert-meter-bar').forEach(b => b.style.height = '0%');
+            document.querySelectorAll('.mbcomp-vert-meter-value').forEach(v => { v.textContent = '0'; v.style.color = 'var(--green)'; });
+        }
+
+        // Sidechain GR meter
+        const scBar = document.getElementById('scMeterBar');
+        const scVal = document.getElementById('scMeterValue');
+        if (scBar && scVal && currentTrack) {
+            const scGain = currentTrack.sidechainGain.gain.value;
+            const scReduction = scGain < 0.999 ? 20 * Math.log10(Math.max(0.001, scGain)) : 0;
+            const absScRed = Math.abs(scReduction);
+            scBar.style.width = `${Math.min(100, (absScRed / 24) * 100)}%`;
+            scVal.textContent = scReduction < -0.1 ? `${scReduction.toFixed(1)} dB` : '0 dB';
+        }
     }
-    
+
     updateGRMeter();
 }
 
@@ -3319,8 +3490,8 @@ function stopGRMeter() {
 }
 
 function setupEQControls(modal) {
-    const bands = ['low', 'lowMid', 'mid', 'high'];
-    const nodeKeys = { low: 'eqLow', lowMid: 'eqLowMid', mid: 'eqMid', high: 'eqHigh' };
+    const bands = ['low', 'lowMid', 'mid', 'highMid', 'high'];
+    const nodeKeys = { low: 'eqLow', lowMid: 'eqLowMid', mid: 'eqMid', highMid: 'eqHighMid', high: 'eqHigh' };
     
     bands.forEach(band => {
         const freqSlider = modal.querySelector(`.eq-freq[data-band="${band}"]`);
@@ -3417,17 +3588,18 @@ function drawEQCurve() {
     // Calculate combined frequency response
     const numPoints = width;
     const response = new Array(numPoints);
-    
+
     for (let i = 0; i < numPoints; i++) {
         const freq = xToFreq(i, width);
         let totalGain = 0;
-        
+
         // Add contribution from each EQ band
         totalGain += calculateBandResponse(currentTrack.eqLow, freq);
         totalGain += calculateBandResponse(currentTrack.eqLowMid, freq);
         totalGain += calculateBandResponse(currentTrack.eqMid, freq);
+        totalGain += calculateBandResponse(currentTrack.eqHighMid, freq);
         totalGain += calculateBandResponse(currentTrack.eqHigh, freq);
-        
+
         response[i] = totalGain;
     }
     
@@ -3469,39 +3641,53 @@ function drawEQCurve() {
     }
     ctx.stroke();
     
-    // Draw band points
+    // Draw band points (draggable)
     const bandColors = {
         low: '#ff6b6b',
         lowMid: '#4ecdc4',
         mid: '#ffa726',
+        highMid: '#42a5f5',
         high: '#ab47bc'
     };
-    
+
     const bands = [
         { node: currentTrack.eqLow, name: 'low' },
         { node: currentTrack.eqLowMid, name: 'lowMid' },
         { node: currentTrack.eqMid, name: 'mid' },
+        { node: currentTrack.eqHighMid, name: 'highMid' },
         { node: currentTrack.eqHigh, name: 'high' }
     ];
-    
+
+    // Store point positions for hit-testing during drag
+    window._eqBandPoints = [];
+
     bands.forEach(({ node, name }) => {
         const freq = node.frequency.value;
         const gain = node.gain.value;
         const x = freqToX(freq, width);
         const y = dbToY(gain, height);
-        
+
+        window._eqBandPoints.push({ name, x, y, freq, gain });
+
         // Draw point
         ctx.fillStyle = bandColors[name];
         ctx.beginPath();
         ctx.arc(x, y, 8, 0, Math.PI * 2);
         ctx.fill();
-        
+
         // Draw outer ring
         ctx.strokeStyle = bandColors[name];
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(x, y, 12, 0, Math.PI * 2);
         ctx.stroke();
+
+        // Draw label
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        const label = freq >= 1000 ? (freq/1000).toFixed(1) + 'k' : freq.toFixed(0);
+        ctx.fillText(label, x, y - 16);
     });
 }
 
@@ -3629,10 +3815,14 @@ function setupCompressionControls(modal) {
     
     if (makeupSlider) {
         makeupSlider.addEventListener('input', (e) => {
-            // Note: DynamicsCompressor doesn't have makeup gain, we'd need to add a post-compressor gain node
+            if (!currentTrack) return;
+            const dbValue = parseFloat(e.target.value);
+            // Convert dB to linear gain and apply to the makeup gain node
+            currentTrack.makeupGain.gain.value = Math.pow(10, dbValue / 20);
             const valueSpan = modal.querySelector('.comp-makeup-value');
-            if (valueSpan) valueSpan.textContent = parseFloat(e.target.value).toFixed(1) + ' dB';
+            if (valueSpan) valueSpan.textContent = dbValue.toFixed(1) + ' dB';
             updateKnob(e.target);
+            updateEffectIndicators(currentTrack, getCurrentTrackElement());
         });
     }
 }
@@ -3675,6 +3865,627 @@ function setupEffectsControls(modal) {
         currentTrack.reverbWet.gain.value = parseFloat(e.target.value);
         e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 100).toFixed(0) + '%';
         updateEffectIndicators(currentTrack, getCurrentTrackElement());
+    });
+}
+
+// --- Draggable EQ Points ---
+function setupEQDrag(modal) {
+    const canvas = document.getElementById('eqCanvas');
+    if (!canvas) return;
+
+    const nodeKeys = { low: 'eqLow', lowMid: 'eqLowMid', mid: 'eqMid', highMid: 'eqHighMid', high: 'eqHigh' };
+    const freqRanges = {
+        low: [20, 500], lowMid: [200, 2000], mid: [500, 5000],
+        highMid: [1000, 8000], high: [2000, 20000]
+    };
+    let draggingBand = null;
+
+    canvas.addEventListener('mousedown', (e) => {
+        if (!currentTrack || !window._eqBandPoints) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+        // Find closest point within hit radius
+        let closest = null;
+        let closestDist = Infinity;
+        for (const pt of window._eqBandPoints) {
+            const dx = mx - pt.x;
+            const dy = my - pt.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 20 && dist < closestDist) {
+                closest = pt;
+                closestDist = dist;
+            }
+        }
+        if (closest) {
+            draggingBand = closest.name;
+            canvas.parentElement.classList.add('dragging');
+            e.preventDefault();
+        }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!draggingBand || !currentTrack) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+        const freq = xToFreq(Math.max(0, Math.min(canvas.width, mx)), canvas.width);
+        const gain = yToDb(Math.max(0, Math.min(canvas.height, my)), canvas.height);
+        const range = freqRanges[draggingBand];
+        const clampedFreq = Math.max(range[0], Math.min(range[1], freq));
+
+        const node = currentTrack[nodeKeys[draggingBand]];
+        node.frequency.value = clampedFreq;
+        node.gain.value = Math.max(-24, Math.min(24, gain));
+
+        // Update sliders
+        const freqSlider = modal.querySelector(`.eq-freq[data-band="${draggingBand}"]`);
+        const gainSlider = modal.querySelector(`.eq-gain[data-band="${draggingBand}"]`);
+        if (freqSlider) freqSlider.value = clampedFreq;
+        if (gainSlider) gainSlider.value = node.gain.value;
+
+        // Update value displays
+        const freqValue = modal.querySelector(`.eq-band[data-band="${draggingBand}"] .eq-freq-value`);
+        if (freqValue) {
+            freqValue.textContent = clampedFreq >= 1000 ? (clampedFreq/1000).toFixed(1) + ' kHz' : clampedFreq.toFixed(0) + ' Hz';
+        }
+        const gainValue = modal.querySelector(`.eq-band[data-band="${draggingBand}"] .eq-gain-value`);
+        if (gainValue) gainValue.textContent = node.gain.value.toFixed(1) + ' dB';
+
+        drawEQCurve();
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (draggingBand) {
+            draggingBand = null;
+            canvas.parentElement.classList.remove('dragging');
+            updateEffectIndicators(currentTrack, getCurrentTrackElement());
+            scheduleAutoSave();
+        }
+    });
+}
+
+function yToDb(y, height) {
+    const maxDb = 24;
+    const minDb = -24;
+    return maxDb - (y / height) * (maxDb - minDb);
+}
+
+// --- Multiband Compressor Controls ---
+function setupMultibandCompControls(modal) {
+    const bandNodes = {
+        low: { comp: 'mbCompLow', gain: 'mbCompLowGain' },
+        lowMid: { comp: 'mbCompLowMid', gain: 'mbCompLowMidGain' },
+        highMid: { comp: 'mbCompHighMid', gain: 'mbCompHighMidGain' },
+        high: { comp: 'mbCompHigh', gain: 'mbCompHighGain' }
+    };
+
+    ['low', 'lowMid', 'highMid', 'high'].forEach(band => {
+        const thSlider = modal.querySelector(`.mbcomp-threshold[data-band="${band}"]`);
+        const raSlider = modal.querySelector(`.mbcomp-ratio[data-band="${band}"]`);
+        const atSlider = modal.querySelector(`.mbcomp-attack[data-band="${band}"]`);
+        const reSlider = modal.querySelector(`.mbcomp-release[data-band="${band}"]`);
+        const gaSlider = modal.querySelector(`.mbcomp-gain[data-band="${band}"]`);
+
+        if (thSlider) thSlider.addEventListener('input', (e) => {
+            if (!currentTrack) return;
+            currentTrack[bandNodes[band].comp].threshold.value = parseFloat(e.target.value);
+            e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(0);
+            drawMbCompCanvas();
+        });
+        if (raSlider) raSlider.addEventListener('input', (e) => {
+            if (!currentTrack) return;
+            currentTrack[bandNodes[band].comp].ratio.value = parseFloat(e.target.value);
+            e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(1) + ':1';
+        });
+        if (atSlider) atSlider.addEventListener('input', (e) => {
+            if (!currentTrack) return;
+            currentTrack[bandNodes[band].comp].attack.value = parseFloat(e.target.value);
+            e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 1000).toFixed(0);
+        });
+        if (reSlider) reSlider.addEventListener('input', (e) => {
+            if (!currentTrack) return;
+            currentTrack[bandNodes[band].comp].release.value = parseFloat(e.target.value);
+            e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 1000).toFixed(0);
+        });
+        if (gaSlider) gaSlider.addEventListener('input', (e) => {
+            if (!currentTrack) return;
+            const dbVal = parseFloat(e.target.value);
+            currentTrack[bandNodes[band].gain].gain.value = Math.pow(10, dbVal / 20);
+            e.target.nextElementSibling.textContent = dbVal.toFixed(1);
+            drawMbCompCanvas();
+        });
+    });
+
+    // Crossover frequency inputs
+    modal.querySelectorAll('.mbcomp-xover-input').forEach(input => {
+        input.addEventListener('change', (e) => {
+            if (!currentTrack) return;
+            updateCrossoverFrequencies();
+            drawMbCompCanvas();
+            scheduleAutoSave();
+        });
+    });
+
+    // Solo/Bypass buttons
+    modal.querySelectorAll('.mbcomp-solo-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (!currentTrack) return;
+            const band = btn.dataset.band;
+            btn.classList.toggle('active');
+            applyMbCompSoloBypas();
+        });
+    });
+
+    modal.querySelectorAll('.mbcomp-bypass-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (!currentTrack) return;
+            const band = btn.dataset.band;
+            btn.classList.toggle('active');
+            const strip = btn.closest('.mbcomp-strip');
+            strip.classList.toggle('bypassed', btn.classList.contains('active'));
+            applyMbCompSoloBypas();
+        });
+    });
+
+    // Setup canvas draggable crossovers
+    setupMbCompCanvasDrag(modal);
+
+    // Initial draw
+    setTimeout(() => drawMbCompCanvas(), 60);
+}
+
+function updateCrossoverFrequencies() {
+    if (!currentTrack) return;
+    const inputs = document.querySelectorAll('.mbcomp-xover-input');
+    const freqs = Array.from(inputs).map(i => parseFloat(i.value));
+
+    // Ensure monotonic
+    if (freqs[1] <= freqs[0]) freqs[1] = freqs[0] + 10;
+    if (freqs[2] <= freqs[1]) freqs[2] = freqs[1] + 10;
+
+    inputs[0].value = freqs[0];
+    inputs[1].value = freqs[1];
+    inputs[2].value = freqs[2];
+
+    // Update crossover filters
+    currentTrack.mbCompLowFilter.frequency.value = freqs[0];
+    currentTrack.mbCompLowMidFilterHP.frequency.value = freqs[0];
+    currentTrack.mbCompLowMidFilter.frequency.value = freqs[1];
+    currentTrack.mbCompHighMidFilterHP.frequency.value = freqs[1];
+    currentTrack.mbCompHighMidFilter.frequency.value = freqs[2];
+    currentTrack.mbCompHighFilter.frequency.value = freqs[2];
+}
+
+function applyMbCompSoloBypas() {
+    if (!currentTrack) return;
+    const bands = ['low', 'lowMid', 'highMid', 'high'];
+    const gainNodes = {
+        low: currentTrack.mbCompLowGain,
+        lowMid: currentTrack.mbCompLowMidGain,
+        highMid: currentTrack.mbCompHighMidGain,
+        high: currentTrack.mbCompHighGain
+    };
+
+    const soloActive = bands.some(b => document.querySelector(`.mbcomp-solo-btn[data-band="${b}"]`)?.classList.contains('active'));
+
+    bands.forEach(band => {
+        const soloBtn = document.querySelector(`.mbcomp-solo-btn[data-band="${band}"]`);
+        const bypBtn = document.querySelector(`.mbcomp-bypass-btn[data-band="${band}"]`);
+        const isSoloed = soloBtn?.classList.contains('active');
+        const isBypassed = bypBtn?.classList.contains('active');
+        const strip = document.querySelector(`.mbcomp-strip[data-band="${band}"]`);
+
+        strip?.classList.toggle('soloed', isSoloed);
+
+        let gain = 1;
+        if (isBypassed) gain = 0;
+        else if (soloActive && !isSoloed) gain = 0;
+
+        // Store original gain and override
+        const slider = document.querySelector(`.mbcomp-gain[data-band="${band}"]`);
+        const baseGain = slider ? Math.pow(10, parseFloat(slider.value) / 20) : 1;
+        gainNodes[band].gain.value = gain === 0 ? 0 : baseGain;
+    });
+}
+
+// --- MB Comp Canvas Visualizer ---
+function drawMbCompCanvas() {
+    const canvas = document.getElementById('mbcompCanvas');
+    if (!canvas || !currentTrack) return;
+
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width || 600;
+    canvas.height = rect.height || 180;
+    const w = canvas.width, h = canvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Get crossover frequencies
+    const xoverInputs = document.querySelectorAll('.mbcomp-xover-input');
+    const xovers = Array.from(xoverInputs).map(i => parseFloat(i.value) || 200);
+
+    // Band colors (semi-transparent fills)
+    const bandColors = [
+        'rgba(255, 107, 107, 0.12)',  // low - red
+        'rgba(78, 205, 196, 0.12)',   // lowMid - teal
+        'rgba(66, 165, 245, 0.12)',   // highMid - blue
+        'rgba(171, 71, 188, 0.12)'    // high - purple
+    ];
+    const bandBorderColors = [
+        'rgba(255, 107, 107, 0.5)',
+        'rgba(78, 205, 196, 0.5)',
+        'rgba(66, 165, 245, 0.5)',
+        'rgba(171, 71, 188, 0.5)'
+    ];
+
+    // Draw frequency grid
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = 1;
+    const freqMarks = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+    freqMarks.forEach(f => {
+        const x = mbFreqToX(f, w);
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    });
+
+    // Horizontal dB lines
+    const dbMarks = [-18, -12, -6, 0, 6, 12, 18];
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.font = '9px sans-serif';
+    dbMarks.forEach(db => {
+        const y = mbDbToY(db, h);
+        ctx.strokeStyle = db === 0 ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.06)';
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+        if (db !== 0) ctx.fillText(db + '', 4, y - 2);
+    });
+
+    // Frequency scale at bottom
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'center';
+    freqMarks.forEach(f => {
+        const x = mbFreqToX(f, w);
+        const label = f >= 1000 ? (f/1000) + 'k' : f + '';
+        ctx.fillText(label, x, h - 3);
+    });
+
+    // Draw band regions
+    const bandEdges = [20, xovers[0], xovers[1], xovers[2], 20000];
+    for (let i = 0; i < 4; i++) {
+        const x1 = mbFreqToX(bandEdges[i], w);
+        const x2 = mbFreqToX(bandEdges[i + 1], w);
+        ctx.fillStyle = bandColors[i];
+        ctx.fillRect(x1, 0, x2 - x1, h);
+    }
+
+    // Draw crossover lines (draggable handles)
+    xovers.forEach((freq, i) => {
+        const x = mbFreqToX(freq, w);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Draw handle
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.beginPath();
+        ctx.moveTo(x - 6, h - 18);
+        ctx.lineTo(x + 6, h - 18);
+        ctx.lineTo(x, h - 10);
+        ctx.closePath();
+        ctx.fill();
+
+        // Freq label
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        const lbl = freq >= 1000 ? (freq/1000).toFixed(1) + 'k' : freq + '';
+        ctx.fillText(lbl, x, h - 21);
+    });
+
+    // Draw gain curve per band (gain line at the gain value)
+    const bandGainNodes = ['mbCompLowGain', 'mbCompLowMidGain', 'mbCompHighMidGain', 'mbCompHighGain'];
+    for (let i = 0; i < 4; i++) {
+        const x1 = mbFreqToX(bandEdges[i], w);
+        const x2 = mbFreqToX(bandEdges[i + 1], w);
+        const gainDb = 20 * Math.log10(Math.max(0.001, currentTrack[bandGainNodes[i]].gain.value));
+        const y = mbDbToY(gainDb, h);
+
+        ctx.strokeStyle = bandBorderColors[i];
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x1, y);
+        ctx.lineTo(x2, y);
+        ctx.stroke();
+
+        // Band point
+        const cx = (x1 + x2) / 2;
+        ctx.fillStyle = bandBorderColors[i].replace('0.5', '0.9');
+        ctx.beginPath();
+        ctx.arc(cx, y, 5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+function mbFreqToX(freq, w) {
+    return (Math.log10(freq / 20) / Math.log10(20000 / 20)) * w;
+}
+
+function mbXToFreq(x, w) {
+    return 20 * Math.pow(20000 / 20, x / w);
+}
+
+function mbDbToY(db, h) {
+    return ((18 - db) / 36) * h;
+}
+
+// Draggable crossover handles on MB comp canvas
+function setupMbCompCanvasDrag(modal) {
+    const canvas = document.getElementById('mbcompCanvas');
+    if (!canvas) return;
+
+    let draggingXover = -1; // 0, 1, 2
+
+    canvas.addEventListener('mousedown', (e) => {
+        if (!currentTrack) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const xoverInputs = document.querySelectorAll('.mbcomp-xover-input');
+        const xovers = Array.from(xoverInputs).map(i => parseFloat(i.value));
+
+        // Find closest crossover handle
+        for (let i = 0; i < 3; i++) {
+            const hx = mbFreqToX(xovers[i], canvas.width);
+            if (Math.abs(mx - hx) < 15) {
+                draggingXover = i;
+                canvas.parentElement.classList.add('dragging-xover');
+                e.preventDefault();
+                break;
+            }
+        }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (draggingXover < 0 || !currentTrack) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        let freq = Math.round(mbXToFreq(Math.max(0, Math.min(canvas.width, mx)), canvas.width));
+
+        const xoverInputs = document.querySelectorAll('.mbcomp-xover-input');
+        const xovers = Array.from(xoverInputs).map(i => parseFloat(i.value));
+
+        // Clamp: keep 50Hz gap between crossovers
+        const minGap = 50;
+        if (draggingXover === 0) {
+            freq = Math.max(30, Math.min(xovers[1] - minGap, freq));
+        } else if (draggingXover === 1) {
+            freq = Math.max(xovers[0] + minGap, Math.min(xovers[2] - minGap, freq));
+        } else {
+            freq = Math.max(xovers[1] + minGap, Math.min(18000, freq));
+        }
+
+        xoverInputs[draggingXover].value = freq;
+        updateCrossoverFrequencies();
+        drawMbCompCanvas();
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (draggingXover >= 0) {
+            draggingXover = -1;
+            canvas.parentElement?.classList.remove('dragging-xover');
+            scheduleAutoSave();
+        }
+    });
+
+    // Cursor hint on hover
+    canvas.addEventListener('mousemove', (e) => {
+        if (draggingXover >= 0) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const xoverInputs = document.querySelectorAll('.mbcomp-xover-input');
+        const xovers = Array.from(xoverInputs).map(i => parseFloat(i.value));
+        let nearHandle = false;
+        for (let i = 0; i < 3; i++) {
+            if (Math.abs(mx - mbFreqToX(xovers[i], canvas.width)) < 15) { nearHandle = true; break; }
+        }
+        canvas.style.cursor = nearHandle ? 'ew-resize' : 'default';
+    });
+}
+
+// --- De-esser Controls ---
+function setupDeesserControls(modal) {
+    const freqSlider = modal.querySelector('.deesser-freq');
+    const thSlider = modal.querySelector('.deesser-threshold');
+    const ratioSlider = modal.querySelector('.deesser-ratio');
+    const rangeSlider = modal.querySelector('.deesser-range');
+
+    if (freqSlider) freqSlider.addEventListener('input', (e) => {
+        if (!currentTrack) return;
+        const freq = parseFloat(e.target.value);
+        currentTrack.deesserFilter.frequency.value = freq;
+        e.target.nextElementSibling.textContent = freq >= 1000 ? (freq/1000).toFixed(1) + ' kHz' : freq.toFixed(0) + ' Hz';
+    });
+    if (thSlider) thSlider.addEventListener('input', (e) => {
+        if (!currentTrack) return;
+        currentTrack.deesserCompressor.threshold.value = parseFloat(e.target.value);
+        e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(0) + ' dB';
+    });
+    if (ratioSlider) ratioSlider.addEventListener('input', (e) => {
+        if (!currentTrack) return;
+        currentTrack.deesserCompressor.ratio.value = parseFloat(e.target.value);
+        e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(1) + ':1';
+    });
+    if (rangeSlider) rangeSlider.addEventListener('input', (e) => {
+        if (!currentTrack) return;
+        currentTrack.deesserFilter.Q.value = parseFloat(e.target.value);
+        e.target.nextElementSibling.textContent = 'Q ' + parseFloat(e.target.value).toFixed(1);
+    });
+}
+
+// --- Side-chain Controls ---
+let sidechainInterval = null;
+
+function setupSidechainControls(modal) {
+    const sourceSelect = modal.querySelector('.sidechain-source');
+    const thSlider = modal.querySelector('.sidechain-threshold');
+    const ratioSlider = modal.querySelector('.sidechain-ratio');
+    const atkSlider = modal.querySelector('.sidechain-attack');
+    const relSlider = modal.querySelector('.sidechain-release');
+    const amtSlider = modal.querySelector('.sidechain-amount');
+
+    if (sourceSelect) sourceSelect.addEventListener('change', (e) => {
+        if (!currentTrack) return;
+        currentTrack.sidechainSettings.sourceTrackId = e.target.value || null;
+    });
+    if (thSlider) thSlider.addEventListener('input', (e) => {
+        if (!currentTrack) return;
+        currentTrack.sidechainSettings.threshold = parseFloat(e.target.value);
+        e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(0) + ' dB';
+    });
+    if (ratioSlider) ratioSlider.addEventListener('input', (e) => {
+        if (!currentTrack) return;
+        currentTrack.sidechainSettings.ratio = parseFloat(e.target.value);
+        e.target.nextElementSibling.textContent = parseFloat(e.target.value).toFixed(1) + ':1';
+    });
+    if (atkSlider) atkSlider.addEventListener('input', (e) => {
+        if (!currentTrack) return;
+        currentTrack.sidechainSettings.attack = parseFloat(e.target.value);
+        e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 1000).toFixed(0) + ' ms';
+    });
+    if (relSlider) relSlider.addEventListener('input', (e) => {
+        if (!currentTrack) return;
+        currentTrack.sidechainSettings.release = parseFloat(e.target.value);
+        e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 1000).toFixed(0) + ' ms';
+    });
+    if (amtSlider) amtSlider.addEventListener('input', (e) => {
+        if (!currentTrack) return;
+        currentTrack.sidechainSettings.amount = parseFloat(e.target.value);
+        e.target.nextElementSibling.textContent = (parseFloat(e.target.value) * 100).toFixed(0) + '%';
+    });
+}
+
+// Side-chain processing loop - runs during playback
+function startSidechainProcessing() {
+    if (sidechainInterval) return;
+    sidechainInterval = setInterval(() => {
+        if (!audioEngine.isPlaying) return;
+        audioEngine.tracks.forEach(track => {
+            if (!track.sidechainSettings.enabled || !track.sidechainSettings.sourceTrackId) return;
+            const sourceTrack = audioEngine.tracks.find(t => t.id === track.sidechainSettings.sourceTrackId);
+            if (!sourceTrack) return;
+
+            // Analyse the source track level
+            if (!sourceTrack._scAnalyser) {
+                sourceTrack._scAnalyser = audioEngine.audioContext.createAnalyser();
+                sourceTrack._scAnalyser.fftSize = 256;
+                sourceTrack.sidechainGain.connect(sourceTrack._scAnalyser);
+            }
+
+            const data = new Float32Array(sourceTrack._scAnalyser.fftSize);
+            sourceTrack._scAnalyser.getFloatTimeDomainData(data);
+            let rms = 0;
+            for (let i = 0; i < data.length; i++) rms += data[i] * data[i];
+            rms = Math.sqrt(rms / data.length);
+            const dbLevel = 20 * Math.log10(Math.max(rms, 1e-10));
+
+            const sc = track.sidechainSettings;
+            if (dbLevel > sc.threshold) {
+                const overDb = dbLevel - sc.threshold;
+                const reductionDb = overDb * (1 - 1 / sc.ratio) * sc.amount;
+                const targetGain = Math.pow(10, -reductionDb / 20);
+                // Smooth gain change
+                const now = audioEngine.audioContext.currentTime;
+                track.sidechainGain.gain.cancelScheduledValues(now);
+                track.sidechainGain.gain.setTargetAtTime(targetGain, now, sc.attack);
+            } else {
+                const now = audioEngine.audioContext.currentTime;
+                track.sidechainGain.gain.cancelScheduledValues(now);
+                track.sidechainGain.gain.setTargetAtTime(1.0, now, sc.release);
+            }
+        });
+    }, 20); // 50Hz update rate
+}
+
+function stopSidechainProcessing() {
+    if (sidechainInterval) {
+        clearInterval(sidechainInterval);
+        sidechainInterval = null;
+    }
+    // Reset all sidechain gains
+    audioEngine.tracks.forEach(track => {
+        track.sidechainGain.gain.value = 1;
+    });
+}
+
+// --- Effect Section Drag Reorder ---
+function setupEffectSectionReorder(modal) {
+    const settingsSections = modal.querySelector('.settings-sections');
+    if (!settingsSections) return;
+
+    // Add drag handles to each section
+    settingsSections.querySelectorAll('.settings-section').forEach(section => {
+        if (section.querySelector('.drag-handle')) return;
+        const handle = document.createElement('span');
+        handle.className = 'drag-handle';
+        handle.textContent = '⋮⋮';
+        handle.title = 'Drag to reorder';
+        handle.draggable = true;
+        section.appendChild(handle);
+        section.draggable = false; // Only handle triggers drag
+
+        handle.addEventListener('dragstart', (e) => {
+            section.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', '');
+            window._draggedSection = section;
+        });
+
+        handle.addEventListener('dragend', () => {
+            section.classList.remove('dragging');
+            settingsSections.querySelectorAll('.settings-section').forEach(s => {
+                s.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+            window._draggedSection = null;
+        });
+
+        section.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (!window._draggedSection || window._draggedSection === section) return;
+            e.dataTransfer.dropEffect = 'move';
+
+            const rect = section.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            section.classList.remove('drag-over-top', 'drag-over-bottom');
+            if (e.clientY < midY) {
+                section.classList.add('drag-over-top');
+            } else {
+                section.classList.add('drag-over-bottom');
+            }
+        });
+
+        section.addEventListener('dragleave', () => {
+            section.classList.remove('drag-over-top', 'drag-over-bottom');
+        });
+
+        section.addEventListener('drop', (e) => {
+            e.preventDefault();
+            if (!window._draggedSection || window._draggedSection === section) return;
+
+            const rect = section.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+
+            if (e.clientY < midY) {
+                settingsSections.insertBefore(window._draggedSection, section);
+            } else {
+                settingsSections.insertBefore(window._draggedSection, section.nextSibling);
+            }
+
+            section.classList.remove('drag-over-top', 'drag-over-bottom');
+        });
     });
 }
 
@@ -3741,51 +4552,98 @@ function updateAutomationList(track, modal) {
 function updateAllSettingsDisplays() {
     // Update all value displays
     document.querySelectorAll('.eq-freq').forEach(el => {
-        el.nextElementSibling.textContent = parseFloat(el.value).toFixed(0) + ' Hz';
+        const freq = parseFloat(el.value);
+        el.nextElementSibling.textContent = freq >= 1000 ? (freq/1000).toFixed(1) + ' kHz' : freq.toFixed(0) + ' Hz';
     });
-    
+
     document.querySelectorAll('.eq-gain').forEach(el => {
         el.nextElementSibling.textContent = parseFloat(el.value).toFixed(1) + ' dB';
     });
-    
+
     document.querySelectorAll('.eq-q').forEach(el => {
         el.nextElementSibling.textContent = parseFloat(el.value).toFixed(1);
     });
-    
+
     const compThresholdVal = document.querySelector('.comp-threshold-value');
     const compThreshold = document.querySelector('.comp-threshold');
     if (compThresholdVal) compThresholdVal.textContent = parseFloat(compThreshold.value).toFixed(0) + ' dB';
-    
+
     const compKneeVal = document.querySelector('.comp-knee-value');
     const compKnee = document.querySelector('.comp-knee');
     if (compKneeVal) compKneeVal.textContent = parseFloat(compKnee.value).toFixed(0) + ' dB';
-    
+
     const compRatioVal = document.querySelector('.comp-ratio-value');
     const compRatio = document.querySelector('.comp-ratio');
     if (compRatioVal) compRatioVal.textContent = parseFloat(compRatio.value).toFixed(1) + ':1';
-    
+
     const compAttackVal = document.querySelector('.comp-attack-value');
     const compAttack = document.querySelector('.comp-attack');
     if (compAttackVal) compAttackVal.textContent = (parseFloat(compAttack.value) * 1000).toFixed(0) + ' ms';
-    
+
     const compReleaseVal = document.querySelector('.comp-release-value');
     const compRelease = document.querySelector('.comp-release');
     if (compReleaseVal) compReleaseVal.textContent = (parseFloat(compRelease.value) * 1000).toFixed(0) + ' ms';
-    
+
+    const compMakeupVal = document.querySelector('.comp-makeup-value');
+    const compMakeup = document.querySelector('.comp-makeup');
+    if (compMakeupVal && compMakeup) compMakeupVal.textContent = parseFloat(compMakeup.value).toFixed(1) + ' dB';
+
     const delayTime = document.querySelector('.delay-time');
-    delayTime.nextElementSibling.textContent = (parseFloat(delayTime.value) * 1000).toFixed(0) + ' ms';
-    
+    if (delayTime) delayTime.nextElementSibling.textContent = (parseFloat(delayTime.value) * 1000).toFixed(0) + ' ms';
+
     const delayFeedback = document.querySelector('.delay-feedback');
-    delayFeedback.nextElementSibling.textContent = (parseFloat(delayFeedback.value) * 100).toFixed(0) + '%';
-    
+    if (delayFeedback) delayFeedback.nextElementSibling.textContent = (parseFloat(delayFeedback.value) * 100).toFixed(0) + '%';
+
     const delayMix = document.querySelector('.delay-mix');
-    delayMix.nextElementSibling.textContent = (parseFloat(delayMix.value) * 100).toFixed(0) + '%';
-    
+    if (delayMix) delayMix.nextElementSibling.textContent = (parseFloat(delayMix.value) * 100).toFixed(0) + '%';
+
     const reverbDecay = document.querySelector('.reverb-decay');
-    reverbDecay.nextElementSibling.textContent = parseFloat(reverbDecay.value).toFixed(1) + ' s';
-    
+    if (reverbDecay) reverbDecay.nextElementSibling.textContent = parseFloat(reverbDecay.value).toFixed(1) + ' s';
+
     const reverbMix = document.querySelector('.reverb-mix');
-    reverbMix.nextElementSibling.textContent = (parseFloat(reverbMix.value) * 100).toFixed(0) + '%';
+    if (reverbMix) reverbMix.nextElementSibling.textContent = (parseFloat(reverbMix.value) * 100).toFixed(0) + '%';
+
+    // Multiband comp displays (compact)
+    document.querySelectorAll('.mbcomp-threshold').forEach(el => {
+        el.nextElementSibling.textContent = parseFloat(el.value).toFixed(0);
+    });
+    document.querySelectorAll('.mbcomp-ratio').forEach(el => {
+        el.nextElementSibling.textContent = parseFloat(el.value).toFixed(1) + ':1';
+    });
+    document.querySelectorAll('.mbcomp-attack').forEach(el => {
+        el.nextElementSibling.textContent = (parseFloat(el.value) * 1000).toFixed(0);
+    });
+    document.querySelectorAll('.mbcomp-release').forEach(el => {
+        el.nextElementSibling.textContent = (parseFloat(el.value) * 1000).toFixed(0);
+    });
+    document.querySelectorAll('.mbcomp-gain').forEach(el => {
+        el.nextElementSibling.textContent = parseFloat(el.value).toFixed(1);
+    });
+
+    // De-esser displays
+    const deFreq = document.querySelector('.deesser-freq');
+    if (deFreq) {
+        const f = parseFloat(deFreq.value);
+        deFreq.nextElementSibling.textContent = f >= 1000 ? (f/1000).toFixed(1) + ' kHz' : f.toFixed(0) + ' Hz';
+    }
+    const deTh = document.querySelector('.deesser-threshold');
+    if (deTh) deTh.nextElementSibling.textContent = parseFloat(deTh.value).toFixed(0) + ' dB';
+    const deRatio = document.querySelector('.deesser-ratio');
+    if (deRatio) deRatio.nextElementSibling.textContent = parseFloat(deRatio.value).toFixed(1) + ':1';
+    const deRange = document.querySelector('.deesser-range');
+    if (deRange) deRange.nextElementSibling.textContent = 'Q ' + parseFloat(deRange.value).toFixed(1);
+
+    // Side-chain displays
+    const scTh = document.querySelector('.sidechain-threshold');
+    if (scTh) scTh.nextElementSibling.textContent = parseFloat(scTh.value).toFixed(0) + ' dB';
+    const scRatio = document.querySelector('.sidechain-ratio');
+    if (scRatio) scRatio.nextElementSibling.textContent = parseFloat(scRatio.value).toFixed(1) + ':1';
+    const scAtk = document.querySelector('.sidechain-attack');
+    if (scAtk) scAtk.nextElementSibling.textContent = (parseFloat(scAtk.value) * 1000).toFixed(0) + ' ms';
+    const scRel = document.querySelector('.sidechain-release');
+    if (scRel) scRel.nextElementSibling.textContent = (parseFloat(scRel.value) * 1000).toFixed(0) + ' ms';
+    const scAmt = document.querySelector('.sidechain-amount');
+    if (scAmt) scAmt.nextElementSibling.textContent = (parseFloat(scAmt.value) * 100).toFixed(0) + '%';
 }
 
 function switchTab(tabName) {
@@ -3849,7 +4707,34 @@ function updateEffectIndicators(track, trackElement) {
         indicatorsContainer.appendChild(indicator);
         hasActiveEffects = true;
     }
-    
+
+    // Check Multiband Comp
+    if (track.isEffectEnabled('multibandComp')) {
+        const indicator = document.createElement('span');
+        indicator.className = 'effect-indicator';
+        indicator.textContent = 'MB';
+        indicatorsContainer.appendChild(indicator);
+        hasActiveEffects = true;
+    }
+
+    // Check De-esser
+    if (track.isEffectEnabled('deesser')) {
+        const indicator = document.createElement('span');
+        indicator.className = 'effect-indicator';
+        indicator.textContent = 'DE-S';
+        indicatorsContainer.appendChild(indicator);
+        hasActiveEffects = true;
+    }
+
+    // Check Side-chain
+    if (track.sidechainSettings && track.sidechainSettings.enabled) {
+        const indicator = document.createElement('span');
+        indicator.className = 'effect-indicator';
+        indicator.textContent = 'SC';
+        indicatorsContainer.appendChild(indicator);
+        hasActiveEffects = true;
+    }
+
     // Update button appearance
     if (hasActiveEffects) {
         settingsBtn.classList.add('has-effects');
@@ -3886,11 +4771,16 @@ function selectTrack(trackElement) {
 function startMetering() {
     const meterL = document.getElementById('masterMeterL');
     const meterR = document.getElementById('masterMeterR');
+    // Pre-allocate typed array — reused every frame instead of re-creating
     const dataArray = new Uint8Array(audioEngine.analyser.frequencyBinCount);
-    
+
     let clipTimeoutL = null;
     let clipTimeoutR = null;
-    
+
+    // Cache DOM refs for per-track meters to avoid querySelectorAll each frame
+    let _cachedTrackMeterBars = null;
+    let _trackMeterCacheTime = 0;
+
     function updateMeters() {
         audioEngine.analyser.getByteTimeDomainData(dataArray);
         
@@ -3944,10 +4834,7 @@ function startMetering() {
         
         meterL.style.height = `${newHeightL}%`;
         meterR.style.height = `${newHeightR}%`;
-        
-        // Update play button state
-        updatePlayPauseButton();
-        
+
         // Handle loop playback
         if (loopEnabled && audioEngine.isPlaying) {
             const currentTime = audioEngine.getCurrentTime();
@@ -3955,10 +4842,15 @@ function startMetering() {
                 audioEngine.seek(loopStart);
             }
         }
-        
-        // Update per-track meters (simplified - uses master signal divided by track count)
+
+        // Update per-track meters — cache DOM query, refresh every ~2 seconds
+        const now = performance.now();
+        if (!_cachedTrackMeterBars || now - _trackMeterCacheTime > 2000) {
+            _cachedTrackMeterBars = document.querySelectorAll('.track-meter-bar');
+            _trackMeterCacheTime = now;
+        }
         const avgLevel = (maxL + maxR) / 2;
-        document.querySelectorAll('.track-meter-bar').forEach(meterBar => {
+        _cachedTrackMeterBars.forEach(meterBar => {
             const currentWidth = parseFloat(meterBar.style.width) || 0;
             const targetWidth = audioEngine.isPlaying ? Math.min(avgLevel * 100, 100) : 0;
             const newWidth = targetWidth > currentWidth ? targetWidth : currentWidth * 0.9;
@@ -4057,6 +4949,7 @@ function serializeProject() {
                 low: { frequency: track.eqLow.frequency.value, gain: track.eqLow.gain.value, Q: track.eqLow.Q.value },
                 lowMid: { frequency: track.eqLowMid.frequency.value, gain: track.eqLowMid.gain.value, Q: track.eqLowMid.Q.value },
                 mid: { frequency: track.eqMid.frequency.value, gain: track.eqMid.gain.value, Q: track.eqMid.Q.value },
+                highMid: { frequency: track.eqHighMid.frequency.value, gain: track.eqHighMid.gain.value, Q: track.eqHighMid.Q.value },
                 high: { frequency: track.eqHigh.frequency.value, gain: track.eqHigh.gain.value, Q: track.eqHigh.Q.value }
             },
             compressor: {
@@ -4064,8 +4957,22 @@ function serializeProject() {
                 knee: track.compressor.knee.value,
                 ratio: track.compressor.ratio.value,
                 attack: track.compressor.attack.value,
-                release: track.compressor.release.value
+                release: track.compressor.release.value,
+                makeup: track.makeupGain.gain.value
             },
+            multibandComp: {
+                low: { threshold: track.mbCompLow.threshold.value, ratio: track.mbCompLow.ratio.value, attack: track.mbCompLow.attack.value, release: track.mbCompLow.release.value, gain: track.mbCompLowGain.gain.value },
+                lowMid: { threshold: track.mbCompLowMid.threshold.value, ratio: track.mbCompLowMid.ratio.value, attack: track.mbCompLowMid.attack.value, release: track.mbCompLowMid.release.value, gain: track.mbCompLowMidGain.gain.value },
+                highMid: { threshold: track.mbCompHighMid.threshold.value, ratio: track.mbCompHighMid.ratio.value, attack: track.mbCompHighMid.attack.value, release: track.mbCompHighMid.release.value, gain: track.mbCompHighMidGain.gain.value },
+                high: { threshold: track.mbCompHigh.threshold.value, ratio: track.mbCompHigh.ratio.value, attack: track.mbCompHigh.attack.value, release: track.mbCompHigh.release.value, gain: track.mbCompHighGain.gain.value }
+            },
+            deesser: {
+                frequency: track.deesserFilter.frequency.value,
+                threshold: track.deesserCompressor.threshold.value,
+                ratio: track.deesserCompressor.ratio.value,
+                Q: track.deesserFilter.Q.value
+            },
+            sidechain: { ...track.sidechainSettings },
             delay: {
                 time: track.delayNode.delayTime.value,
                 feedback: track.delayFeedback.gain.value,
@@ -4241,6 +5148,11 @@ async function restoreProject(projectData, audioBuffers) {
                 track.eqMid.frequency.value = trackData.eq.mid.frequency;
                 track.eqMid.gain.value = trackData.eq.mid.gain;
                 track.eqMid.Q.value = trackData.eq.mid.Q;
+                if (trackData.eq.highMid) {
+                    track.eqHighMid.frequency.value = trackData.eq.highMid.frequency;
+                    track.eqHighMid.gain.value = trackData.eq.highMid.gain;
+                    track.eqHighMid.Q.value = trackData.eq.highMid.Q;
+                }
                 track.eqHigh.frequency.value = trackData.eq.high.frequency;
                 track.eqHigh.gain.value = trackData.eq.high.gain;
                 track.eqHigh.Q.value = trackData.eq.high.Q;
@@ -4253,6 +5165,43 @@ async function restoreProject(projectData, audioBuffers) {
                 track.compressor.ratio.value = trackData.compressor.ratio;
                 track.compressor.attack.value = trackData.compressor.attack;
                 track.compressor.release.value = trackData.compressor.release;
+                if (trackData.compressor.makeup !== undefined) {
+                    track.makeupGain.gain.value = trackData.compressor.makeup;
+                }
+            }
+
+            // Restore multiband compressor
+            if (trackData.multibandComp) {
+                const mbRestoreMap = {
+                    low: { comp: track.mbCompLow, gain: track.mbCompLowGain },
+                    lowMid: { comp: track.mbCompLowMid, gain: track.mbCompLowMidGain },
+                    highMid: { comp: track.mbCompHighMid, gain: track.mbCompHighMidGain },
+                    high: { comp: track.mbCompHigh, gain: track.mbCompHighGain }
+                };
+                ['low', 'lowMid', 'highMid', 'high'].forEach(band => {
+                    const d = trackData.multibandComp[band];
+                    if (!d) return;
+                    const comp = mbRestoreMap[band].comp;
+                    const gain = mbRestoreMap[band].gain;
+                    comp.threshold.value = d.threshold;
+                    comp.ratio.value = d.ratio;
+                    comp.attack.value = d.attack;
+                    comp.release.value = d.release;
+                    gain.gain.value = d.gain;
+                });
+            }
+
+            // Restore de-esser
+            if (trackData.deesser) {
+                track.deesserFilter.frequency.value = trackData.deesser.frequency;
+                track.deesserCompressor.threshold.value = trackData.deesser.threshold;
+                track.deesserCompressor.ratio.value = trackData.deesser.ratio;
+                track.deesserFilter.Q.value = trackData.deesser.Q;
+            }
+
+            // Restore sidechain
+            if (trackData.sidechain) {
+                Object.assign(track.sidechainSettings, trackData.sidechain);
             }
 
             // Restore delay

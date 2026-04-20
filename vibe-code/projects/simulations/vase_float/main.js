@@ -1,4 +1,4 @@
-﻿// Enhanced Greek Garden with Floating Musical Bowls
+// Enhanced Greek Garden with Floating Musical Bowls — v2
 class FloatingBowlsGarden {
     constructor() {
         this.scene = null;
@@ -69,14 +69,37 @@ class FloatingBowlsGarden {
         this.lydianScale = this.scales.lydian.notes;
         this.lights = {};
 
+        // New systems
+        this.stars = null;
+        this.moon = null;
+        this.moonGlow = null;
+        this.cherryPetals = [];
+        this.waterMistParticles = [];
+        this.splashParticles = [];
+        this.clouds = [];
+        this.rainDrops = null;
+        this.rainActive = false;
+        this.rainIntensity = 0;
+        this.causticLight = null;
+        this.ambientSounds = {};
+        this.dragonflies = [];
+
         this.init();
         this.createSkyDome();
+        this.createStars();
+        this.createMoon();
+        this.createClouds();
         this.createGarden();
         this.createPond();
         this.createLilyPads();
         this.createBowls();
         this.createFireflies();
         this.createKoiFish();
+        this.createCherryBlossoms();
+        this.createWaterMist();
+        this.createRainSystem();
+        this.createDragonflies();
+        this.createCausticLight();
         this.setupAudio();
         this.setupControls();
         this.setupBoatControls();
@@ -134,6 +157,8 @@ class FloatingBowlsGarden {
         this.camera.lookAt(0, 1, 0);
     }
 
+    // ─── SKY, STARS, MOON, CLOUDS ───────────────────────────────
+
     createSkyDome() {
         const skyGeo = new THREE.SphereGeometry(200, 32, 15);
         const skyMat = new THREE.ShaderMaterial({
@@ -168,6 +193,119 @@ class FloatingBowlsGarden {
         this.skyDome = new THREE.Mesh(skyGeo, skyMat);
         this.scene.add(this.skyDome);
     }
+
+    createStars() {
+        const starCount = 1200;
+        const positions = new Float32Array(starCount * 3);
+        const sizes = new Float32Array(starCount);
+        const twinklePhases = new Float32Array(starCount);
+        for (let i = 0; i < starCount; i++) {
+            // Distribute on upper hemisphere
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.random() * Math.PI * 0.48; // upper half
+            const r = 190;
+            positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+            positions[i * 3 + 1] = r * Math.cos(phi) + 10;
+            positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+            sizes[i] = 0.8 + Math.random() * 2.0;
+            twinklePhases[i] = Math.random() * Math.PI * 2;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+        const mat = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 1.2,
+            transparent: true,
+            opacity: 0,
+            sizeAttenuation: true,
+            depthWrite: false
+        });
+        this.stars = new THREE.Points(geo, mat);
+        this.stars.userData.twinklePhases = twinklePhases;
+        this.scene.add(this.stars);
+    }
+
+    createMoon() {
+        // Moon sphere
+        const moonGeo = new THREE.SphereGeometry(8, 32, 32);
+        const moonMat = new THREE.MeshStandardMaterial({
+            color: 0xf5f0d0,
+            emissive: 0xf5f0d0,
+            emissiveIntensity: 0.0,
+            roughness: 0.8,
+            metalness: 0.0
+        });
+        this.moon = new THREE.Mesh(moonGeo, moonMat);
+        this.moon.position.set(-80, 120, -60);
+        this.scene.add(this.moon);
+
+        // Moon glow sprite
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+        gradient.addColorStop(0, 'rgba(255, 250, 220, 0.6)');
+        gradient.addColorStop(0.3, 'rgba(255, 250, 220, 0.2)');
+        gradient.addColorStop(1, 'rgba(255, 250, 220, 0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 128, 128);
+        const tex = new THREE.CanvasTexture(canvas);
+        const glowMat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+        this.moonGlow = new THREE.Sprite(glowMat);
+        this.moonGlow.scale.set(50, 50, 1);
+        this.moonGlow.position.copy(this.moon.position);
+        this.scene.add(this.moonGlow);
+
+        // Moon light
+        this.lights.moonLight = new THREE.DirectionalLight(0xd0d8ff, 0);
+        this.lights.moonLight.position.copy(this.moon.position);
+        this.scene.add(this.lights.moonLight);
+    }
+
+    createClouds() {
+        for (let i = 0; i < 8; i++) {
+            const cloudGroup = new THREE.Group();
+            const cloudMat = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.35,
+                roughness: 1.0,
+                depthWrite: false
+            });
+            const puffCount = 4 + Math.floor(Math.random() * 4);
+            for (let p = 0; p < puffCount; p++) {
+                const puffGeo = new THREE.SphereGeometry(3 + Math.random() * 4, 8, 6);
+                const puff = new THREE.Mesh(puffGeo, cloudMat.clone());
+                puff.position.set(
+                    (Math.random() - 0.5) * 10,
+                    (Math.random() - 0.5) * 1.5,
+                    (Math.random() - 0.5) * 4
+                );
+                puff.scale.y = 0.4 + Math.random() * 0.3;
+                cloudGroup.add(puff);
+            }
+            const angle = (i / 8) * Math.PI * 2;
+            const radius = 60 + Math.random() * 50;
+            cloudGroup.position.set(
+                Math.cos(angle) * radius,
+                35 + Math.random() * 25,
+                Math.sin(angle) * radius
+            );
+            cloudGroup.userData = {
+                speed: 0.3 + Math.random() * 0.5,
+                angle: angle,
+                radius: radius,
+                baseY: cloudGroup.position.y,
+                phase: Math.random() * Math.PI * 2
+            };
+            this.clouds.push(cloudGroup);
+            this.scene.add(cloudGroup);
+        }
+    }
+
+    // ─── GARDEN ─────────────────────────────────────────────────
 
     createGarden() {
         const groundGeo = new THREE.PlaneGeometry(120, 120, 20, 20);
@@ -255,6 +393,10 @@ class FloatingBowlsGarden {
     createVegetation() {
         const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5C3317, roughness: 0.9 });
         const foliageColors = [0x1B7A1B, 0x228B22, 0x2E8B2E, 0x186A18, 0x2D8B2D, 0x3CB043];
+        // Cherry blossom trees (pink foliage) — a few of the trees
+        const cherryTrunkMat = new THREE.MeshStandardMaterial({ color: 0x6B3A30, roughness: 0.85 });
+        const cherryFoliageColors = [0xFFB7C5, 0xFF92A5, 0xFFC0CB, 0xFFA0B4];
+
         for (let i = 0; i < 18; i++) {
             const angle = (i / 18) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
             const radius = 33 + Math.random() * 14;
@@ -265,17 +407,24 @@ class FloatingBowlsGarden {
                 if (Math.sqrt((x - col[0]) ** 2 + (z - col[2]) ** 2) < 8) { tooClose = true; break; }
             }
             if (tooClose) continue;
+
+            const isCherryTree = i % 5 === 0; // Every 5th tree is a cherry blossom
             const treeHeight = 7 + Math.random() * 4;
             const trunkGeo = new THREE.CylinderGeometry(0.4, 0.7, treeHeight, 8);
-            const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+            const trunk = new THREE.Mesh(trunkGeo, isCherryTree ? cherryTrunkMat : trunkMat);
             trunk.position.set(x, treeHeight / 2, z);
             trunk.castShadow = true;
             this.scene.add(trunk);
             const layers = 2 + Math.floor(Math.random() * 2);
             for (let l = 0; l < layers; l++) {
                 const sz = (4 + Math.random() * 2) * (1 - l * 0.2);
-                const fc = foliageColors[Math.floor(Math.random() * foliageColors.length)];
-                const fm = new THREE.MeshStandardMaterial({ color: fc, roughness: 0.8 });
+                const colors = isCherryTree ? cherryFoliageColors : foliageColors;
+                const fc = colors[Math.floor(Math.random() * colors.length)];
+                const fm = new THREE.MeshStandardMaterial({
+                    color: fc, roughness: 0.8,
+                    emissive: isCherryTree ? fc : 0x000000,
+                    emissiveIntensity: isCherryTree ? 0.05 : 0
+                });
                 const fg = new THREE.SphereGeometry(sz, 8, 6);
                 const fl = new THREE.Mesh(fg, fm);
                 fl.position.set(x + (Math.random() - 0.5) * 2, treeHeight + l * 2 + Math.random(), z + (Math.random() - 0.5) * 2);
@@ -436,32 +585,196 @@ class FloatingBowlsGarden {
             this.scene.add(swirl);
         }
     }
+
+    // ─── POND (SHADER WATER) ────────────────────────────────────
+
     createPond() {
+        // Deep water base
         const deepGeo = new THREE.CircleGeometry(10, 64);
-        const deepMat = new THREE.MeshStandardMaterial({ color: 0x1a3a5c, roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.95, side: THREE.DoubleSide });
+        const deepMat = new THREE.MeshStandardMaterial({ color: 0x0d2840, roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.98, side: THREE.DoubleSide });
         const deepWater = new THREE.Mesh(deepGeo, deepMat);
         deepWater.rotation.x = -Math.PI / 2;
         deepWater.position.y = -0.05;
         deepWater.receiveShadow = true;
         this.scene.add(deepWater);
 
-        const pondGeo = new THREE.CircleGeometry(10, 80);
-        const pondMat = new THREE.MeshPhysicalMaterial({
-            color: 0x3a7fb5, roughness: 0.05, metalness: 0.3,
-            transparent: true, opacity: 0.65, side: THREE.DoubleSide,
-            clearcoat: 0.4, clearcoatRoughness: 0.1
+        // Shader-based water surface
+        const pondGeo = new THREE.CircleGeometry(10, 128);
+        const pondMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0 },
+                uSunDirection: { value: new THREE.Vector3(0.5, 0.8, 0.3) },
+                uSunColor: { value: new THREE.Color(1.0, 0.95, 0.8) },
+                uWaterColor: { value: new THREE.Color(0.15, 0.45, 0.65) },
+                uDeepColor: { value: new THREE.Color(0.05, 0.15, 0.35) },
+                uCameraPosition: { value: new THREE.Vector3() },
+                uNightFactor: { value: 0.0 },
+                uRainIntensity: { value: 0.0 },
+                uFoamColor: { value: new THREE.Color(0.9, 0.95, 1.0) }
+            },
+            vertexShader: `
+                varying vec3 vWorldPosition;
+                varying vec3 vNormal;
+                varying vec2 vUv;
+                uniform float uTime;
+                uniform float uRainIntensity;
+
+                // Simple noise
+                float hash(vec2 p) {
+                    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                }
+                float noise(vec2 p) {
+                    vec2 i = floor(p);
+                    vec2 f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    float a = hash(i);
+                    float b = hash(i + vec2(1.0, 0.0));
+                    float c = hash(i + vec2(0.0, 1.0));
+                    float d = hash(i + vec2(1.0, 1.0));
+                    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+                }
+
+                void main() {
+                    vUv = uv;
+                    vec3 pos = position;
+                    float dist = length(pos.xy);
+                    float edgeFade = smoothstep(10.0, 8.0, dist);
+
+                    // Layered waves
+                    float wave1 = sin(pos.x * 0.8 + uTime * 1.2) * cos(pos.y * 0.6 + uTime * 0.9) * 0.06;
+                    float wave2 = sin(pos.x * 1.5 - uTime * 1.8 + pos.y * 0.8) * 0.03;
+                    float wave3 = noise(pos.xy * 0.5 + uTime * 0.3) * 0.04;
+                    float wave4 = sin(pos.x * 3.0 + uTime * 2.5) * cos(pos.y * 2.5 - uTime * 2.0) * 0.015;
+
+                    // Rain ripple disturbance
+                    float rainWave = 0.0;
+                    if (uRainIntensity > 0.01) {
+                        rainWave = sin(pos.x * 8.0 + uTime * 6.0) * sin(pos.y * 8.0 + uTime * 5.0) * 0.012 * uRainIntensity;
+                        rainWave += sin(pos.x * 12.0 - uTime * 8.0) * cos(pos.y * 10.0 + uTime * 7.0) * 0.008 * uRainIntensity;
+                    }
+
+                    float height = (wave1 + wave2 + wave3 + wave4 + rainWave) * edgeFade;
+
+                    vec4 worldPos = modelMatrix * vec4(pos.x, pos.y, height, 1.0);
+                    vWorldPosition = worldPos.xyz;
+
+                    // Approximate normal from wave derivatives
+                    float dx = cos(pos.x * 0.8 + uTime * 1.2) * 0.8 * cos(pos.y * 0.6 + uTime * 0.9) * 0.06
+                             + cos(pos.x * 1.5 - uTime * 1.8 + pos.y * 0.8) * 1.5 * 0.03;
+                    float dy = sin(pos.x * 0.8 + uTime * 1.2) * (-sin(pos.y * 0.6 + uTime * 0.9)) * 0.6 * 0.06;
+                    vNormal = normalize(vec3(-dx, -dy, 1.0));
+
+                    gl_Position = projectionMatrix * viewMatrix * worldPos;
+                }
+            `,
+            fragmentShader: `
+                uniform float uTime;
+                uniform vec3 uSunDirection;
+                uniform vec3 uSunColor;
+                uniform vec3 uWaterColor;
+                uniform vec3 uDeepColor;
+                uniform vec3 uCameraPosition;
+                uniform float uNightFactor;
+                uniform float uRainIntensity;
+                uniform vec3 uFoamColor;
+
+                varying vec3 vWorldPosition;
+                varying vec3 vNormal;
+                varying vec2 vUv;
+
+                float hash(vec2 p) {
+                    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                }
+                float noise(vec2 p) {
+                    vec2 i = floor(p);
+                    vec2 f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    float a = hash(i);
+                    float b = hash(i + vec2(1.0, 0.0));
+                    float c = hash(i + vec2(0.0, 1.0));
+                    float d = hash(i + vec2(1.0, 1.0));
+                    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+                }
+
+                void main() {
+                    vec3 viewDir = normalize(uCameraPosition - vWorldPosition);
+                    vec3 normal = normalize(vNormal);
+
+                    // Fresnel effect
+                    float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), 3.5);
+                    fresnel = mix(0.04, 1.0, fresnel);
+
+                    // Specular highlight from sun/moon
+                    vec3 halfDir = normalize(uSunDirection + viewDir);
+                    float spec = pow(max(dot(normal, halfDir), 0.0), 256.0);
+                    float specBroad = pow(max(dot(normal, halfDir), 0.0), 32.0) * 0.15;
+
+                    // Water color with depth gradient
+                    float dist = length(vWorldPosition.xz);
+                    float depthFactor = smoothstep(0.0, 8.0, dist);
+                    vec3 waterCol = mix(uWaterColor, uDeepColor, depthFactor * 0.5);
+
+                    // Night tinting
+                    vec3 nightWater = mix(waterCol, vec3(0.05, 0.08, 0.18), uNightFactor * 0.6);
+                    waterCol = nightWater;
+
+                    // Caustic pattern on water surface
+                    float caustic1 = noise(vWorldPosition.xz * 2.0 + uTime * 0.5);
+                    float caustic2 = noise(vWorldPosition.xz * 3.0 - uTime * 0.3);
+                    float caustic = pow(caustic1 * caustic2, 1.5) * 0.3 * (1.0 - uNightFactor * 0.7);
+
+                    // Edge foam
+                    float edgeDist = smoothstep(9.5, 8.5, dist);
+                    float foam = (1.0 - edgeDist) * smoothstep(9.8, 9.2, dist);
+                    foam += noise(vWorldPosition.xz * 4.0 + uTime * 0.8) * foam * 0.5;
+
+                    // Rain surface disturbance
+                    float rainSpec = 0.0;
+                    if (uRainIntensity > 0.01) {
+                        float ripple = sin(length(vWorldPosition.xz - vec2(hash(floor(vWorldPosition.xz * 2.0 + uTime)))) * 20.0 - uTime * 10.0);
+                        rainSpec = max(0.0, ripple) * uRainIntensity * 0.1;
+                    }
+
+                    // Reflection color (sky-like)
+                    vec3 skyReflect = mix(
+                        vec3(0.5, 0.7, 0.9),
+                        vec3(0.05, 0.05, 0.15),
+                        uNightFactor
+                    );
+
+                    vec3 color = mix(waterCol, skyReflect, fresnel * 0.5);
+                    color += caustic * vec3(0.3, 0.5, 0.7);
+                    color += (spec + specBroad) * uSunColor * (1.0 - uNightFactor * 0.8);
+                    color += foam * uFoamColor * 0.3;
+                    color += rainSpec * vec3(0.8, 0.85, 0.9);
+
+                    // Moon reflection at night
+                    if (uNightFactor > 0.1) {
+                        vec3 moonDir = normalize(vec3(-0.4, 0.6, -0.3));
+                        vec3 moonHalf = normalize(moonDir + viewDir);
+                        float moonSpec = pow(max(dot(normal, moonHalf), 0.0), 128.0);
+                        float moonSpecBroad = pow(max(dot(normal, moonHalf), 0.0), 16.0) * 0.08;
+                        color += (moonSpec * 0.5 + moonSpecBroad) * vec3(0.7, 0.75, 0.9) * uNightFactor;
+                    }
+
+                    float alpha = mix(0.72, 0.85, fresnel);
+                    alpha = max(alpha, foam * 0.6);
+
+                    gl_FragColor = vec4(color, alpha);
+                }
+            `,
+            transparent: true,
+            side: THREE.DoubleSide,
+            depthWrite: false
         });
+
         this.pondWater = new THREE.Mesh(pondGeo, pondMat);
         this.pondWater.rotation.x = -Math.PI / 2;
         this.pondWater.position.y = 0.15;
         this.pondWater.receiveShadow = true;
         this.scene.add(this.pondWater);
-        this.pondWater.userData = { originalVertices: [] };
-        const vertices = pondGeo.attributes.position.array;
-        for (let i = 0; i < vertices.length; i += 3) {
-            this.pondWater.userData.originalVertices.push({ x: vertices[i], y: vertices[i + 1], z: vertices[i + 2] });
-        }
 
+        // Stone edge
         const edgeMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc8, roughness: 0.5, metalness: 0.02 });
         const innerEdgeGeo = new THREE.TorusGeometry(10.3, 0.4, 8, 48);
         const innerEdge = new THREE.Mesh(innerEdgeGeo, edgeMat);
@@ -476,6 +789,8 @@ class FloatingBowlsGarden {
         outerEdge.castShadow = true; outerEdge.receiveShadow = true;
         this.scene.add(outerEdge);
     }
+
+    // ─── LILY PADS & LOTUS ──────────────────────────────────────
 
     createLilyPads() {
         for (let i = 0; i < 8; i++) {
@@ -521,6 +836,8 @@ class FloatingBowlsGarden {
         }
     }
 
+    // ─── BOWLS ──────────────────────────────────────────────────
+
     createBowls() {
         const bowlPalette = [
             { color: 0xE0B15A, emissive: 0x7A5A20 },
@@ -561,7 +878,6 @@ class FloatingBowlsGarden {
             });
             const bowl = new THREE.Mesh(bowlGeo, bowlMat);
             bowl.position.set(x, 0.15 - bowlHeight * 0.35, z);
-            // Interior cap to block pond water showing through the bowl
             const innerCapGeo = new THREE.CircleGeometry(bowlSize * 0.78, 24);
             const innerCapMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9, metalness: 0.0, side: THREE.DoubleSide });
             const innerCap = new THREE.Mesh(innerCapGeo, innerCapMat);
@@ -586,6 +902,8 @@ class FloatingBowlsGarden {
         }
     }
 
+    // ─── FIREFLIES ──────────────────────────────────────────────
+
     createFireflies() {
         for (let i = 0; i < 40; i++) {
             const ffGeo = new THREE.SphereGeometry(0.04, 6, 6);
@@ -609,13 +927,17 @@ class FloatingBowlsGarden {
         }
     }
 
+    // ─── KOI FISH ───────────────────────────────────────────────
+
     createKoiFish() {
         const koiColors = [
             { body: 0xE84A5F, accent: 0xFFFFFF, belly: 0xFFF1E6 },
             { body: 0xF6A04D, accent: 0xFFFFFF, belly: 0xFFF0D6 },
             { body: 0xFFFFFF, accent: 0xD7263D, belly: 0xFFFFFF },
+            { body: 0x2E86C1, accent: 0xF0E68C, belly: 0xE8F8F5 },
+            { body: 0x1A1A1A, accent: 0xE84A5F, belly: 0x333333 },
         ];
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 5; i++) {
             const koiGroup = new THREE.Group();
             const palette = koiColors[i];
             const bodyMat = new THREE.MeshPhysicalMaterial({
@@ -624,7 +946,6 @@ class FloatingBowlsGarden {
             });
             const bellyMat = new THREE.MeshStandardMaterial({ color: palette.belly, roughness: 0.25 });
             const accentMat = new THREE.MeshStandardMaterial({ color: palette.accent, roughness: 0.25 });
-            // Body — smoother lathe profile
             const bodyProfile = [];
             for (let j = 0; j <= 28; j++) {
                 const t = j / 28;
@@ -640,13 +961,11 @@ class FloatingBowlsGarden {
             body.rotation.z = Math.PI / 2;
             body.scale.set(1, 0.55, 1);
             koiGroup.add(body);
-            // Belly highlight
             const bellyGeo = new THREE.SphereGeometry(0.1, 10, 8);
             bellyGeo.scale(2.3, 0.22, 0.65);
             const belly = new THREE.Mesh(bellyGeo, bellyMat);
             belly.position.set(0.02, -0.03, 0);
             koiGroup.add(belly);
-            // Head + mouth
             const headGeo = new THREE.SphereGeometry(0.09, 12, 10);
             headGeo.scale(1.2, 0.9, 1.0);
             const head = new THREE.Mesh(headGeo, bodyMat);
@@ -657,7 +976,6 @@ class FloatingBowlsGarden {
             const mouth = new THREE.Mesh(mouthGeo, bellyMat);
             mouth.position.set(0.44, 0.0, 0);
             koiGroup.add(mouth);
-            // Eyes
             const eyeWhiteGeo = new THREE.SphereGeometry(0.02, 8, 8);
             const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.2 });
             const eyePupilGeo = new THREE.SphereGeometry(0.01, 6, 6);
@@ -670,7 +988,6 @@ class FloatingBowlsGarden {
                 eyeP.position.set(0.345, 0.03, side * 0.075);
                 koiGroup.add(eyeP);
             });
-            // Fins
             const finMat = new THREE.MeshStandardMaterial({ color: palette.body, roughness: 0.3, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
             const dorsalShape = new THREE.Shape();
             dorsalShape.moveTo(0, 0);
@@ -699,7 +1016,6 @@ class FloatingBowlsGarden {
             pFinR.rotation.y = -0.3;
             pFinR.name = 'pFinR';
             koiGroup.add(pFinR);
-            // Tail — larger forked fan
             const tailShape = new THREE.Shape();
             tailShape.moveTo(0, 0);
             tailShape.lineTo(-0.2, 0.11);
@@ -712,7 +1028,6 @@ class FloatingBowlsGarden {
             tailFin.position.set(-0.46, 0, -0.002);
             tailFin.name = 'tailFin';
             koiGroup.add(tailFin);
-            // Accent color patches
             const numPatches = 2 + Math.floor(Math.random() * 2);
             for (let p = 0; p < numPatches; p++) {
                 const pGeo = new THREE.SphereGeometry(0.045 + Math.random() * 0.03, 10, 8);
@@ -722,7 +1037,7 @@ class FloatingBowlsGarden {
                 koiGroup.add(pMesh);
             }
 
-            const angle = (i / 3) * Math.PI * 2 + Math.random() * 0.5;
+            const angle = (i / 5) * Math.PI * 2 + Math.random() * 0.5;
             const radius = 2.5 + Math.random() * 4.5;
             koiGroup.position.set(Math.cos(angle) * radius, 0.08, Math.sin(angle) * radius);
             koiGroup.scale.set(0.6, 0.6, 0.6);
@@ -741,64 +1056,207 @@ class FloatingBowlsGarden {
         }
     }
 
-    updateKoiFish(delta) {
-        this.koiFish.forEach(koi => {
-            const ud = koi.userData;
-            ud.turnTimer += delta;
-            if (ud.turnTimer > ud.turnInterval) {
-                ud.turnTimer = 0;
-                ud.turnInterval = 4 + Math.random() * 8;
-                ud.swimAngle += (Math.random() - 0.5) * 1.5;
-                ud.targetRadius = 2 + Math.random() * 5.5;
-            }
-            ud.radius += (ud.targetRadius - ud.radius) * delta * 0.5;
-            ud.angle += ud.speed * delta * (1.0 / Math.max(2, ud.radius));
-            const tx = Math.cos(ud.angle) * ud.radius;
-            const tz = Math.sin(ud.angle) * ud.radius;
-            const dx = tx - koi.position.x;
-            const dz = tz - koi.position.z;
-            koi.position.x += dx * delta * 2;
-            koi.position.z += dz * delta * 2;
-            koi.position.y = 0.05 + Math.sin(this.elapsedTime * 1.5 + ud.phase) * 0.015;
-            // Face direction of movement
-            const moveAngle = Math.atan2(dz, dx);
-            koi.rotation.y = -moveAngle;
-            // Tail wag
-            const tailFin = koi.getObjectByName('tailFin');
-            const tailWag = Math.sin(this.elapsedTime * 6 + ud.phase) * 0.55;
-            if (tailFin) tailFin.rotation.y = tailWag;
-            // Pectoral fins paddle
-            const pFinL = koi.getObjectByName('pFinL');
-            const pFinR = koi.getObjectByName('pFinR');
-            const finPaddle = Math.sin(this.elapsedTime * 3.5 + ud.phase) * 0.3;
-            if (pFinL) pFinL.rotation.x = 0.25 + finPaddle;
-            if (pFinR) pFinR.rotation.x = -0.25 - finPaddle;
-            // Gentle body undulation
-            koi.rotation.z = Math.sin(this.elapsedTime * 3 + ud.phase) * 0.04;
-            // Avoid RC boat
-            if (this.rcBoat && this.boatMode) {
-                const bDist = koi.position.distanceTo(this.rcBoat.position);
-                if (bDist < 2.5) {
-                    const away = new THREE.Vector3().subVectors(koi.position, this.rcBoat.position);
-                    away.y = 0; away.normalize();
-                    const flee = (2.5 - bDist) / 2.5;
-                    koi.position.x += away.x * flee * delta * 3;
-                    koi.position.z += away.z * flee * delta * 3;
-                    ud.speed = 0.5; // swim faster when scared
-                }
-            } else {
-                ud.speed += (0.15 + 0.25 * Math.sin(ud.phase) * 0.5 - ud.speed) * delta * 0.3; // relax speed
-            }
-            // Keep inside pond
-            const dist = Math.sqrt(koi.position.x ** 2 + koi.position.z ** 2);
-            if (dist > 8.5) {
-                const n = new THREE.Vector3(koi.position.x, 0, koi.position.z).normalize();
-                koi.position.x -= n.x * (dist - 8.5);
-                koi.position.z -= n.z * (dist - 8.5);
-                ud.swimAngle += Math.PI * 0.5;
-            }
-        });
+    // ─── CHERRY BLOSSOMS ────────────────────────────────────────
+
+    createCherryBlossoms() {
+        const petalColors = [0xFFB7C5, 0xFFC0CB, 0xFFD1DC, 0xFFA0B4, 0xFFE4E8];
+        for (let i = 0; i < 60; i++) {
+            const geo = new THREE.PlaneGeometry(0.08 + Math.random() * 0.06, 0.06 + Math.random() * 0.04);
+            const color = petalColors[Math.floor(Math.random() * petalColors.length)];
+            const mat = new THREE.MeshBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.7 + Math.random() * 0.3,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+            const petal = new THREE.Mesh(geo, mat);
+            this.resetPetal(petal);
+            petal.userData.rotSpeedX = (Math.random() - 0.5) * 2;
+            petal.userData.rotSpeedY = (Math.random() - 0.5) * 3;
+            petal.userData.rotSpeedZ = (Math.random() - 0.5) * 2;
+            petal.userData.swayPhase = Math.random() * Math.PI * 2;
+            petal.userData.swayAmp = 0.3 + Math.random() * 0.5;
+            petal.userData.fallSpeed = 0.3 + Math.random() * 0.6;
+            this.cherryPetals.push(petal);
+            this.scene.add(petal);
+        }
     }
+
+    resetPetal(petal) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 5 + Math.random() * 45;
+        petal.position.set(
+            Math.cos(angle) * radius,
+            12 + Math.random() * 15,
+            Math.sin(angle) * radius
+        );
+        petal.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    }
+
+    // ─── WATER MIST ─────────────────────────────────────────────
+
+    createWaterMist() {
+        for (let i = 0; i < 30; i++) {
+            const size = 0.3 + Math.random() * 0.6;
+            const geo = new THREE.SphereGeometry(size, 6, 4);
+            const mat = new THREE.MeshBasicMaterial({
+                color: 0xddeeff,
+                transparent: true,
+                opacity: 0.0,
+                depthWrite: false
+            });
+            const mist = new THREE.Mesh(geo, mat);
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * 10;
+            mist.position.set(
+                Math.cos(angle) * radius,
+                0.2 + Math.random() * 0.4,
+                Math.sin(angle) * radius
+            );
+            mist.scale.y = 0.3;
+            mist.userData = {
+                phase: Math.random() * Math.PI * 2,
+                driftSpeed: 0.1 + Math.random() * 0.2,
+                baseX: mist.position.x,
+                baseZ: mist.position.z,
+                maxOpacity: 0.04 + Math.random() * 0.06
+            };
+            this.waterMistParticles.push(mist);
+            this.scene.add(mist);
+        }
+    }
+
+    // ─── RAIN SYSTEM ────────────────────────────────────────────
+
+    createRainSystem() {
+        const rainCount = 2000;
+        const positions = new Float32Array(rainCount * 3);
+        for (let i = 0; i < rainCount; i++) {
+            positions[i * 3] = (Math.random() - 0.5) * 80;
+            positions[i * 3 + 1] = Math.random() * 40;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 80;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const mat = new THREE.PointsMaterial({
+            color: 0xaaccee,
+            size: 0.08,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false
+        });
+        this.rainDrops = new THREE.Points(geo, mat);
+        this.scene.add(this.rainDrops);
+    }
+
+    // ─── DRAGONFLIES ────────────────────────────────────────────
+
+    createDragonflies() {
+        const bodyColors = [0x2266AA, 0x33AA44, 0x8844BB, 0xCC6622];
+        for (let i = 0; i < 4; i++) {
+            const group = new THREE.Group();
+            const bodyMat = new THREE.MeshStandardMaterial({
+                color: bodyColors[i],
+                roughness: 0.3,
+                metalness: 0.4,
+                emissive: bodyColors[i],
+                emissiveIntensity: 0.1
+            });
+            // Body
+            const bodyGeo = new THREE.CylinderGeometry(0.02, 0.015, 0.3, 6);
+            bodyGeo.rotateX(Math.PI / 2);
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            group.add(body);
+            // Head
+            const headGeo = new THREE.SphereGeometry(0.025, 6, 6);
+            const head = new THREE.Mesh(headGeo, bodyMat);
+            head.position.set(0, 0, 0.17);
+            group.add(head);
+            // Wings (4 wings)
+            const wingMat = new THREE.MeshBasicMaterial({
+                color: 0xddeeff,
+                transparent: true,
+                opacity: 0.25,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+            const wingShape = new THREE.Shape();
+            wingShape.moveTo(0, 0);
+            wingShape.quadraticCurveTo(0.08, 0.04, 0.15, 0);
+            wingShape.quadraticCurveTo(0.08, -0.02, 0, 0);
+            const wingGeo = new THREE.ShapeGeometry(wingShape);
+            for (let w = 0; w < 4; w++) {
+                const wing = new THREE.Mesh(wingGeo, wingMat);
+                const side = w < 2 ? 1 : -1;
+                const front = w % 2 === 0 ? 0.04 : -0.02;
+                wing.position.set(0, 0.01, front);
+                wing.rotation.z = side * 0.2;
+                wing.scale.x = side;
+                wing.name = 'wing' + w;
+                group.add(wing);
+            }
+
+            const angle = (i / 4) * Math.PI * 2;
+            const radius = 5 + Math.random() * 8;
+            group.position.set(Math.cos(angle) * radius, 1.5 + Math.random() * 2, Math.sin(angle) * radius);
+            group.scale.set(1.5, 1.5, 1.5);
+            group.userData = {
+                angle: angle,
+                radius: radius,
+                targetRadius: radius,
+                speed: 0.8 + Math.random() * 0.6,
+                heightPhase: Math.random() * Math.PI * 2,
+                hoverAmp: 0.3 + Math.random() * 0.3,
+                turnTimer: 0,
+                turnInterval: 3 + Math.random() * 5,
+                baseHeight: 1.5 + Math.random() * 2
+            };
+            this.dragonflies.push(group);
+            this.scene.add(group);
+        }
+    }
+
+    // ─── CAUSTIC LIGHT ──────────────────────────────────────────
+
+    createCausticLight() {
+        // Animated caustic-like light projected onto the pond bottom
+        this.causticLight = new THREE.PointLight(0x66aadd, 0, 12);
+        this.causticLight.position.set(0, 2, 0);
+        this.scene.add(this.causticLight);
+    }
+
+    // ─── SPLASH PARTICLES ───────────────────────────────────────
+
+    spawnSplash(position, intensity) {
+        const count = Math.floor(3 + intensity * 5);
+        for (let i = 0; i < count; i++) {
+            const size = 0.02 + Math.random() * 0.03;
+            const geo = new THREE.SphereGeometry(size, 4, 4);
+            const mat = new THREE.MeshBasicMaterial({
+                color: 0xccddff,
+                transparent: true,
+                opacity: 0.6,
+                depthWrite: false
+            });
+            const drop = new THREE.Mesh(geo, mat);
+            drop.position.copy(position);
+            drop.position.y += 0.1;
+            const angle = Math.random() * Math.PI * 2;
+            const force = 0.5 + Math.random() * intensity * 2;
+            drop.userData = {
+                vx: Math.cos(angle) * force * 0.3,
+                vy: 1.5 + Math.random() * intensity * 2,
+                vz: Math.sin(angle) * force * 0.3,
+                life: 1.0,
+                decay: 1.5 + Math.random() * 1.0
+            };
+            this.splashParticles.push(drop);
+            this.scene.add(drop);
+        }
+    }
+
+    // ─── RC BOAT ────────────────────────────────────────────────
 
     spawnRCBoat() {
         if (this.rcBoat) {
@@ -812,7 +1270,6 @@ class FloatingBowlsGarden {
         const whiteMat = new THREE.MeshStandardMaterial({ color: 0xF2F2F2, roughness: 0.25, metalness: 0.1 });
         const darkMat = new THREE.MeshStandardMaterial({ color: 0x1b1b1b, roughness: 0.35, metalness: 0.7 });
         const chromeMat = new THREE.MeshStandardMaterial({ color: 0xCFCFCF, roughness: 0.1, metalness: 0.9 });
-        // Hull — classic RC speedboat V-hull
         const hullShape = new THREE.Shape();
         hullShape.moveTo(0.6, 0);
         hullShape.lineTo(0.35, 0.16);
@@ -832,7 +1289,6 @@ class FloatingBowlsGarden {
         hull.rotation.x = -Math.PI / 2;
         hull.position.set(0, 0.0, 0);
         boatGroup.add(hull);
-        // Deck — raised top surface
         const deckGeo = new THREE.ExtrudeGeometry(hullShape, { depth: 0.04, bevelEnabled: false });
         deckGeo.scale(0.82, 0.7, 1);
         deckGeo.translate(0.02, 0, -0.02);
@@ -840,13 +1296,11 @@ class FloatingBowlsGarden {
         deck.rotation.x = -Math.PI / 2;
         deck.position.set(0.02, 0.05, 0);
         boatGroup.add(deck);
-        // Cockpit cutout
         const cockpitGeo = new THREE.BoxGeometry(0.18, 0.015, 0.12);
         const cockpitMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.6 });
         const cockpit = new THREE.Mesh(cockpitGeo, cockpitMat);
         cockpit.position.set(0.12, 0.055, 0);
         boatGroup.add(cockpit);
-        // Windshield — angled trapezoid
         const wsShape = new THREE.Shape();
         wsShape.moveTo(-0.08, 0);
         wsShape.lineTo(0.08, 0);
@@ -859,12 +1313,10 @@ class FloatingBowlsGarden {
         ws.rotation.set(-0.35, 0, 0);
         ws.position.set(0.2, 0.09, -0.002);
         boatGroup.add(ws);
-        // Rear hatch
         const hatchGeo = new THREE.BoxGeometry(0.2, 0.03, 0.14);
         const hatch = new THREE.Mesh(hatchGeo, redMat);
         hatch.position.set(-0.18, 0.065, 0);
         boatGroup.add(hatch);
-        // Side stripes
         const stripeGeo = new THREE.BoxGeometry(0.72, 0.004, 0.02);
         const stripeMat = new THREE.MeshStandardMaterial({ color: 0xFFCC00, roughness: 0.3 });
         const stripeL = new THREE.Mesh(stripeGeo, stripeMat);
@@ -873,7 +1325,6 @@ class FloatingBowlsGarden {
         const stripeR = new THREE.Mesh(stripeGeo, stripeMat);
         stripeR.position.set(0.0, 0.035, -0.11);
         boatGroup.add(stripeR);
-        // Outboard motor
         const motorBlockGeo = new THREE.BoxGeometry(0.07, 0.09, 0.05);
         const motorBlock = new THREE.Mesh(motorBlockGeo, darkMat);
         motorBlock.position.set(-0.7, -0.01, 0);
@@ -882,13 +1333,11 @@ class FloatingBowlsGarden {
         const shaft = new THREE.Mesh(shaftGeo, chromeMat);
         shaft.position.set(-0.7, -0.06, 0);
         boatGroup.add(shaft);
-        // Propeller
         const propGeo = new THREE.BoxGeometry(0.004, 0.012, 0.06);
         const prop = new THREE.Mesh(propGeo, chromeMat);
         prop.position.set(-0.7, -0.095, 0);
         prop.name = 'propeller';
         boatGroup.add(prop);
-        // Antenna
         const antGeo = new THREE.CylinderGeometry(0.002, 0.002, 0.15, 4);
         const ant = new THREE.Mesh(antGeo, darkMat);
         ant.position.set(-0.05, 0.16, 0.02);
@@ -898,6 +1347,11 @@ class FloatingBowlsGarden {
         antTip.position.set(-0.05, 0.235, 0.02);
         antTip.name = 'antTip';
         boatGroup.add(antTip);
+        // Boat headlight
+        const headlight = new THREE.PointLight(0xffffcc, 0, 4);
+        headlight.position.set(0.6, 0.08, 0);
+        headlight.name = 'headlight';
+        boatGroup.add(headlight);
         // Wake V-shape
         const wakeArmGeo = new THREE.PlaneGeometry(0.35, 0.025);
         const wakeMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.0, side: THREE.DoubleSide });
@@ -924,6 +1378,61 @@ class FloatingBowlsGarden {
         this.scene.add(boatGroup);
     }
 
+    // ─── UPDATE METHODS ─────────────────────────────────────────
+
+    updateKoiFish(delta) {
+        this.koiFish.forEach(koi => {
+            const ud = koi.userData;
+            ud.turnTimer += delta;
+            if (ud.turnTimer > ud.turnInterval) {
+                ud.turnTimer = 0;
+                ud.turnInterval = 4 + Math.random() * 8;
+                ud.swimAngle += (Math.random() - 0.5) * 1.5;
+                ud.targetRadius = 2 + Math.random() * 5.5;
+            }
+            ud.radius += (ud.targetRadius - ud.radius) * delta * 0.5;
+            ud.angle += ud.speed * delta * (1.0 / Math.max(2, ud.radius));
+            const tx = Math.cos(ud.angle) * ud.radius;
+            const tz = Math.sin(ud.angle) * ud.radius;
+            const dx = tx - koi.position.x;
+            const dz = tz - koi.position.z;
+            koi.position.x += dx * delta * 2;
+            koi.position.z += dz * delta * 2;
+            koi.position.y = 0.05 + Math.sin(this.elapsedTime * 1.5 + ud.phase) * 0.015;
+            const moveAngle = Math.atan2(dz, dx);
+            koi.rotation.y = -moveAngle;
+            const tailFin = koi.getObjectByName('tailFin');
+            const tailWag = Math.sin(this.elapsedTime * 6 + ud.phase) * 0.55;
+            if (tailFin) tailFin.rotation.y = tailWag;
+            const pFinL = koi.getObjectByName('pFinL');
+            const pFinR = koi.getObjectByName('pFinR');
+            const finPaddle = Math.sin(this.elapsedTime * 3.5 + ud.phase) * 0.3;
+            if (pFinL) pFinL.rotation.x = 0.25 + finPaddle;
+            if (pFinR) pFinR.rotation.x = -0.25 - finPaddle;
+            koi.rotation.z = Math.sin(this.elapsedTime * 3 + ud.phase) * 0.04;
+            if (this.rcBoat && this.boatMode) {
+                const bDist = koi.position.distanceTo(this.rcBoat.position);
+                if (bDist < 2.5) {
+                    const away = new THREE.Vector3().subVectors(koi.position, this.rcBoat.position);
+                    away.y = 0; away.normalize();
+                    const flee = (2.5 - bDist) / 2.5;
+                    koi.position.x += away.x * flee * delta * 3;
+                    koi.position.z += away.z * flee * delta * 3;
+                    ud.speed = 0.5;
+                }
+            } else {
+                ud.speed += (0.15 + 0.25 * Math.sin(ud.phase) * 0.5 - ud.speed) * delta * 0.3;
+            }
+            const dist = Math.sqrt(koi.position.x ** 2 + koi.position.z ** 2);
+            if (dist > 8.5) {
+                const n = new THREE.Vector3(koi.position.x, 0, koi.position.z).normalize();
+                koi.position.x -= n.x * (dist - 8.5);
+                koi.position.z -= n.z * (dist - 8.5);
+                ud.swimAngle += Math.PI * 0.5;
+            }
+        });
+    }
+
     updateRCBoat(delta) {
         if (!this.rcBoat || !this.boatMode) return;
         const turnRate = 2.5;
@@ -940,15 +1449,11 @@ class FloatingBowlsGarden {
         const vz = -Math.sin(this.boatAngle) * this.boatSpeed * delta;
         this.rcBoat.position.x += vx;
         this.rcBoat.position.z += vz;
-        // Bob on water
         this.rcBoat.position.y = 0.14 + Math.sin(this.elapsedTime * 3) * 0.008 + Math.abs(this.boatSpeed) * 0.005;
         this.rcBoat.rotation.y = this.boatAngle;
-        // Lean into turns
         const targetLean = (this.boatKeys.left ? 1 : 0) - (this.boatKeys.right ? 1 : 0);
         this.rcBoat.rotation.z = targetLean * 0.12 * Math.min(1, Math.abs(this.boatSpeed));
-        // Nose pitch based on speed
         this.rcBoat.rotation.x = -this.boatSpeed * 0.02;
-        // Wake visibility + propeller spin
         const wakeL = this.rcBoat.getObjectByName('wakeL');
         const wakeR = this.rcBoat.getObjectByName('wakeR');
         const wakeOp = Math.min(0.4, Math.abs(this.boatSpeed) * 0.12);
@@ -956,10 +1461,11 @@ class FloatingBowlsGarden {
         if (wakeR) { wakeR.material.opacity = wakeOp; wakeR.scale.x = 0.5 + Math.abs(this.boatSpeed) * 0.2; }
         const prop = this.rcBoat.getObjectByName('propeller');
         if (prop) prop.rotation.y += this.boatSpeed * 15 * delta;
-        // Blink antenna
         const antTip = this.rcBoat.getObjectByName('antTip');
         if (antTip) antTip.material.emissiveIntensity = 0.3 + 0.5 * Math.sin(this.elapsedTime * 4);
-        // Keep in pond
+        // Headlight at night
+        const headlight = this.rcBoat.getObjectByName('headlight');
+        if (headlight) headlight.intensity = this.isNight ? 1.5 : 0;
         const dist = Math.sqrt(this.rcBoat.position.x ** 2 + this.rcBoat.position.z ** 2);
         if (dist > 9.0) {
             const n = new THREE.Vector3(this.rcBoat.position.x, 0, this.rcBoat.position.z).normalize();
@@ -967,7 +1473,6 @@ class FloatingBowlsGarden {
             this.rcBoat.position.z = n.z * 9.0;
             this.boatSpeed *= -0.3;
         }
-        // Prevent boat from passing through bowls
         const boatRadius = this.rcBoat.userData.radius || 0.6;
         this.bowls.forEach(bowl => {
             const bd = this.rcBoat.position.distanceTo(bowl.position);
@@ -981,9 +1486,9 @@ class FloatingBowlsGarden {
                 const pushStrength = (Math.abs(this.boatSpeed) + 0.4) * 1.2;
                 bowl.userData.velocity.addScaledVector(n, -pushStrength);
                 this.boatSpeed *= 0.35;
+                this.spawnSplash(bowl.position, 0.5);
             }
         });
-        // Push bowls out of the way
         this.bowls.forEach(bowl => {
             const d = this.rcBoat.position.distanceTo(bowl.position);
             if (d < 1.0 && d > 0.01) {
@@ -1014,12 +1519,15 @@ class FloatingBowlsGarden {
         });
     }
 
+    // ─── AUDIO ──────────────────────────────────────────────────
+
     setupAudio() {
         this.audioContext = null;
         const unlock = () => {
             if (!this.audioContext) {
                 this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 this.createReverbChain();
+                this.startAmbientSounds();
             }
             if (this.audioContext.state === 'suspended') this.audioContext.resume();
         };
@@ -1056,6 +1564,98 @@ class FloatingBowlsGarden {
             feedback.connect(delay);
             filter.connect(this.wetGain);
         });
+    }
+
+    startAmbientSounds() {
+        if (!this.audioContext) return;
+
+        // Water ambient — filtered noise
+        const waterGain = this.audioContext.createGain();
+        waterGain.gain.value = 0.015;
+        waterGain.connect(this.masterGain);
+        const bufferSize = this.audioContext.sampleRate * 2;
+        const noiseBuffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) output[i] = Math.random() * 2 - 1;
+        const waterNoise = this.audioContext.createBufferSource();
+        waterNoise.buffer = noiseBuffer;
+        waterNoise.loop = true;
+        const waterFilter = this.audioContext.createBiquadFilter();
+        waterFilter.type = 'bandpass';
+        waterFilter.frequency.value = 400;
+        waterFilter.Q.value = 0.5;
+        waterNoise.connect(waterFilter);
+        waterFilter.connect(waterGain);
+        waterNoise.start();
+        this.ambientSounds.waterGain = waterGain;
+
+        // Cricket sounds — oscillators that pulse at night
+        const cricketGain = this.audioContext.createGain();
+        cricketGain.gain.value = 0;
+        cricketGain.connect(this.masterGain);
+        for (let i = 0; i < 3; i++) {
+            const osc = this.audioContext.createOscillator();
+            osc.frequency.value = 4200 + i * 300 + Math.random() * 200;
+            osc.type = 'sine';
+            const oscGain = this.audioContext.createGain();
+            oscGain.gain.value = 0;
+            const lfo = this.audioContext.createOscillator();
+            lfo.frequency.value = 7 + i * 2 + Math.random() * 3;
+            const lfoGain = this.audioContext.createGain();
+            lfoGain.gain.value = 0.008;
+            lfo.connect(lfoGain);
+            lfoGain.connect(oscGain.gain);
+            osc.connect(oscGain);
+            oscGain.connect(cricketGain);
+            osc.start();
+            lfo.start();
+        }
+        this.ambientSounds.cricketGain = cricketGain;
+
+        // Bird chirps — occasional sine bursts during day
+        this.ambientSounds.birdTimer = 0;
+        this.ambientSounds.birdGain = this.audioContext.createGain();
+        this.ambientSounds.birdGain.gain.value = 0;
+        this.ambientSounds.birdGain.connect(this.masterGain);
+
+        // Rain sound
+        const rainGain = this.audioContext.createGain();
+        rainGain.gain.value = 0;
+        rainGain.connect(this.masterGain);
+        const rainNoise = this.audioContext.createBufferSource();
+        rainNoise.buffer = noiseBuffer;
+        rainNoise.loop = true;
+        const rainFilter = this.audioContext.createBiquadFilter();
+        rainFilter.type = 'highpass';
+        rainFilter.frequency.value = 2000;
+        rainFilter.Q.value = 0.3;
+        const rainFilter2 = this.audioContext.createBiquadFilter();
+        rainFilter2.type = 'lowpass';
+        rainFilter2.frequency.value = 8000;
+        rainNoise.connect(rainFilter);
+        rainFilter.connect(rainFilter2);
+        rainFilter2.connect(rainGain);
+        rainNoise.start();
+        this.ambientSounds.rainGain = rainGain;
+    }
+
+    playBirdChirp() {
+        if (!this.audioContext || this.isMuted || this.isNight) return;
+        const now = this.audioContext.currentTime;
+        const freq = 1800 + Math.random() * 1500;
+        const osc = this.audioContext.createOscillator();
+        osc.frequency.setValueAtTime(freq, now);
+        osc.frequency.linearRampToValueAtTime(freq * (0.8 + Math.random() * 0.4), now + 0.1);
+        osc.frequency.linearRampToValueAtTime(freq * (0.9 + Math.random() * 0.3), now + 0.2);
+        osc.type = 'sine';
+        const gain = this.audioContext.createGain();
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.008, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+        osc.connect(gain);
+        gain.connect(this.ambientSounds.birdGain);
+        osc.start(now);
+        osc.stop(now + 0.3);
     }
 
     playBowlSound(frequency, duration = 3.0, intensity = 1.0) {
@@ -1101,48 +1701,35 @@ class FloatingBowlsGarden {
         gain4.gain.exponentialRampToValueAtTime(0.0001, now + duration * 0.35);
         osc4.connect(gain4);
         gain4.connect(this.dryGain);
-        osc1.start(now); osc2.start(now); osc3.start(now); osc4.start(now);
+        // Sub-bass undertone for depth
+        const osc5 = this.audioContext.createOscillator();
+        const gain5 = this.audioContext.createGain();
+        osc5.frequency.setValueAtTime(frequency * 0.5, now);
+        osc5.type = 'sine';
+        gain5.gain.setValueAtTime(0, now);
+        gain5.gain.linearRampToValueAtTime(vol * 0.08, now + 0.05);
+        gain5.gain.exponentialRampToValueAtTime(0.0001, now + duration * 0.6);
+        osc5.connect(gain5);
+        gain5.connect(this.dryGain);
+        gain5.connect(this.reverbInput);
+        osc1.start(now); osc2.start(now); osc3.start(now); osc4.start(now); osc5.start(now);
         osc1.stop(now + duration); osc2.stop(now + duration * 0.75);
         osc3.stop(now + duration * 0.5); osc4.stop(now + duration * 0.35);
+        osc5.stop(now + duration * 0.6);
     }
 
-    createRipples(bowlPosition, frequency) {
-        if (!this.pondWater || !this.pondWater.userData.originalVertices) return;
-        const vertices = this.pondWater.geometry.attributes.position.array;
-        const originalVertices = this.pondWater.userData.originalVertices;
-        const t = this.elapsedTime;
-        for (let i = 0; i < originalVertices.length; i++) {
-            const orig = originalVertices[i];
-            const dist = Math.sqrt((orig.x - bowlPosition.x) ** 2 + (-orig.y - bowlPosition.z) ** 2);
-            if (dist < 4) {
-                const ri = Math.max(0, (4 - dist) / 4);
-                const rf = frequency / 80;
-                const rh = 0.015 * ri * Math.sin(t * 8.0 * rf - dist * 2);
-                vertices[i * 3 + 2] = orig.z + rh;
-            }
-        }
-        this.pondWater.geometry.attributes.position.needsUpdate = true;
-    }
+    // ─── WATER ANIMATION ────────────────────────────────────────
 
     updateWaterAnimation(delta) {
         this.windField.time += delta * 0.5;
-        if (this.pondWater && this.pondWater.userData.originalVertices) {
-            const vertices = this.pondWater.geometry.attributes.position.array;
-            const ov = this.pondWater.userData.originalVertices;
-            const t = this.windField.time;
-            for (let i = 0; i < ov.length; i++) {
-                const o = ov[i];
-                const dist = Math.sqrt(o.x * o.x + o.y * o.y);
-                if (dist < 9.8) {
-                    const w1 = 0.015 * Math.sin(t * 1.5 + o.x * 0.3 + o.y * 0.2);
-                    const w2 = 0.01 * Math.sin(t * 2.3 + o.x * 0.5 - o.y * 0.4);
-                    const w3 = 0.005 * Math.cos(t * 3.1 - o.x * 0.2 + o.y * 0.6);
-                    const edgeFade = Math.max(0, 1 - dist / 9.8);
-                    vertices[i * 3 + 2] = o.z + (w1 + w2 + w3) * edgeFade;
-                }
-            }
-            this.pondWater.geometry.attributes.position.needsUpdate = true;
-            this.pondWater.geometry.computeVertexNormals();
+        // Shader water — just update uniforms
+        if (this.pondWater && this.pondWater.material.uniforms) {
+            this.pondWater.material.uniforms.uTime.value = this.elapsedTime;
+            this.pondWater.material.uniforms.uCameraPosition.value.copy(this.camera.position);
+            this.pondWater.material.uniforms.uRainIntensity.value = this.rainIntensity;
+            // Update sun direction based on day cycle
+            const sunPos = this.lights.sun.position.clone().normalize();
+            this.pondWater.material.uniforms.uSunDirection.value.copy(sunPos);
         }
     }
 
@@ -1151,7 +1738,6 @@ class FloatingBowlsGarden {
         const ws = this.windState;
         const baseX = ws.strength * Math.cos(ws.direction);
         const baseZ = ws.strength * Math.sin(ws.direction);
-        // Add local turbulence
         const turbX = 0.003 * Math.sin(t * 0.5 + x * 0.1) * Math.cos(t * 0.3 + z * 0.08);
         const turbZ = 0.003 * Math.cos(t * 0.4 + x * 0.08) * Math.sin(t * 0.45 + z * 0.1);
         return new THREE.Vector3(baseX + turbX, 0, baseZ + turbZ);
@@ -1166,13 +1752,18 @@ class FloatingBowlsGarden {
             ws.targetDirection = Math.random() * Math.PI * 2;
             ws.targetStrength = 0.008 + Math.random() * 0.02;
         }
-        // Smooth interpolation toward target
         let dAngle = ws.targetDirection - ws.direction;
         while (dAngle > Math.PI) dAngle -= Math.PI * 2;
         while (dAngle < -Math.PI) dAngle += Math.PI * 2;
         ws.direction += dAngle * delta * 0.3;
         ws.strength += (ws.targetStrength - ws.strength) * delta * 0.4;
+        // Increase wind during rain
+        if (this.rainActive) {
+            ws.strength = Math.max(ws.strength, 0.025);
+        }
     }
+
+    // ─── BOWL PHYSICS ───────────────────────────────────────────
 
     updateBowlPhysics(delta) {
         const nowMs = this.elapsedTime * 1000;
@@ -1212,7 +1803,6 @@ class FloatingBowlsGarden {
             if (ud.isVibrating && nowMs < ud.vibratingUntil) {
                 const vp = 1 - (nowMs - (ud.vibratingUntil - 2500)) / 2500;
                 ud.targetGlow = Math.max(0, vp * 0.25);
-                this.createRipples(bowl.position, ud.frequency);
                 targetY += Math.sin(this.elapsedTime * 20 * (ud.frequency / 500)) * 0.003;
             } else { ud.isVibrating = false; ud.targetGlow = 0; }
             const yError = targetY - bowl.position.y;
@@ -1234,7 +1824,7 @@ class FloatingBowlsGarden {
             ud.glowIntensity += (ud.targetGlow - ud.glowIntensity) * 0.1;
             bowl.material.emissiveIntensity = ud.glowIntensity;
             if (this.hoveredBowl === bowl && !ud.isVibrating) {
-                bowl.material.emissiveIntensity = Math.max(bowl.material.emissiveIntensity, 0.08);
+                bowl.material.emissiveIntensity = Math.max(bowl.material.emissiveIntensity, 0.12);
             }
             const dist = Math.sqrt(bowl.position.x ** 2 + bowl.position.z ** 2);
             const edgeL = pondR - ud.size * 1.2;
@@ -1251,6 +1841,7 @@ class FloatingBowlsGarden {
                 }
                 if (nowMs - ud.lastCollision > 800) {
                     this.playBowlSound(ud.frequency * 0.7, 2.0, 0.6);
+                    this.spawnSplash(bowl.position, 0.4);
                     ud.lastCollision = nowMs;
                 }
             }
@@ -1285,6 +1876,7 @@ class FloatingBowlsGarden {
                         if (nowMs - ud.lastCollision > 400) {
                             this.playBowlSound(ud.frequency, 3.0, cI);
                             ud.lastCollision = nowMs; ud.isVibrating = true; ud.vibratingUntil = nowMs + 2500;
+                            this.spawnSplash(bowl.position.clone().add(other.position).multiplyScalar(0.5), cI);
                         }
                         if (nowMs - od.lastCollision > 400) {
                             this.playBowlSound(od.frequency, 3.0, cI);
@@ -1304,6 +1896,214 @@ class FloatingBowlsGarden {
             }
         });
     }
+
+    // ─── NEW UPDATE METHODS ─────────────────────────────────────
+
+    updateStars() {
+        if (!this.stars) return;
+        const nightFactor = this.isNight ? 1.0 : 0.0;
+        const targetOpacity = nightFactor * 0.8;
+        this.stars.material.opacity += (targetOpacity - this.stars.material.opacity) * 0.03;
+        // Twinkle by modulating size
+        const sizes = this.stars.geometry.attributes.size;
+        if (sizes) {
+            const phases = this.stars.userData.twinklePhases;
+            const t = this.elapsedTime;
+            for (let i = 0; i < phases.length; i++) {
+                sizes.array[i] = (0.8 + Math.sin(t * (1.5 + phases[i]) + phases[i] * 10) * 0.5) * 1.2;
+            }
+            sizes.needsUpdate = true;
+        }
+    }
+
+    updateMoon() {
+        if (!this.moon) return;
+        const nightFactor = this.isNight ? 1.0 : 0.0;
+        this.moon.material.emissiveIntensity += (nightFactor * 0.4 - this.moon.material.emissiveIntensity) * 0.03;
+        this.moonGlow.material.opacity += (nightFactor * 0.5 - this.moonGlow.material.opacity) * 0.03;
+        this.lights.moonLight.intensity += (nightFactor * 0.3 - this.lights.moonLight.intensity) * 0.03;
+    }
+
+    updateClouds(delta) {
+        this.clouds.forEach(cloud => {
+            const ud = cloud.userData;
+            ud.angle += ud.speed * delta * 0.003;
+            cloud.position.x = Math.cos(ud.angle) * ud.radius;
+            cloud.position.z = Math.sin(ud.angle) * ud.radius;
+            cloud.position.y = ud.baseY + Math.sin(this.elapsedTime * 0.1 + ud.phase) * 2;
+            // Darken clouds at night
+            cloud.children.forEach(puff => {
+                const nightColor = this.isNight ? 0.15 : 1.0;
+                const targetOp = this.rainActive ? 0.55 : 0.35;
+                puff.material.opacity += (targetOp - puff.material.opacity) * 0.02;
+                const c = puff.material.color;
+                c.r += (nightColor - c.r) * 0.02;
+                c.g += (nightColor - c.g) * 0.02;
+                c.b += (nightColor * 1.05 - c.b) * 0.02;
+            });
+        });
+    }
+
+    updateCherryBlossoms(delta) {
+        const t = this.elapsedTime;
+        this.cherryPetals.forEach(petal => {
+            const ud = petal.userData;
+            petal.position.y -= ud.fallSpeed * delta;
+            petal.position.x += Math.sin(t * 0.5 + ud.swayPhase) * ud.swayAmp * delta;
+            petal.position.z += Math.cos(t * 0.3 + ud.swayPhase * 1.3) * ud.swayAmp * 0.5 * delta;
+            // Wind influence
+            const wind = this.windState;
+            petal.position.x += Math.cos(wind.direction) * wind.strength * 8 * delta;
+            petal.position.z += Math.sin(wind.direction) * wind.strength * 8 * delta;
+            petal.rotation.x += ud.rotSpeedX * delta;
+            petal.rotation.y += ud.rotSpeedY * delta;
+            petal.rotation.z += ud.rotSpeedZ * delta;
+            if (petal.position.y < 0.1) {
+                this.resetPetal(petal);
+            }
+        });
+    }
+
+    updateWaterMist() {
+        const t = this.elapsedTime;
+        // Mist is more visible at night and during rain
+        const nightBoost = this.isNight ? 1.5 : 1.0;
+        const rainBoost = this.rainActive ? 1.8 : 1.0;
+        this.waterMistParticles.forEach(mist => {
+            const ud = mist.userData;
+            mist.position.x = ud.baseX + Math.sin(t * 0.15 + ud.phase) * 1.5;
+            mist.position.z = ud.baseZ + Math.cos(t * 0.12 + ud.phase * 1.4) * 1.5;
+            mist.position.y = 0.25 + Math.sin(t * 0.3 + ud.phase * 2) * 0.15;
+            const targetOp = ud.maxOpacity * nightBoost * rainBoost;
+            mist.material.opacity += (targetOp - mist.material.opacity) * 0.02;
+        });
+    }
+
+    updateSplashParticles(delta) {
+        for (let i = this.splashParticles.length - 1; i >= 0; i--) {
+            const drop = this.splashParticles[i];
+            const ud = drop.userData;
+            ud.vy -= 9.8 * delta; // gravity
+            drop.position.x += ud.vx * delta;
+            drop.position.y += ud.vy * delta;
+            drop.position.z += ud.vz * delta;
+            ud.life -= ud.decay * delta;
+            drop.material.opacity = Math.max(0, ud.life * 0.6);
+            drop.scale.setScalar(Math.max(0.1, ud.life));
+            if (ud.life <= 0 || drop.position.y < -0.5) {
+                this.scene.remove(drop);
+                this.splashParticles.splice(i, 1);
+            }
+        }
+    }
+
+    updateRain(delta) {
+        if (!this.rainDrops) return;
+        const targetIntensity = this.rainActive ? 1.0 : 0.0;
+        this.rainIntensity += (targetIntensity - this.rainIntensity) * delta * 2;
+        this.rainDrops.material.opacity = this.rainIntensity * 0.4;
+        if (this.rainIntensity < 0.01) return;
+        const positions = this.rainDrops.geometry.attributes.position.array;
+        const windDir = this.windState.direction;
+        const windStr = this.windState.strength * 30;
+        for (let i = 0; i < positions.length; i += 3) {
+            positions[i + 1] -= (15 + Math.random() * 5) * delta; // fall speed
+            positions[i] += Math.cos(windDir) * windStr * delta;
+            positions[i + 2] += Math.sin(windDir) * windStr * delta;
+            if (positions[i + 1] < 0) {
+                positions[i] = (Math.random() - 0.5) * 80;
+                positions[i + 1] = 30 + Math.random() * 10;
+                positions[i + 2] = (Math.random() - 0.5) * 80;
+            }
+        }
+        this.rainDrops.geometry.attributes.position.needsUpdate = true;
+
+        // Update rain sound
+        if (this.ambientSounds.rainGain) {
+            const ctx = this.audioContext;
+            if (ctx) {
+                const targetVol = this.isMuted ? 0 : this.rainIntensity * 0.04;
+                this.ambientSounds.rainGain.gain.setTargetAtTime(targetVol, ctx.currentTime, 0.3);
+            }
+        }
+    }
+
+    updateDragonflies(delta) {
+        const t = this.elapsedTime;
+        const dayFactor = this.isNight ? 0 : 1;
+        this.dragonflies.forEach(df => {
+            const ud = df.userData;
+            // Only active during day
+            if (dayFactor < 0.5) {
+                df.visible = false;
+                return;
+            }
+            df.visible = true;
+            ud.turnTimer += delta;
+            if (ud.turnTimer > ud.turnInterval) {
+                ud.turnTimer = 0;
+                ud.turnInterval = 3 + Math.random() * 5;
+                ud.targetRadius = 3 + Math.random() * 10;
+                ud.speed = 0.5 + Math.random() * 1.0;
+            }
+            ud.radius += (ud.targetRadius - ud.radius) * delta * 0.8;
+            ud.angle += ud.speed * delta * (1.0 / Math.max(2, ud.radius));
+            const tx = Math.cos(ud.angle) * ud.radius;
+            const tz = Math.sin(ud.angle) * ud.radius;
+            df.position.x += (tx - df.position.x) * delta * 3;
+            df.position.z += (tz - df.position.z) * delta * 3;
+            df.position.y = ud.baseHeight + Math.sin(t * 2 + ud.heightPhase) * ud.hoverAmp;
+            // Face movement direction
+            const moveAngle = Math.atan2(tz - df.position.z, tx - df.position.x);
+            df.rotation.y = -moveAngle;
+            // Wing flutter
+            df.children.forEach(child => {
+                if (child.name && child.name.startsWith('wing')) {
+                    const idx = parseInt(child.name[4]);
+                    const side = idx < 2 ? 1 : -1;
+                    child.rotation.z = side * (0.2 + Math.sin(t * 25 + idx * 1.5) * 0.6);
+                }
+            });
+        });
+    }
+
+    updateCausticLight() {
+        if (!this.causticLight) return;
+        const t = this.elapsedTime;
+        const dayFactor = this.isNight ? 0.1 : 0.5;
+        this.causticLight.intensity = dayFactor * (0.5 + Math.sin(t * 1.5) * 0.3);
+        this.causticLight.position.x = Math.sin(t * 0.3) * 4;
+        this.causticLight.position.z = Math.cos(t * 0.25) * 4;
+    }
+
+    updateAmbientSoundLevels() {
+        if (!this.audioContext || !this.ambientSounds.cricketGain) return;
+        const ctx = this.audioContext;
+        const now = ctx.currentTime;
+        const nightFactor = this.isNight ? 1.0 : 0.0;
+        const muteScale = this.isMuted ? 0 : 1;
+
+        // Crickets at night
+        this.ambientSounds.cricketGain.gain.setTargetAtTime(nightFactor * 0.012 * muteScale, now, 0.5);
+        // Water always
+        if (this.ambientSounds.waterGain) {
+            this.ambientSounds.waterGain.gain.setTargetAtTime(0.015 * muteScale, now, 0.3);
+        }
+        // Bird chirps
+        if (this.ambientSounds.birdGain) {
+            this.ambientSounds.birdGain.gain.setTargetAtTime((1 - nightFactor) * muteScale, now, 0.3);
+        }
+        // Bird chirp scheduling
+        if (this.ambientSounds.birdTimer !== undefined) {
+            this.ambientSounds.birdTimer -= 1/60;
+            if (this.ambientSounds.birdTimer <= 0 && !this.isNight) {
+                this.playBirdChirp();
+                this.ambientSounds.birdTimer = 3 + Math.random() * 8;
+            }
+        }
+    }
+
+    // ─── EXISTING UPDATE METHODS ────────────────────────────────
 
     updateFireflies() {
         const t = this.elapsedTime;
@@ -1381,6 +2181,12 @@ class FloatingBowlsGarden {
         this.lights.fill.intensity = sunElev * 0.15;
         this.lights.waterGlow.intensity = 0.2 + (1 - sunElev) * 0.6;
         this.lights.waterGlow.color.setHSL(0.6, 0.6, 0.5 + (1 - sunElev) * 0.2);
+
+        // Update water shader night factor
+        if (this.pondWater && this.pondWater.material.uniforms) {
+            this.pondWater.material.uniforms.uNightFactor.value = 1 - sunElev;
+        }
+
         if (this.skyDome) {
             const su = this.skyDome.material.uniforms;
             const dtc = new THREE.Color(0x0066aa), ntc = new THREE.Color(0x0a0a2e);
@@ -1390,7 +2196,10 @@ class FloatingBowlsGarden {
         }
         const fogDay = new THREE.Color(0x87CEEB), fogNight = new THREE.Color(0x1a1a3e);
         this.scene.fog.color.copy(fogDay).lerp(fogNight, 1 - sunElev);
-        this.renderer.toneMappingExposure = 0.35 + sunElev * 0.6;
+        // Increase fog density during rain
+        const baseFogDensity = 0.006;
+        this.scene.fog.density = baseFogDensity + this.rainIntensity * 0.004;
+        this.renderer.toneMappingExposure = 0.35 + sunElev * 0.6 - this.rainIntensity * 0.1;
         const dayNightBtn = document.getElementById('btn-daynight');
         if (dayNightBtn) dayNightBtn.classList.toggle('active', this.isNight);
     }
@@ -1398,7 +2207,8 @@ class FloatingBowlsGarden {
     updateAmbientEffects() {
         const t = this.elapsedTime;
         this.grassBlades.forEach(g => {
-            const ws = 0.12 * Math.sin(t * 1.2 + g.userData.swayPhase);
+            const windStr = this.windState.strength * 8;
+            const ws = (0.12 + windStr) * Math.sin(t * 1.2 + g.userData.swayPhase);
             g.rotation.z = ws; g.rotation.x = ws * 0.4;
         });
         this.ambientParticles.forEach(p => {
@@ -1421,6 +2231,9 @@ class FloatingBowlsGarden {
             }
         });
     }
+
+    // ─── CONTROLS ───────────────────────────────────────────────
+
     setupControls() {
         this.container.addEventListener('mousedown', (e) => {
             this.mouseDown = true;
@@ -1568,8 +2381,11 @@ class FloatingBowlsGarden {
             ud.vibratingUntil = Date.now() + 2500;
             const fromCam = new THREE.Vector3().subVectors(bowl.position, this.camera.position).setY(0).normalize();
             ud.velocity.add(fromCam.multiplyScalar(0.025));
+            this.spawnSplash(bowl.position, 0.3);
         }
     }
+
+    // ─── UI SETUP ───────────────────────────────────────────────
 
     setupUI() {
         const orbitBtn = document.getElementById('btn-orbit');
@@ -1577,6 +2393,7 @@ class FloatingBowlsGarden {
         const muteBtn = document.getElementById('btn-mute');
         const boatBtn = document.getElementById('btn-boat');
         const scaleBtn = document.getElementById('btn-scale');
+        const rainBtn = document.getElementById('btn-rain');
         if (orbitBtn) {
             orbitBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1624,7 +2441,6 @@ class FloatingBowlsGarden {
                 this.cycleScale();
                 const scaleName = this.scales[this.scaleNames[this.currentScaleIndex]].name;
                 scaleBtn.title = 'Scale: ' + scaleName;
-                // Flash label briefly
                 let label = document.getElementById('scale-label');
                 if (!label) {
                     label = document.createElement('div');
@@ -1638,22 +2454,29 @@ class FloatingBowlsGarden {
                 label._hideTimer = setTimeout(() => { label.style.opacity = '0'; }, 1800);
             });
         }
+        if (rainBtn) {
+            rainBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.rainActive = !this.rainActive;
+                rainBtn.classList.toggle('active', this.rainActive);
+            });
+        }
     }
 
     cycleScale() {
         this.currentScaleIndex = (this.currentScaleIndex + 1) % this.scaleNames.length;
         const newScale = this.scales[this.scaleNames[this.currentScaleIndex]].notes;
         this.lydianScale = newScale;
-        // Update existing bowl frequencies
         this.bowls.forEach((bowl, i) => {
             const ud = bowl.userData;
             ud.frequency = newScale[i % newScale.length] * (0.8 + ud.size * 0.4);
         });
     }
 
+    // ─── CAMERA ─────────────────────────────────────────────────
+
     smoothCameraUpdate(delta) {
         if (this.boatMode && this.rcBoat) {
-            // Chase camera behind boat
             const camDist = 3.5;
             const camHeight = 1.8;
             const behindX = this.rcBoat.position.x - Math.cos(this.boatAngle) * camDist;
@@ -1681,6 +2504,8 @@ class FloatingBowlsGarden {
         this.camera.lookAt(0, 1, 0);
     }
 
+    // ─── MAIN LOOP ──────────────────────────────────────────────
+
     animate() {
         requestAnimationFrame(() => this.animate());
         const delta = Math.min(this.clock.getDelta(), 0.05);
@@ -1691,6 +2516,16 @@ class FloatingBowlsGarden {
         this.updateBowlPhysics(delta);
         this.updateKoiFish(delta);
         this.updateRCBoat(delta);
+        this.updateStars();
+        this.updateMoon();
+        this.updateClouds(delta);
+        this.updateCherryBlossoms(delta);
+        this.updateWaterMist();
+        this.updateSplashParticles(delta);
+        this.updateRain(delta);
+        this.updateDragonflies(delta);
+        this.updateCausticLight();
+        this.updateAmbientSoundLevels();
         this.renderer.render(this.scene, this.camera);
     }
 

@@ -556,8 +556,8 @@ class Game {
         this.assembledComponents.splice(this.draggedTimingIndex, 1);
         this.componentTimings.splice(this.draggedTimingIndex, 1);
         
-        // Adjust target index if needed
-        const adjustedTarget = this.draggedTimingIndex < targetIndex ? targetIndex : targetIndex;
+        // Adjust target index since we already removed from old position
+        const adjustedTarget = this.draggedTimingIndex < targetIndex ? targetIndex - 1 : targetIndex;
         
         // Insert at new position
         this.assembledComponents.splice(adjustedTarget, 0, draggedComp);
@@ -875,6 +875,9 @@ class Game {
     }
     
     createConfetti() {
+        // Clean up any existing confetti
+        document.querySelectorAll('.confetti').forEach(el => el.remove());
+
         const colors = ['#00ff88', '#00dd66', '#88ff88', '#44ff99', '#00ffaa', '#66ffbb', '#ffd700', '#ffff00'];
         const confettiCount = 80;
         

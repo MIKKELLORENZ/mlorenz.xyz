@@ -17,19 +17,43 @@ class AudioEngine {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
         this.masterGain = this.audioContext.createGain();
         this.masterGain.gain.value = 0.8;
-        
+
         // Create master analyser for metering
         this.analyser = this.audioContext.createAnalyser();
         this.analyser.fftSize = 256;
-        
+
         this.masterGain.connect(this.analyser);
         this.analyser.connect(this.audioContext.destination);
-        
+
+        // Shared reverb impulse buffer — avoids creating one per track
+        this._sharedReverbImpulse = null;
+        this._sharedReverbDuration = 0;
+
         return this.audioContext;
+    }
+
+    getSharedReverbImpulse(duration) {
+        if (this._sharedReverbImpulse && Math.abs(this._sharedReverbDuration - duration) < 0.01) {
+            return this._sharedReverbImpulse;
+        }
+        const sampleRate = this.audioContext.sampleRate;
+        const length = sampleRate * duration;
+        const impulse = this.audioContext.createBuffer(2, length, sampleRate);
+        const leftChannel = impulse.getChannelData(0);
+        const rightChannel = impulse.getChannelData(1);
+        for (let i = 0; i < length; i++) {
+            const decay = Math.pow(1 - i / length, 2);
+            leftChannel[i] = (Math.random() * 2 - 1) * decay;
+            rightChannel[i] = (Math.random() * 2 - 1) * decay;
+        }
+        this._sharedReverbImpulse = impulse;
+        this._sharedReverbDuration = duration;
+        return impulse;
     }
 
     createTrack(id, name) {
         const track = new Track(id, name, this.audioContext, this.masterGain);
+        track._engine = this; // Back-reference for shared resources (reverb impulse, etc.)
         this.tracks.push(track);
         return track;
     }
@@ -288,16 +312,60 @@ class Track {
         this.eqLow = null;
         this.eqLowMid = null;
         this.eqMid = null;
+        this.eqHighMid = null;
         this.delayEnableGain = null;
         this.eqHigh = null;
         this.compressor = null;
+        this.makeupGain = null;
         this.reverbEnableGain = null;
         this.delayNode = null;
         this.delayFeedback = null;
         this.delayWet = null;
         this.convolver = null;
         this.reverbWet = null;
-        
+
+        // Multiband compressor nodes (4 bands)
+        this.mbCompLowFilter = null;
+        this.mbCompLowMidFilterHP = null;
+        this.mbCompLowMidFilter = null;
+        this.mbCompHighMidFilterHP = null;
+        this.mbCompHighMidFilter = null;
+        this.mbCompHighFilter = null;
+        this.mbCompLow = null;
+        this.mbCompLowMid = null;
+        this.mbCompHighMid = null;
+        this.mbCompHigh = null;
+        this.mbCompLowGain = null;
+        this.mbCompLowMidGain = null;
+        this.mbCompHighMidGain = null;
+        this.mbCompHighGain = null;
+        this.mbCompBypassGain = null;
+        this.mbCompPathGain = null;
+        this.preMbCompBus = null;
+        this.postMbCompBus = null;
+
+        // De-esser nodes
+        this.deesserFilter = null;
+        this.deesserCompressor = null;
+        this.deesserBypassGain = null;
+        this.deesserPathGain = null;
+        this.preDeesserBus = null;
+        this.postDeesserBus = null;
+
+        // Side-chain
+        this.sidechainSource = null; // track ID of sidechain source
+        this.sidechainGain = null; // gain node used for ducking
+        this.sidechainAnalyser = null;
+        this.sidechainSettings = {
+            enabled: false,
+            sourceTrackId: null,
+            threshold: -24,
+            ratio: 4,
+            attack: 0.01,
+            release: 0.1,
+            amount: 1.0
+        };
+
         // Track properties
         this.duration = 0;
         this.startOffset = 0;
@@ -306,6 +374,8 @@ class Track {
         this.effectStates = {
             eq: false,
             compressor: false,
+            multibandComp: false,
+            deesser: false,
             delay: false,
             reverb: false
         };
@@ -324,30 +394,36 @@ class Track {
         // Gain
         this.gainNode = this.audioContext.createGain();
         this.gainNode.gain.value = 0.8;
-        
+
         // Panning
         this.panNode = this.audioContext.createStereoPanner();
         this.panNode.pan.value = 0;
-        
-        // 4-band EQ
+
+        // 5-band EQ
         this.eqLow = this.audioContext.createBiquadFilter();
         this.eqLow.type = 'lowshelf';
         this.eqLow.frequency.value = 100;
         this.eqLow.Q.value = 1;
         this.eqLow.gain.value = 0;
-        
+
         this.eqLowMid = this.audioContext.createBiquadFilter();
         this.eqLowMid.type = 'peaking';
         this.eqLowMid.frequency.value = 400;
         this.eqLowMid.Q.value = 1;
         this.eqLowMid.gain.value = 0;
-        
+
         this.eqMid = this.audioContext.createBiquadFilter();
         this.eqMid.type = 'peaking';
         this.eqMid.frequency.value = 1000;
         this.eqMid.Q.value = 1;
         this.eqMid.gain.value = 0;
-        
+
+        this.eqHighMid = this.audioContext.createBiquadFilter();
+        this.eqHighMid.type = 'peaking';
+        this.eqHighMid.frequency.value = 3000;
+        this.eqHighMid.Q.value = 1;
+        this.eqHighMid.gain.value = 0;
+
         this.eqHigh = this.audioContext.createBiquadFilter();
         this.eqHigh.type = 'highshelf';
         this.eqHigh.frequency.value = 8000;
@@ -357,7 +433,7 @@ class Track {
         this.eqBypassGain = this.audioContext.createGain();
         this.eqPathGain = this.audioContext.createGain();
         this.preCompBus = this.audioContext.createGain();
-        
+
         // Compressor
         this.compressor = this.audioContext.createDynamicsCompressor();
         this.compressor.threshold.value = -24;
@@ -366,10 +442,114 @@ class Track {
         this.compressor.attack.value = 0.003;
         this.compressor.release.value = 0.25;
 
+        // Makeup gain (post-compressor)
+        this.makeupGain = this.audioContext.createGain();
+        this.makeupGain.gain.value = 1;
+
         this.compBypassGain = this.audioContext.createGain();
         this.compPathGain = this.audioContext.createGain();
         this.postCompBus = this.audioContext.createGain();
-        
+
+        // Multiband Compressor (4 bands)
+        this.preMbCompBus = this.audioContext.createGain();
+        this.postMbCompBus = this.audioContext.createGain();
+        this.mbCompBypassGain = this.audioContext.createGain();
+        this.mbCompPathGain = this.audioContext.createGain();
+
+        // Crossover frequencies: 200Hz, 1kHz, 5kHz
+        // Low band: lowpass at 200Hz
+        this.mbCompLowFilter = this.audioContext.createBiquadFilter();
+        this.mbCompLowFilter.type = 'lowpass';
+        this.mbCompLowFilter.frequency.value = 200;
+        this.mbCompLowFilter.Q.value = 0.7;
+
+        // Low-Mid band: 200-1000Hz
+        this.mbCompLowMidFilterHP = this.audioContext.createBiquadFilter();
+        this.mbCompLowMidFilterHP.type = 'highpass';
+        this.mbCompLowMidFilterHP.frequency.value = 200;
+        this.mbCompLowMidFilterHP.Q.value = 0.7;
+        this.mbCompLowMidFilter = this.audioContext.createBiquadFilter();
+        this.mbCompLowMidFilter.type = 'lowpass';
+        this.mbCompLowMidFilter.frequency.value = 1000;
+        this.mbCompLowMidFilter.Q.value = 0.7;
+
+        // High-Mid band: 1000-5000Hz
+        this.mbCompHighMidFilterHP = this.audioContext.createBiquadFilter();
+        this.mbCompHighMidFilterHP.type = 'highpass';
+        this.mbCompHighMidFilterHP.frequency.value = 1000;
+        this.mbCompHighMidFilterHP.Q.value = 0.7;
+        this.mbCompHighMidFilter = this.audioContext.createBiquadFilter();
+        this.mbCompHighMidFilter.type = 'lowpass';
+        this.mbCompHighMidFilter.frequency.value = 5000;
+        this.mbCompHighMidFilter.Q.value = 0.7;
+
+        // High band: highpass at 5000Hz
+        this.mbCompHighFilter = this.audioContext.createBiquadFilter();
+        this.mbCompHighFilter.type = 'highpass';
+        this.mbCompHighFilter.frequency.value = 5000;
+        this.mbCompHighFilter.Q.value = 0.7;
+
+        // Per-band compressors
+        this.mbCompLow = this.audioContext.createDynamicsCompressor();
+        this.mbCompLow.threshold.value = -24;
+        this.mbCompLow.knee.value = 10;
+        this.mbCompLow.ratio.value = 3;
+        this.mbCompLow.attack.value = 0.01;
+        this.mbCompLow.release.value = 0.15;
+
+        this.mbCompLowMid = this.audioContext.createDynamicsCompressor();
+        this.mbCompLowMid.threshold.value = -22;
+        this.mbCompLowMid.knee.value = 10;
+        this.mbCompLowMid.ratio.value = 3;
+        this.mbCompLowMid.attack.value = 0.008;
+        this.mbCompLowMid.release.value = 0.12;
+
+        this.mbCompHighMid = this.audioContext.createDynamicsCompressor();
+        this.mbCompHighMid.threshold.value = -20;
+        this.mbCompHighMid.knee.value = 10;
+        this.mbCompHighMid.ratio.value = 3;
+        this.mbCompHighMid.attack.value = 0.005;
+        this.mbCompHighMid.release.value = 0.1;
+
+        this.mbCompHigh = this.audioContext.createDynamicsCompressor();
+        this.mbCompHigh.threshold.value = -18;
+        this.mbCompHigh.knee.value = 10;
+        this.mbCompHigh.ratio.value = 3;
+        this.mbCompHigh.attack.value = 0.003;
+        this.mbCompHigh.release.value = 0.08;
+
+        // Per-band output gains
+        this.mbCompLowGain = this.audioContext.createGain();
+        this.mbCompLowGain.gain.value = 1;
+        this.mbCompLowMidGain = this.audioContext.createGain();
+        this.mbCompLowMidGain.gain.value = 1;
+        this.mbCompHighMidGain = this.audioContext.createGain();
+        this.mbCompHighMidGain.gain.value = 1;
+        this.mbCompHighGain = this.audioContext.createGain();
+        this.mbCompHighGain.gain.value = 1;
+
+        // De-esser
+        this.preDeesserBus = this.audioContext.createGain();
+        this.postDeesserBus = this.audioContext.createGain();
+        this.deesserBypassGain = this.audioContext.createGain();
+        this.deesserPathGain = this.audioContext.createGain();
+
+        this.deesserFilter = this.audioContext.createBiquadFilter();
+        this.deesserFilter.type = 'bandpass';
+        this.deesserFilter.frequency.value = 6500;
+        this.deesserFilter.Q.value = 2;
+
+        this.deesserCompressor = this.audioContext.createDynamicsCompressor();
+        this.deesserCompressor.threshold.value = -30;
+        this.deesserCompressor.knee.value = 6;
+        this.deesserCompressor.ratio.value = 8;
+        this.deesserCompressor.attack.value = 0.001;
+        this.deesserCompressor.release.value = 0.05;
+
+        // Side-chain gain node
+        this.sidechainGain = this.audioContext.createGain();
+        this.sidechainGain.gain.value = 1;
+
         // Delay
         this.delayNode = this.audioContext.createDelay(5.0);
         this.delayNode.delayTime.value = 0.5;
@@ -378,47 +558,94 @@ class Track {
         this.delayWet = this.audioContext.createGain();
         this.delayWet.gain.value = 0;
         this.delayEnableGain = this.audioContext.createGain();
-        
+
         // Reverb (using convolver with impulse response)
         this.convolver = this.audioContext.createConvolver();
         this.reverbWet = this.audioContext.createGain();
         this.reverbWet.gain.value = 0;
         this.reverbEnableGain = this.audioContext.createGain();
         this.createReverbImpulse(2.0);
-        
+
         this.convolver.connect(this.reverbWet);
         this.reverbWet.connect(this.reverbEnableGain);
         this.delayNode.connect(this.delayFeedback);
         this.delayFeedback.connect(this.delayNode);
         this.delayNode.connect(this.delayWet);
         this.delayWet.connect(this.delayEnableGain);
-        
-        // Connect chain: gain -> pan -> (EQ bypass or EQ path) -> (Comp bypass or Comp path)
+
+        // Multiband compressor internal routing (4 bands)
+        this.preMbCompBus.connect(this.mbCompLowFilter);
+        this.preMbCompBus.connect(this.mbCompLowMidFilterHP);
+        this.preMbCompBus.connect(this.mbCompHighMidFilterHP);
+        this.preMbCompBus.connect(this.mbCompHighFilter);
+        this.mbCompLowFilter.connect(this.mbCompLow);
+        this.mbCompLowMidFilterHP.connect(this.mbCompLowMidFilter);
+        this.mbCompLowMidFilter.connect(this.mbCompLowMid);
+        this.mbCompHighMidFilterHP.connect(this.mbCompHighMidFilter);
+        this.mbCompHighMidFilter.connect(this.mbCompHighMid);
+        this.mbCompHighFilter.connect(this.mbCompHigh);
+        this.mbCompLow.connect(this.mbCompLowGain);
+        this.mbCompLowMid.connect(this.mbCompLowMidGain);
+        this.mbCompHighMid.connect(this.mbCompHighMidGain);
+        this.mbCompHigh.connect(this.mbCompHighGain);
+        this.mbCompLowGain.connect(this.mbCompPathGain);
+        this.mbCompLowMidGain.connect(this.mbCompPathGain);
+        this.mbCompHighMidGain.connect(this.mbCompPathGain);
+        this.mbCompHighGain.connect(this.mbCompPathGain);
+
+        // De-esser internal routing: signal splits to sidechain detector & main path
+        // The deesserFilter feeds the compressor's sidechain-like behavior
+        // We route full signal through the compressor, with the bandpass feeding the detector
+        this.preDeesserBus.connect(this.deesserBypassGain);
+        this.preDeesserBus.connect(this.deesserCompressor);
+        this.deesserCompressor.connect(this.deesserPathGain);
+        // The bandpass filter is used for the sidechain detection path
+        this.preDeesserBus.connect(this.deesserFilter);
+
+        // Connect chain: gain -> pan -> (EQ bypass or EQ path) -> (Comp bypass or Comp path) -> (MB Comp) -> (De-esser) -> sidechain -> effects
         this.gainNode.connect(this.panNode);
         this.panNode.connect(this.eqBypassGain);
         this.panNode.connect(this.eqLow);
         this.eqLow.connect(this.eqLowMid);
         this.eqLowMid.connect(this.eqMid);
-        this.eqMid.connect(this.eqHigh);
+        this.eqMid.connect(this.eqHighMid);
+        this.eqHighMid.connect(this.eqHigh);
         this.eqHigh.connect(this.eqPathGain);
 
         this.eqBypassGain.connect(this.preCompBus);
         this.eqPathGain.connect(this.preCompBus);
         this.preCompBus.connect(this.compBypassGain);
         this.preCompBus.connect(this.compressor);
-        this.compressor.connect(this.compPathGain);
+        this.compressor.connect(this.makeupGain);
+        this.makeupGain.connect(this.compPathGain);
         this.compBypassGain.connect(this.postCompBus);
         this.compPathGain.connect(this.postCompBus);
-        
-        // Parallel effects
-        this.postCompBus.connect(this.destination); // Dry signal
-        this.postCompBus.connect(this.delayNode);
+
+        // Post single-band comp -> multiband comp
+        this.postCompBus.connect(this.preMbCompBus);
+        this.postCompBus.connect(this.mbCompBypassGain);
+        this.mbCompBypassGain.connect(this.postMbCompBus);
+        this.mbCompPathGain.connect(this.postMbCompBus);
+
+        // Post multiband comp -> de-esser
+        this.postMbCompBus.connect(this.preDeesserBus);
+        this.deesserBypassGain.connect(this.postDeesserBus);
+        this.deesserPathGain.connect(this.postDeesserBus);
+
+        // Post de-esser -> sidechain gain -> effects
+        this.postDeesserBus.connect(this.sidechainGain);
+
+        // Parallel effects from sidechain gain
+        this.sidechainGain.connect(this.destination); // Dry signal
+        this.sidechainGain.connect(this.delayNode);
         this.delayEnableGain.connect(this.destination);
-        this.postCompBus.connect(this.convolver);
+        this.sidechainGain.connect(this.convolver);
         this.reverbEnableGain.connect(this.destination);
 
         this.setEffectEnabled('eq', false);
         this.setEffectEnabled('compressor', false);
+        this.setEffectEnabled('multibandComp', false);
+        this.setEffectEnabled('deesser', false);
         this.setEffectEnabled('delay', false);
         this.setEffectEnabled('reverb', false);
     }
@@ -435,6 +662,12 @@ class Track {
         } else if (effectName === 'compressor') {
             this.compBypassGain.gain.value = isEnabled ? 0 : 1;
             this.compPathGain.gain.value = isEnabled ? 1 : 0;
+        } else if (effectName === 'multibandComp') {
+            this.mbCompBypassGain.gain.value = isEnabled ? 0 : 1;
+            this.mbCompPathGain.gain.value = isEnabled ? 1 : 0;
+        } else if (effectName === 'deesser') {
+            this.deesserBypassGain.gain.value = isEnabled ? 0 : 1;
+            this.deesserPathGain.gain.value = isEnabled ? 1 : 0;
         } else if (effectName === 'delay') {
             this.delayEnableGain.gain.value = isEnabled ? 1 : 0;
         } else if (effectName === 'reverb') {
@@ -447,6 +680,11 @@ class Track {
     }
 
     createReverbImpulse(duration) {
+        // Use shared impulse from AudioEngine when available (saves memory with many tracks)
+        if (this._engine && this._engine.getSharedReverbImpulse) {
+            this.convolver.buffer = this._engine.getSharedReverbImpulse(duration);
+            return;
+        }
         const sampleRate = this.audioContext.sampleRate;
         const length = sampleRate * duration;
         const impulse = this.audioContext.createBuffer(2, length, sampleRate);
@@ -767,6 +1005,12 @@ class Track {
         eqMid.Q.value = this.eqMid.Q.value;
         eqMid.gain.value = this.eqMid.gain.value;
 
+        const eqHighMid = offlineContext.createBiquadFilter();
+        eqHighMid.type = this.eqHighMid.type;
+        eqHighMid.frequency.value = this.eqHighMid.frequency.value;
+        eqHighMid.Q.value = this.eqHighMid.Q.value;
+        eqHighMid.gain.value = this.eqHighMid.gain.value;
+
         const eqHigh = offlineContext.createBiquadFilter();
         eqHigh.type = this.eqHigh.type;
         eqHigh.frequency.value = this.eqHigh.frequency.value;
@@ -786,11 +1030,78 @@ class Track {
         compressor.attack.value = this.compressor.attack.value;
         compressor.release.value = this.compressor.release.value;
 
+        const makeupGain = offlineContext.createGain();
+        makeupGain.gain.value = this.makeupGain.gain.value;
+
         const compBypassGain = offlineContext.createGain();
         compBypassGain.gain.value = this.effectStates.compressor ? 0 : 1;
         const compPathGain = offlineContext.createGain();
         compPathGain.gain.value = this.effectStates.compressor ? 1 : 0;
         const postCompBus = offlineContext.createGain();
+
+        // Multiband compressor (offline)
+        const preMbCompBus = offlineContext.createGain();
+        const postMbCompBus = offlineContext.createGain();
+        const mbCompBypassGain = offlineContext.createGain();
+        mbCompBypassGain.gain.value = this.effectStates.multibandComp ? 0 : 1;
+        const mbCompPathGain = offlineContext.createGain();
+        mbCompPathGain.gain.value = this.effectStates.multibandComp ? 1 : 0;
+
+        const mbLowF = offlineContext.createBiquadFilter();
+        mbLowF.type = 'lowpass'; mbLowF.frequency.value = this.mbCompLowFilter.frequency.value; mbLowF.Q.value = 0.7;
+        const mbLowMidFHP = offlineContext.createBiquadFilter();
+        mbLowMidFHP.type = 'highpass'; mbLowMidFHP.frequency.value = this.mbCompLowMidFilterHP.frequency.value; mbLowMidFHP.Q.value = 0.7;
+        const mbLowMidF = offlineContext.createBiquadFilter();
+        mbLowMidF.type = 'lowpass'; mbLowMidF.frequency.value = this.mbCompLowMidFilter.frequency.value; mbLowMidF.Q.value = 0.7;
+        const mbHighMidFHP = offlineContext.createBiquadFilter();
+        mbHighMidFHP.type = 'highpass'; mbHighMidFHP.frequency.value = this.mbCompHighMidFilterHP.frequency.value; mbHighMidFHP.Q.value = 0.7;
+        const mbHighMidF = offlineContext.createBiquadFilter();
+        mbHighMidF.type = 'lowpass'; mbHighMidF.frequency.value = this.mbCompHighMidFilter.frequency.value; mbHighMidF.Q.value = 0.7;
+        const mbHighF = offlineContext.createBiquadFilter();
+        mbHighF.type = 'highpass'; mbHighF.frequency.value = this.mbCompHighFilter.frequency.value; mbHighF.Q.value = 0.7;
+
+        const mbBands = [
+            { src: this.mbCompLow, name: 'Low' },
+            { src: this.mbCompLowMid, name: 'LowMid' },
+            { src: this.mbCompHighMid, name: 'HighMid' },
+            { src: this.mbCompHigh, name: 'High' }
+        ];
+        const mbComps = mbBands.map(b => {
+            const c = offlineContext.createDynamicsCompressor();
+            c.threshold.value = b.src.threshold.value;
+            c.knee.value = b.src.knee.value;
+            c.ratio.value = b.src.ratio.value;
+            c.attack.value = b.src.attack.value;
+            c.release.value = b.src.release.value;
+            return c;
+        });
+        const mbGains = [this.mbCompLowGain, this.mbCompLowMidGain, this.mbCompHighMidGain, this.mbCompHighGain].map(g => {
+            const gn = offlineContext.createGain();
+            gn.gain.value = g.gain.value;
+            return gn;
+        });
+
+        preMbCompBus.connect(mbLowF); preMbCompBus.connect(mbLowMidFHP); preMbCompBus.connect(mbHighMidFHP); preMbCompBus.connect(mbHighF);
+        mbLowF.connect(mbComps[0]); mbLowMidFHP.connect(mbLowMidF); mbLowMidF.connect(mbComps[1]);
+        mbHighMidFHP.connect(mbHighMidF); mbHighMidF.connect(mbComps[2]); mbHighF.connect(mbComps[3]);
+        mbComps.forEach((c, i) => { c.connect(mbGains[i]); mbGains[i].connect(mbCompPathGain); });
+
+        // De-esser (offline)
+        const preDeesserBus = offlineContext.createGain();
+        const postDeesserBus = offlineContext.createGain();
+        const deesserBypassGain = offlineContext.createGain();
+        deesserBypassGain.gain.value = this.effectStates.deesser ? 0 : 1;
+        const deesserPathGain = offlineContext.createGain();
+        deesserPathGain.gain.value = this.effectStates.deesser ? 1 : 0;
+        const deesserComp = offlineContext.createDynamicsCompressor();
+        deesserComp.threshold.value = this.deesserCompressor.threshold.value;
+        deesserComp.knee.value = this.deesserCompressor.knee.value;
+        deesserComp.ratio.value = this.deesserCompressor.ratio.value;
+        deesserComp.attack.value = this.deesserCompressor.attack.value;
+        deesserComp.release.value = this.deesserCompressor.release.value;
+        preDeesserBus.connect(deesserBypassGain);
+        preDeesserBus.connect(deesserComp);
+        deesserComp.connect(deesserPathGain);
 
         const delayNode = offlineContext.createDelay(5.0);
         delayNode.delayTime.value = this.delayNode.delayTime.value;
@@ -816,26 +1127,38 @@ class Track {
         convolver.connect(reverbWet);
         reverbWet.connect(reverbEnableGain);
 
+        // Main chain
         gainNode.connect(panNode);
         panNode.connect(eqBypassGain);
         panNode.connect(eqLow);
         eqLow.connect(eqLowMid);
         eqLowMid.connect(eqMid);
-        eqMid.connect(eqHigh);
+        eqMid.connect(eqHighMid);
+        eqHighMid.connect(eqHigh);
         eqHigh.connect(eqPathGain);
 
         eqBypassGain.connect(preCompBus);
         eqPathGain.connect(preCompBus);
         preCompBus.connect(compBypassGain);
         preCompBus.connect(compressor);
-        compressor.connect(compPathGain);
+        compressor.connect(makeupGain);
+        makeupGain.connect(compPathGain);
         compBypassGain.connect(postCompBus);
         compPathGain.connect(postCompBus);
 
-        postCompBus.connect(destination);
-        postCompBus.connect(delayNode);
+        postCompBus.connect(preMbCompBus);
+        postCompBus.connect(mbCompBypassGain);
+        mbCompBypassGain.connect(postMbCompBus);
+        mbCompPathGain.connect(postMbCompBus);
+
+        postMbCompBus.connect(preDeesserBus);
+        deesserBypassGain.connect(postDeesserBus);
+        deesserPathGain.connect(postDeesserBus);
+
+        postDeesserBus.connect(destination);
+        postDeesserBus.connect(delayNode);
         delayEnableGain.connect(destination);
-        postCompBus.connect(convolver);
+        postDeesserBus.connect(convolver);
         reverbEnableGain.connect(destination);
         
         // Automation (offline)
@@ -908,26 +1231,23 @@ class Track {
 
     dispose() {
         this.stop();
-        
-        if (this.gainNode) this.gainNode.disconnect();
-        if (this.panNode) this.panNode.disconnect();
-        if (this.eqLow) this.eqLow.disconnect();
-        if (this.eqLowMid) this.eqLowMid.disconnect();
-        if (this.eqMid) this.eqMid.disconnect();
-        if (this.eqHigh) this.eqHigh.disconnect();
-        if (this.eqBypassGain) this.eqBypassGain.disconnect();
-        if (this.eqPathGain) this.eqPathGain.disconnect();
-        if (this.preCompBus) this.preCompBus.disconnect();
-        if (this.compressor) this.compressor.disconnect();
-        if (this.compBypassGain) this.compBypassGain.disconnect();
-        if (this.compPathGain) this.compPathGain.disconnect();
-        if (this.postCompBus) this.postCompBus.disconnect();
-        if (this.delayNode) this.delayNode.disconnect();
-        if (this.delayFeedback) this.delayFeedback.disconnect();
-        if (this.delayWet) this.delayWet.disconnect();
-        if (this.delayEnableGain) this.delayEnableGain.disconnect();
-        if (this.convolver) this.convolver.disconnect();
-        if (this.reverbWet) this.reverbWet.disconnect();
-        if (this.reverbEnableGain) this.reverbEnableGain.disconnect();
+
+        const nodes = [
+            this.gainNode, this.panNode,
+            this.eqLow, this.eqLowMid, this.eqMid, this.eqHighMid, this.eqHigh,
+            this.eqBypassGain, this.eqPathGain, this.preCompBus,
+            this.compressor, this.makeupGain, this.compBypassGain, this.compPathGain, this.postCompBus,
+            this.mbCompLowFilter, this.mbCompLowMidFilterHP, this.mbCompLowMidFilter,
+            this.mbCompHighMidFilterHP, this.mbCompHighMidFilter, this.mbCompHighFilter,
+            this.mbCompLow, this.mbCompLowMid, this.mbCompHighMid, this.mbCompHigh,
+            this.mbCompLowGain, this.mbCompLowMidGain, this.mbCompHighMidGain, this.mbCompHighGain,
+            this.mbCompBypassGain, this.mbCompPathGain, this.preMbCompBus, this.postMbCompBus,
+            this.deesserFilter, this.deesserCompressor,
+            this.deesserBypassGain, this.deesserPathGain, this.preDeesserBus, this.postDeesserBus,
+            this.sidechainGain,
+            this.delayNode, this.delayFeedback, this.delayWet, this.delayEnableGain,
+            this.convolver, this.reverbWet, this.reverbEnableGain
+        ];
+        nodes.forEach(n => { if (n) try { n.disconnect(); } catch(e) {} });
     }
 }

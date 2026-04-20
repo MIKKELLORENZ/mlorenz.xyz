@@ -29,6 +29,7 @@
   --rose: #fb7185;
   --rose-glow: rgba(251, 113, 133, 0.3);
   --blue: #60a5fa;
+  --orange: #f97316;
 
   /* Text */
   --text: #e2e8f0;
@@ -104,7 +105,7 @@ body {
 /* ============ LAYOUT ============ */
 .app {
   display: flex; flex-direction: column;
-  max-width: 1440px; margin: 0 auto;
+  max-width: 1480px; margin: 0 auto;
   padding: var(--sp-md); min-height: 100vh;
   gap: var(--sp-md);
 }
@@ -127,12 +128,12 @@ body {
 }
 .header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
 .header .tagline { font-size: 0.8rem; color: var(--text-dim); }
-.header-actions { display: flex; gap: var(--sp-sm); align-items: center; }
+.header-actions { display: flex; gap: var(--sp-sm); align-items: center; flex-wrap: wrap; }
 
 /* Main grid: chart + sidebar */
 .main-grid {
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: 1fr 360px;
   gap: var(--sp-md);
   flex: 1;
   min-height: 0;
@@ -174,7 +175,7 @@ body {
   padding: var(--sp-sm) var(--sp-md) 0;
   font-size: 0.75rem; color: var(--text-dim);
 }
-.legend-item { display: flex; align-items: center; gap: 6px; cursor: pointer; transition: opacity var(--fast); }
+.legend-item { display: flex; align-items: center; gap: 6px; cursor: pointer; transition: opacity var(--fast); user-select: none; }
 .legend-item:hover { opacity: 0.8; }
 .legend-swatch {
   width: 16px; height: 3px; border-radius: 2px;
@@ -212,6 +213,7 @@ body {
   padding-bottom: var(--sp-md);
   border-bottom: 1px solid var(--border);
   margin-bottom: var(--sp-md);
+  flex-wrap: wrap;
 }
 
 /* ============ SIDEBAR ============ */
@@ -256,7 +258,7 @@ body {
   border-radius: var(--r-sm);
   border: 1px solid var(--border);
   font-size: 0.75rem;
-  cursor: pointer;
+  cursor: default;
   transition: all var(--fast);
 }
 .concept-card:hover { border-color: var(--border-hover); background: rgba(255,255,255,0.04); }
@@ -299,6 +301,11 @@ body {
 .btn-sm { padding: var(--sp-xs) var(--sp-sm); font-size: 0.8rem; }
 .btn-lg { padding: var(--sp-md) var(--sp-xl); font-size: 1rem; }
 
+.btn-ghost {
+  background: transparent; border-color: var(--border);
+}
+.btn-ghost:hover { background: rgba(255,255,255,0.06); }
+
 /* ============ FORM CONTROLS ============ */
 .form-group { display: flex; flex-direction: column; gap: var(--sp-xs); }
 .form-group label {
@@ -340,6 +347,26 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 2px 8px var(--cyan-glow); cursor: pointer;
 }
 
+/* Custom function input */
+.custom-fn-row {
+  display: flex; gap: var(--sp-sm); align-items: center;
+  margin-top: var(--sp-sm);
+}
+.custom-fn-row input[type="text"] {
+  flex: 1; padding: 6px var(--sp-md);
+  font-size: 0.8rem; font-family: 'JetBrains Mono', monospace;
+  background: rgba(255,255,255,0.05); color: var(--cyan);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  outline: none; transition: all var(--fast);
+}
+.custom-fn-row input[type="text"]:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--cyan-glow); }
+.custom-fn-row input[type="text"]::placeholder { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+.custom-fn-error {
+  display: none; font-size: 0.72rem; color: var(--rose);
+  margin-top: 4px; padding: 4px 8px;
+  background: rgba(251,113,133,0.08); border-radius: var(--r-sm);
+}
+
 /* Checkbox toggle */
 .toggle-wrap {
   display: flex; align-items: center; gap: var(--sp-sm);
@@ -372,6 +399,7 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap; z-index: 100;
   box-shadow: 0 8px 25px rgba(0,0,0,0.4);
   display: none;
+  line-height: 1.6;
 }
 .chart-tooltip.visible { display: block; }
 
@@ -397,7 +425,7 @@ input[type="range"]::-moz-range-thumb {
 }
 .onboarding.hidden { display: none; }
 .onboarding-card {
-  max-width: 480px; width: 100%;
+  max-width: 520px; width: 100%;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--r-xl);
@@ -416,6 +444,38 @@ input[type="range"]::-moz-range-thumb {
   font-size: 0.8rem; color: var(--text-dim);
 }
 
+/* ============ SHORTCUTS MODAL ============ */
+.shortcuts-modal {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.5); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--sp-lg);
+}
+.shortcuts-modal.hidden { display: none; }
+.shortcuts-card {
+  max-width: 440px; width: 100%;
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: var(--sp-xl);
+}
+.shortcuts-card h3 { font-size: 1.1rem; margin-bottom: var(--sp-lg); text-align: center; }
+.shortcut-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: var(--sp-sm) 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 0.85rem;
+}
+.shortcut-row:last-child { border-bottom: none; }
+.shortcut-key {
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(255,255,255,0.08); padding: 2px 10px;
+  border-radius: var(--r-sm); font-size: 0.8rem;
+  border: 1px solid var(--border);
+}
+.shortcut-label { color: var(--text-dim); }
+
 /* ============ TOAST ============ */
 .toast-container { position: fixed; bottom: var(--sp-lg); right: var(--sp-lg); z-index: 2000; display: flex; flex-direction: column; gap: var(--sp-sm); }
 .toast {
@@ -429,6 +489,11 @@ input[type="range"]::-moz-range-thumb {
 .toast.info { border-left: 3px solid var(--cyan); }
 
 @keyframes toast-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ============ EXPORT BUTTONS ============ */
+.export-group {
+  display: flex; gap: var(--sp-xs); margin-left: auto;
+}
 
 /* ============ RESPONSIVE ============ */
 @media (max-width: 1024px) {
@@ -458,6 +523,8 @@ input[type="range"]::-moz-range-thumb {
   .panel-body { padding: var(--sp-md); }
   .form-group { gap: 2px; }
   .toast-container { left: var(--sp-sm); right: var(--sp-sm); bottom: var(--sp-sm); }
+  .custom-fn-row { flex-direction: column; }
+  .export-group { margin-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -471,6 +538,16 @@ input[type="range"]::-moz-range-thumb {
 
 /* Focus */
 :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+/* ============ DIFFICULTY BADGE ============ */
+.difficulty-dots {
+  display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle;
+}
+.difficulty-dots .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+}
+.difficulty-dots .dot.filled { background: var(--amber); }
 </style>
 </head>
 <body>
@@ -492,15 +569,20 @@ input[type="range"]::-moz-range-thumb {
       </div>
     </div>
     <div class="header-actions">
-      <label class="toggle-wrap" title="Show true function">
+      <label class="toggle-wrap" title="Show true function (T)">
         <input type="checkbox" id="toggle-true-fn" checked>
         <span class="toggle-track"></span>
         <span>Truth</span>
       </label>
-      <label class="toggle-wrap" title="Show acquisition function">
+      <label class="toggle-wrap" title="Show acquisition function (G)">
         <input type="checkbox" id="toggle-acq" checked>
         <span class="toggle-track"></span>
         <span>Acq.</span>
+      </label>
+      <label class="toggle-wrap" title="Compare BO vs random search (C)">
+        <input type="checkbox" id="toggle-compare">
+        <span class="toggle-track"></span>
+        <span>Compare</span>
       </label>
       <button class="btn btn-icon-only" id="btn-help" title="Help" aria-label="Help">?</button>
     </div>
@@ -510,21 +592,28 @@ input[type="range"]::-moz-range-thumb {
   <section class="panel controls-bar">
     <div class="panel-body">
       <div class="transport">
-        <button class="btn btn-primary btn-lg" id="btn-step">
+        <button class="btn btn-primary btn-lg" id="btn-step" title="Step (Space)">
           <span class="icon">▶</span> Step
         </button>
-        <button class="btn btn-success" id="btn-auto">
+        <button class="btn btn-success" id="btn-auto" title="Auto-run (A)">
           <span class="icon">⟳</span> Auto-Run
         </button>
-        <button class="btn btn-danger btn-sm" id="btn-reset">
+        <button class="btn btn-ghost btn-sm" id="btn-undo" title="Undo (U / Ctrl+Z)" disabled>
+          <span class="icon">↩</span> Undo
+        </button>
+        <button class="btn btn-danger btn-sm" id="btn-reset" title="Reset (R)">
           <span class="icon">↺</span> Reset
         </button>
         <div class="stat" style="margin-left:auto">
           <span class="stat-label">Iteration</span>
           <span class="stat-value" id="stat-iter">0</span>
         </div>
+        <div class="export-group">
+          <button class="btn btn-ghost btn-sm" id="btn-export-csv" title="Export convergence data as CSV">CSV</button>
+          <button class="btn btn-ghost btn-sm" id="btn-export-png" title="Export chart as PNG">PNG</button>
+        </div>
       </div>
-      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap:var(--sp-md);">
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(145px,1fr)); gap:var(--sp-md);">
         <div class="form-group">
           <label>Objective Function</label>
           <select id="sel-objective">
@@ -534,14 +623,18 @@ input[type="range"]::-moz-range-thumb {
             <option value="noisyQuad">Noisy Quadratic</option>
             <option value="cliff">Cliff Edge</option>
             <option value="multiModal">Multi-Modal</option>
+            <option value="stepFunction">Step Function</option>
+            <option value="camelback">Six-Hump Camel</option>
+            <option value="custom">Custom f(x)...</option>
           </select>
         </div>
         <div class="form-group">
           <label>Kernel</label>
           <select id="sel-kernel">
             <option value="rbf" selected>RBF (Squared Exp.)</option>
-            <option value="matern32">Matérn 3/2</option>
-            <option value="matern52">Matérn 5/2</option>
+            <option value="matern32">Matern 3/2</option>
+            <option value="matern52">Matern 5/2</option>
+            <option value="periodic">Periodic</option>
           </select>
         </div>
         <div class="form-group">
@@ -550,6 +643,7 @@ input[type="range"]::-moz-range-thumb {
             <option value="ei" selected>Expected Improvement</option>
             <option value="ucb">Upper Confidence Bound</option>
             <option value="poi">Probability of Improvement</option>
+            <option value="thompson">Thompson Sampling</option>
           </select>
         </div>
         <div class="form-group">
@@ -557,14 +651,24 @@ input[type="range"]::-moz-range-thumb {
           <input type="range" id="rng-ls" min="0.03" max="0.6" step="0.01" value="0.15">
         </div>
         <div class="form-group">
-          <label>Noise σ <span class="val" id="lbl-noise">0.05</span></label>
+          <label>Noise sigma <span class="val" id="lbl-noise">0.05</span></label>
           <input type="range" id="rng-noise" min="0" max="0.3" step="0.01" value="0.05">
         </div>
         <div class="form-group">
-          <label>Exploration ξ/κ <span class="val" id="lbl-explore">0.01</span></label>
+          <label>Exploration xi/kappa <span class="val" id="lbl-explore">0.01</span></label>
           <input type="range" id="rng-explore" min="0" max="2" step="0.01" value="0.01">
         </div>
+        <div class="form-group">
+          <label>Auto Speed <span class="val" id="lbl-speed">600ms</span></label>
+          <input type="range" id="rng-speed" min="50" max="1500" step="50" value="600">
+        </div>
       </div>
+      <!-- Custom function input row -->
+      <div class="custom-fn-row" id="custom-fn-row" style="display:none;">
+        <input type="text" id="custom-fn-input" placeholder="e.g. sin(3*PI*x) + 0.5*cos(7*x)" spellcheck="false">
+        <button class="btn btn-primary btn-sm" id="btn-custom-fn">Apply</button>
+      </div>
+      <div class="custom-fn-error" id="custom-fn-error"></div>
     </div>
   </section>
 
@@ -583,6 +687,7 @@ input[type="range"]::-moz-range-thumb {
                 <option value="3" selected>3</option>
                 <option value="5">5</option>
                 <option value="8">8</option>
+                <option value="10">10</option>
               </select>
             </div>
           </div>
@@ -616,15 +721,15 @@ input[type="range"]::-moz-range-thumb {
         <div class="stats-bar">
           <div class="stat">
             <span class="stat-label">Best y</span>
-            <span class="stat-value" id="stat-best-y">—</span>
+            <span class="stat-value" id="stat-best-y">--</span>
           </div>
           <div class="stat">
             <span class="stat-label">Best x</span>
-            <span class="stat-value" id="stat-best-x">—</span>
+            <span class="stat-value" id="stat-best-x">--</span>
           </div>
           <div class="stat">
             <span class="stat-label">Next x</span>
-            <span class="stat-value" id="stat-next-x">—</span>
+            <span class="stat-value" id="stat-next-x">--</span>
           </div>
           <div class="stat">
             <span class="stat-label">Kernel</span>
@@ -632,7 +737,15 @@ input[type="range"]::-moz-range-thumb {
           </div>
           <div class="stat">
             <span class="stat-label">Acq. Max</span>
-            <span class="stat-value" id="stat-acq-max">—</span>
+            <span class="stat-value" id="stat-acq-max">--</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Regret</span>
+            <span class="stat-value" id="stat-regret" style="color:var(--rose)">--</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Log ML</span>
+            <span class="stat-value" id="stat-logml" style="color:var(--purple)">--</span>
           </div>
         </div>
       </div>
@@ -642,14 +755,14 @@ input[type="range"]::-moz-range-thumb {
     <aside class="sidebar" id="sidebar">
       <!-- Mobile tab bar -->
       <div class="mobile-tabs">
-        <button class="mobile-tab active" data-section="edu">📚 Learn</button>
-        <button class="mobile-tab" data-section="params">⚙️ Details</button>
+        <button class="mobile-tab active" data-section="edu">Learn</button>
+        <button class="mobile-tab" data-section="params">Details</button>
       </div>
 
       <!-- Education Panel -->
       <div class="panel edu-panel sidebar-section active" data-section="edu" id="edu-panel">
         <div class="panel-head">
-          <h2>📚 How It Works</h2>
+          <h2>How It Works</h2>
           <button class="btn btn-sm" id="btn-edu-reset">Reset</button>
         </div>
         <div class="panel-body" id="edu-content">
@@ -660,15 +773,15 @@ input[type="range"]::-moz-range-thumb {
       <!-- Parameter Details Panel -->
       <div class="panel sidebar-section" data-section="params" id="params-panel" style="display:none;">
         <div class="panel-head">
-          <h2>⚙️ Parameter Details</h2>
+          <h2>Parameter Details</h2>
         </div>
         <div class="panel-body">
           <div class="concept-grid" id="concept-grid">
             <!-- Populated by JS -->
           </div>
           <div style="margin-top:var(--sp-md);">
-            <h4 style="font-size:0.85rem;margin-bottom:var(--sp-sm);">📈 Convergence</h4>
-            <div class="canvas-wrap" style="height:120px;">
+            <h4 style="font-size:0.85rem;margin-bottom:var(--sp-sm);">Convergence</h4>
+            <div class="canvas-wrap" style="height:140px;">
               <canvas id="canvas-convergence"></canvas>
             </div>
           </div>
@@ -679,7 +792,7 @@ input[type="range"]::-moz-range-thumb {
 
   <!-- ====== FOOTER ====== -->
   <footer style="text-align:center;padding:var(--sp-md);color:var(--text-muted);font-size:0.8rem;">
-    Built with Canvas & vanilla JS · No external dependencies · All computation runs in your browser
+    Built with Canvas & vanilla JS · No external dependencies · Press <span style="font-family:'JetBrains Mono',monospace;background:rgba(255,255,255,0.06);padding:1px 6px;border-radius:4px;">?</span> for keyboard shortcuts
   </footer>
 </div>
 
@@ -690,10 +803,13 @@ input[type="range"]::-moz-range-thumb {
     <h2>Welcome to the Bayesian Optimization Playground</h2>
     <p>Explore how Gaussian Processes guide intelligent search for the optimum of unknown functions. Watch the surrogate model update in real-time as new samples arrive.</p>
     <div class="feature-pills">
-      <span class="feature-pill">🔬 Gaussian Processes</span>
-      <span class="feature-pill">📈 Acquisition Functions</span>
-      <span class="feature-pill">🎯 Optimization</span>
-      <span class="feature-pill">🧠 Interactive Learning</span>
+      <span class="feature-pill">Gaussian Processes</span>
+      <span class="feature-pill">4 Acquisition Functions</span>
+      <span class="feature-pill">Custom Objectives</span>
+      <span class="feature-pill">BO vs Random Compare</span>
+      <span class="feature-pill">Undo History</span>
+      <span class="feature-pill">Export CSV/PNG</span>
+      <span class="feature-pill">Interactive Learning</span>
     </div>
     <button class="btn btn-primary btn-lg" id="btn-start" style="width:100%;">
       <span class="icon">▶</span> Start Exploring
@@ -701,8 +817,36 @@ input[type="range"]::-moz-range-thumb {
   </div>
 </div>
 
+<!-- ====== SHORTCUTS MODAL ====== -->
+<div class="shortcuts-modal hidden" id="shortcuts-modal">
+  <div class="shortcuts-card">
+    <h3>Keyboard Shortcuts</h3>
+    <div class="shortcut-row"><span class="shortcut-label">Step forward</span><span class="shortcut-key">Space</span></div>
+    <div class="shortcut-row"><span class="shortcut-label">Step forward</span><span class="shortcut-key">S</span></div>
+    <div class="shortcut-row"><span class="shortcut-label">Toggle auto-run</span><span class="shortcut-key">A</span></div>
+    <div class="shortcut-row"><span class="shortcut-label">Reset</span><span class="shortcut-key">R</span></div>
+    <div class="shortcut-row"><span class="shortcut-label">Undo last step</span><span class="shortcut-key">U</span></div>
+    <div class="shortcut-row"><span class="shortcut-label">Undo last step</span><span class="shortcut-key">Ctrl+Z</span></div>
+    <div class="shortcut-row"><span class="shortcut-label">Toggle true function</span><span class="shortcut-key">T</span></div>
+    <div class="shortcut-row"><span class="shortcut-label">Toggle acquisition</span><span class="shortcut-key">G</span></div>
+    <div class="shortcut-row"><span class="shortcut-label">Toggle comparison mode</span><span class="shortcut-key">C</span></div>
+    <div class="shortcut-row"><span class="shortcut-label">Focus custom function</span><span class="shortcut-key">E</span></div>
+    <div class="shortcut-row"><span class="shortcut-label">This modal</span><span class="shortcut-key">?</span></div>
+    <div style="text-align:center;margin-top:var(--sp-lg);">
+      <button class="btn btn-sm" onclick="document.getElementById('shortcuts-modal').classList.add('hidden')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast container -->
 <div class="toast-container" id="toast-container"></div>
+
+<!-- Show/hide custom function row when "Custom" is selected -->
+<script>
+document.getElementById('sel-objective').addEventListener('change', function() {
+  document.getElementById('custom-fn-row').style.display = this.value === 'custom' ? 'flex' : 'none';
+});
+</script>
 
 <script src="bayesian-education.js"></script>
 <script src="script.js"></script>
