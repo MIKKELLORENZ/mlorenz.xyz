@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Suburb Phase Test</title>
+    <link rel="stylesheet" href="styles.css">
+    <script>
+        try { localStorage.setItem('live-wallpaper:theme', 'suburb'); } catch(e){}
+        window.__errors = [];
+        window.addEventListener('error', e => window.__errors.push(String(e.message)));
+    </script>
+</head>
+<body>
+    <canvas id="stage"></canvas>
+    <div class="ui-overlay" id="uiOverlay" style="display:none">
+        <aside class="picker" id="picker"><header class="picker-header"><span class="picker-title"></span><button class="icon-btn picker-collapse" id="pickerCollapse"></button></header><div class="picker-list" id="pickerList"></div></aside>
+        <button class="picker-reveal hidden" id="pickerReveal"></button>
+        <div class="controls" id="controls"><button class="icon-btn" id="hideUiBtn"></button><button class="icon-btn" id="fullscreenBtn"><svg id="fsEnterIcon"></svg><svg id="fsExitIcon" class="hidden"></svg></button></div>
+        <div class="hidden-hint hidden" id="hiddenHint"></div>
+    </div>
+    <script src="themes/base.js"></script>
+    <script>
+        // Wrap the registry so we can intercept the suburb wallpaper factory.
+        const _origRegister = LiveWallpaper.register;
+        LiveWallpaper.register = function(def) {
+            if (def && def.id === 'suburb') {
+                const origFactory = def.factory;
+                def.factory = function(canvas) {
+                    const inst = origFactory(canvas);
+                    const params = new URLSearchParams(location.search);
+                    const phase = parseFloat(params.get('phase'));
+                    if (!isNaN(phase)) {
+                        // Override render so t corresponds to desired phase.
+                        const origRender = inst.render.bind(inst);
+                        // DAY_CYCLE_MS=240000, CYCLE_START=0.40.
+                        // Want cycle = (t/240000 + 0.40) % 1 = phase.
+                        const targetT = (((phase - 0.40) % 1 + 1) % 1) * 240000;
+                        inst.render = function(t, dt) {
+                            // Always render at targetT — frozen phase.
+                            return origRender(targetT, dt);
+                        };
+                    }
+                    return inst;
+                };
+            }
+            return _origRegister.call(this, def);
+        };
+    </script>
+    <script src="themes/suburb/suburb.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

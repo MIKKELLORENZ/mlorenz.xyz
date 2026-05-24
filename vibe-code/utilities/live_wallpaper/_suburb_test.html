@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Suburb Test</title>
+    <link rel="stylesheet" href="styles.css">
+    <script>
+        try { localStorage.setItem('live-wallpaper:theme', 'suburb'); } catch(e){}
+        window.__errors = [];
+        window.addEventListener('error', e => window.__errors.push(String(e.message)));
+    </script>
+</head>
+<body>
+    <canvas id="stage"></canvas>
+    <div class="ui-overlay" id="uiOverlay" style="display:none">
+        <aside class="picker" id="picker"><header class="picker-header"><span class="picker-title"></span><button class="icon-btn picker-collapse" id="pickerCollapse"></button></header><div class="picker-list" id="pickerList"></div></aside>
+        <button class="picker-reveal hidden" id="pickerReveal"></button>
+        <div class="controls" id="controls"><button class="icon-btn" id="hideUiBtn"></button><button class="icon-btn" id="fullscreenBtn"><svg id="fsEnterIcon"></svg><svg id="fsExitIcon" class="hidden"></svg></button></div>
+        <div class="hidden-hint hidden" id="hiddenHint"></div>
+    </div>
+    <script src="themes/base.js"></script>
+    <script src="themes/suburb/suburb.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
