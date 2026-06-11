@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded', function() {
         {
             id: "craft_note",
             title: "Craft Note",
-            description: "",
+            description: "A sticky-note board for quick notes and to-dos, right in your browser.",
             thumbnail: "../vibe-code/utilities/craft_note/thumbnail.jpg",
             category: "utilities",
             tags: ["sticky notes", "productivity", "javascript", "utilities","note-taking","to-do", "to do"],
@@ -97,6 +97,30 @@ document.addEventListener('DOMContentLoaded', function() {
             type: "iframe" // Explicitly set to load in iframe
         },
 
+
+        {
+            id: "neural_racers",
+            title: "Neural Racers",
+            description: "Watch cars with ray sensors and recurrent neural-network brains learn to race — and fire at rivals — via evolutionary reinforcement learning. Switch tracks to test how well they generalize.",
+            thumbnail: "../vibe-code/simulations/2d_driving_reinforcement_learning/thumbnail.png",
+            category: "simulations",
+            tags: ["reinforcement learning", "neural network", "cars", "racing", "evolution", "machine learning", "javascript"],
+            date: "2026-06-11",
+            path: "simulations/2d_driving_reinforcement_learning/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "neural_arena",
+            title: "Neural Arena",
+            description: "Battle-only sibling of Neural Racers: cars with line-of-sight sensors evolve to fight, dodge and hide behind cover while a danger zone closes in. Free-for-all, or red vs blue with two co-evolving gene pools.",
+            thumbnail: "../vibe-code/simulations/neural_arena/thumbnail.png",
+            category: "simulations",
+            tags: ["reinforcement learning", "neural network", "battle", "evolution", "machine learning", "javascript"],
+            date: "2026-06-11",
+            path: "simulations/neural_arena/index.html",
+            type: "iframe"
+        },
 
         {
             id: "stick_balance",
@@ -196,9 +220,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="project-title-container">
                     <span class="project-title">${projectTitle || 'Interactive Project'}</span>
                 </div>
-                <button id="theme-toggle" aria-label="Toggle dark mode">
-                    🌙
-                </button>
+                <button id="theme-toggle" aria-label="Toggle dark mode"></button>
             `;
             
             // Add event listener to the new back button
@@ -297,8 +319,10 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Function to create a project card
     function createProjectCard(project) {
-        const card = document.createElement('div');
+        // A real anchor gives keyboard access, middle-click, and link previews for free
+        const card = document.createElement('a');
         card.classList.add('card');
+        card.href = `?project=${project.id}`;
         card.innerHTML = `
             <div class="card-image">
                 <img src="${project.thumbnail}" alt="${project.title}" loading="lazy" onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
@@ -314,12 +338,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             </div>
         `;
-        
-        // Add click event to open the project
-        card.addEventListener('click', () => {
-            window.location.href = `?project=${project.id}`;
-        });
-        
+
         return card;
     }
     
@@ -371,9 +390,11 @@ document.addEventListener('DOMContentLoaded', function() {
             
             projectsContainer.appendChild(projectFrame);
             
-            // Update browser history and title
+            // Update title and history state. replaceState (not pushState): this runs
+            // on initial load of ?project=… pages, and pushing would duplicate the
+            // entry so the back button needs two presses to leave.
             document.title = `${project.title} - Vibe Code`;
-            history.pushState({projectId: project.id}, '', `?project=${project.id}`);
+            history.replaceState({projectId: project.id}, '', `?project=${project.id}`);
         } else {
             // Project not found, redirect to projects list
             window.location.href = 'index.html';

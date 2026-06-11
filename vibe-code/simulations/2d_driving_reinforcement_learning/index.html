@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neural Racers — Cars Learning to Drive</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Neural Racers</h1>
+            <span class="brand-sub">evolutionary reinforcement learning</span>
+        </div>
+        <nav id="track-tabs" aria-label="Track selector">
+            <button class="track-tab active" data-track="0"><span class="swatch sw-0"></span>Sunset Oval</button>
+            <button class="track-tab" data-track="1"><span class="swatch sw-1"></span>Grand Circuit</button>
+            <button class="track-tab" data-track="2"><span class="swatch sw-2"></span>Chicane Gauntlet</button>
+            <button class="track-tab" data-track="3"><span class="swatch sw-3"></span>Apex Alley</button>
+            <button class="track-tab" data-track="4"><span class="swatch sw-4"></span>Titan GP</button>
+        </nav>
+    </header>
+
+    <main id="layout">
+        <div id="viewport">
+            <canvas id="sim"></canvas>
+            <div id="gen-banner" class="hidden"></div>
+        </div>
+
+        <aside id="panel">
+            <section class="stats-grid">
+                <div class="stat"><span class="stat-label">Generation</span><span class="stat-value" id="stat-gen">1</span></div>
+                <div class="stat"><span class="stat-label">Alive</span><span class="stat-value" id="stat-alive">0</span></div>
+                <div class="stat"><span class="stat-label">Best distance</span><span class="stat-value" id="stat-best">0 m</span></div>
+                <div class="stat"><span class="stat-label">Leader laps</span><span class="stat-value" id="stat-laps">0</span></div>
+                <div class="stat"><span class="stat-label">Record</span><span class="stat-value" id="stat-record">0 m</span></div>
+                <div class="stat"><span class="stat-label">Sim rate</span><span class="stat-value" id="stat-sps">0×</span></div>
+                <div class="stat" style="grid-column: span 2;"><span class="stat-label">Kills / shots this gen</span><span class="stat-value" id="stat-kills">0 / 0</span></div>
+            </section>
+
+            <section class="card">
+                <h2>Fitness history</h2>
+                <canvas id="chart" width="280" height="110"></canvas>
+            </section>
+
+            <section class="card">
+                <h2>Eliminations <span class="hint">per generation</span></h2>
+                <canvas id="elim" width="280" height="90"></canvas>
+            </section>
+
+            <section class="card">
+                <h2>Leader's brain <span class="hint">recurrent net, live</span></h2>
+                <canvas id="net" width="280" height="310"></canvas>
+            </section>
+
+            <section class="card controls">
+                <div class="row">
+                    <button id="btn-pause" class="btn primary">Pause</button>
+                    <button id="btn-reset" class="btn danger">Reset training</button>
+                </div>
+                <label class="slider-row">
+                    <span>Speed <b id="speed-label">4×</b></span>
+                    <input type="range" id="speed" min="0" max="7" value="2" step="1">
+                </label>
+                <label class="slider-row">
+                    <span>Population <b id="pop-label">60</b> <i class="hint">next gen</i></span>
+                    <input type="range" id="pop" min="20" max="120" value="60" step="10">
+                </label>
+                <label class="slider-row">
+                    <span>Mutation <b id="mut-label">≈6 weights</b></span>
+                    <input type="range" id="mut" min="1" max="40" value="6" step="1">
+                </label>
+                <div class="row split">
+                    <label class="select-row">
+                        <span>Sensors</span>
+                        <select id="sensors">
+                            <option value="leader" selected>Leader</option>
+                            <option value="all">All cars</option>
+                            <option value="off">Off</option>
+                        </select>
+                    </label>
+                    <label class="check-row" title="Freeze learning: cars keep their brains, no evolution. Switch tracks to test generalization.">
+                        <input type="checkbox" id="eval-mode">
+                        <span>Eval mode</span>
+                    </label>
+                </div>
+                <div class="row">
+                    <button id="btn-save" class="btn">Save best brain</button>
+                    <button id="btn-load" class="btn">Load brain</button>
+                </div>
+            </section>
+
+            <details class="card about">
+                <summary>How it works</summary>
+                <p>Each car senses the world with <b>7 distance rays</b> plus its own speed, and also sees the <b>nearest car ahead and behind</b> — where they are now, where they were a moment ago, and their <b>relative velocity</b>, so a brain can anticipate their path. It senses <b>incoming bullets</b> at long range (position and velocity), and a <b>reload neuron</b> rises from 0 to 1 as its own gun becomes ready. Everything feeds a small <b>recurrent neural network</b> whose hidden state gives it short-term memory. It outputs <b>steering</b>, a combined <b>throttle / brake / reverse</b> signal, and a <b>trigger</b>. There is no artificial top speed — drag is the only limit, and the walls don't negotiate.</p>
+                <p>Every car carries a gun, but guns stay <b>locked for the first 150 generations</b> so driving skill evolves first. After that: one bullet every 2 seconds (reload timers start randomized), with a little recoil. A <b>kill earns big bonus fitness</b> (worth about 70 m of driving) and <b>getting shot costs heavily</b>; <b>near misses</b> earn the shooter graded credit and rattle the car they grazed, so aiming and dodging improve by degrees instead of waiting on lucky hits. Blind shots with no car in sensor range cost a little. Aggression, evasion, or pure racing: whatever wins, breeds.</p>
+                <p>Training is <b>neuroevolution</b>: each generation is scored over <b>two runs</b> from different grid slots (averaging out luck), and the fittest cars seed the next population with mutated copies of their network weights. Crashing, stalling, or driving too slowly gets a car eliminated early, and <b>jerky steering</b> slowly drains fitness — smooth driving is cheaper on the machinery. The fitness chart shows <b>laps</b>, so progress is comparable across tracks.</p>
+                <p>To test <b>generalization</b>, turn on <i>Eval mode</i> (no learning) and switch tracks — the cars keep the brains they evolved elsewhere. Training on multiple tracks produces more general drivers.</p>
+            </details>
+        </aside>
+    </main>
+</div>
+<script src="main.js"></script>
+</body>
+</html>

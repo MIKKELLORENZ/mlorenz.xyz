@@ -1,36 +1,36 @@
-document.addEventListener('DOMContentLoaded', function() {
-    const themeToggle = document.getElementById('theme-toggle');
-    const prefersDarkScheme = window.matchMedia('(prefers-color-scheme: dark)');
-    
-    if (!themeToggle) return; // Exit if no theme toggle button found
-    
-    // Check for saved theme preference or use the system preference
-    const currentTheme = localStorage.getItem('theme') || 
-                        (prefersDarkScheme.matches ? 'dark' : 'light');
-    
-    // Set initial theme
-    if (currentTheme === 'dark') {
-        document.body.classList.add('dark-mode');
-        document.body.classList.remove('light-mode');
-        themeToggle.innerHTML = '☀️';
-    } else {
-        document.body.classList.add('light-mode');
-        document.body.classList.remove('dark-mode');
-        themeToggle.innerHTML = '🌙';
+// Theme handling. An inline script in <head> applies the saved theme class to
+// <html> before first paint; this file wires up the navbar toggle button.
+// initDarkModeToggle is exposed globally so pages that rebuild the navbar
+// (e.g. projects.js interactive mode) can re-bind the new toggle button.
+(function () {
+    function currentTheme() {
+        try {
+            const stored = localStorage.getItem('theme');
+            if (stored === 'dark' || stored === 'light') return stored;
+        } catch (e) { /* storage unavailable */ }
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
-    
-    // Theme toggle click handler
-    themeToggle.addEventListener('click', function() {
-        if (document.body.classList.contains('dark-mode')) {
-            document.body.classList.remove('dark-mode');
-            document.body.classList.add('light-mode');
-            themeToggle.innerHTML = '🌙';
-            localStorage.setItem('theme', 'light');
-        } else {
-            document.body.classList.remove('light-mode');
-            document.body.classList.add('dark-mode');
-            themeToggle.innerHTML = '☀️';
-            localStorage.setItem('theme', 'dark');
-        }
-    });
-});
+
+    function applyTheme(theme) {
+        const root = document.documentElement;
+        root.classList.toggle('dark-mode', theme === 'dark');
+        root.classList.toggle('light-mode', theme !== 'dark');
+        const toggle = document.getElementById('theme-toggle');
+        if (toggle) toggle.textContent = theme === 'dark' ? '☀️' : '🌙';
+    }
+
+    window.initDarkModeToggle = function () {
+        const toggle = document.getElementById('theme-toggle');
+        if (!toggle) return;
+
+        applyTheme(currentTheme());
+
+        toggle.addEventListener('click', function () {
+            const next = document.documentElement.classList.contains('dark-mode') ? 'light' : 'dark';
+            try { localStorage.setItem('theme', next); } catch (e) { /* storage unavailable */ }
+            applyTheme(next);
+        });
+    };
+
+    document.addEventListener('DOMContentLoaded', window.initDarkModeToggle);
+})();

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neural Arena — Cars Learning to Fight</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Neural Arena</h1>
+            <span class="brand-sub">evolutionary battle learning</span>
+        </div>
+        <nav id="mode-tabs" aria-label="Mode selector">
+            <button class="tab mode-tab active" data-mode="ffa"><span class="swatch sw-ffa"></span>Free-for-all</button>
+            <button class="tab mode-tab" data-mode="teams"><span class="swatch sw-red"></span><span class="swatch sw-blue"></span>Team battle</button>
+        </nav>
+        <nav id="arena-tabs" aria-label="Arena selector">
+            <button class="tab arena-tab active" data-arena="0"><span class="swatch sw-0"></span>Pillars</button>
+            <button class="tab arena-tab" data-arena="1"><span class="swatch sw-1"></span>Bunkers</button>
+            <button class="tab arena-tab" data-arena="2"><span class="swatch sw-2"></span>Crossfire</button>
+        </nav>
+    </header>
+
+    <main id="layout">
+        <div id="viewport">
+            <canvas id="sim"></canvas>
+            <div id="gen-banner" class="hidden"></div>
+        </div>
+
+        <aside id="panel">
+            <section class="stats-grid">
+                <div class="stat"><span class="stat-label">Generation</span><span class="stat-value" id="stat-gen">1</span></div>
+                <div class="stat"><span class="stat-label">Alive</span><span class="stat-value" id="stat-alive">0</span></div>
+                <div class="stat"><span class="stat-label">Best fitness</span><span class="stat-value" id="stat-best">0</span></div>
+                <div class="stat"><span class="stat-label">Record</span><span class="stat-value" id="stat-record">0</span></div>
+                <div class="stat"><span class="stat-label">Sim rate</span><span class="stat-value" id="stat-sps">0×</span></div>
+                <div class="stat"><span class="stat-label">Kills / shots this gen</span><span class="stat-value" id="stat-kills">0 / 0</span></div>
+                <div class="stat hidden" id="stat-score-box" style="grid-column: span 2;"><span class="stat-label">Round wins</span><span class="stat-value" id="stat-score"><span class="red">Red 0</span> — <span class="blue">0 Blue</span></span></div>
+            </section>
+
+            <section class="card">
+                <h2>Fitness history</h2>
+                <canvas id="chart" width="280" height="110"></canvas>
+            </section>
+
+            <section class="card">
+                <h2>Eliminations <span class="hint">per generation</span></h2>
+                <canvas id="elim" width="280" height="90"></canvas>
+            </section>
+
+            <section class="card">
+                <h2>Leader's brain <span class="hint">recurrent net, live</span></h2>
+                <canvas id="net" width="280" height="340"></canvas>
+            </section>
+
+            <section class="card controls">
+                <div class="row">
+                    <button id="btn-pause" class="btn primary">Pause</button>
+                    <button id="btn-reset" class="btn danger">Reset training</button>
+                </div>
+                <label class="slider-row">
+                    <span>Speed <b id="speed-label">4×</b></span>
+                    <input type="range" id="speed" min="0" max="7" value="2" step="1">
+                </label>
+                <label class="slider-row">
+                    <span>Population <b id="pop-label">40</b> <i class="hint">next gen</i></span>
+                    <input type="range" id="pop" min="16" max="80" value="40" step="4">
+                </label>
+                <label class="slider-row">
+                    <span>Mutation <b id="mut-label">≈6 weights</b></span>
+                    <input type="range" id="mut" min="1" max="40" value="6" step="1">
+                </label>
+                <div class="row split">
+                    <label class="select-row">
+                        <span>Sensors</span>
+                        <select id="sensors">
+                            <option value="leader" selected>Leader</option>
+                            <option value="all">All cars</option>
+                            <option value="off">Off</option>
+                        </select>
+                    </label>
+                    <label class="check-row" title="Freeze learning: cars keep their brains, no evolution. Switch arenas or modes to test generalization.">
+                        <input type="checkbox" id="eval-mode">
+                        <span>Eval mode</span>
+                    </label>
+                </div>
+                <div class="row">
+                    <button id="btn-save" class="btn">Save best brain</button>
+                    <button id="btn-load" class="btn">Load brain</button>
+                </div>
+            </section>
+
+            <details class="card about">
+                <summary>How it works</summary>
+                <p>This is the battle-only sibling of <b>Neural Racers</b>: no laps, no finish line — <b>fitness is survival</b>. Each car senses walls and cover with <b>9 distance rays</b>, plus its own speed, reload and hull state. Enemies are sensed <b>only with line of sight</b>: duck behind cover and you vanish from rivals' senses — and since bullets stop at walls too, <i>hiding is real</i>, not cosmetic. But a sighting leaves a <b>fading memory trace</b>: for a few seconds a car still knows roughly where the enemy it lost went, which is what makes stalking, peeking and ambushing learnable. A car also senses whether the enemy it sees is <b>aiming at it</b> (dodge fuel) and <b>how damaged</b> it is (finish the weak, avoid the strong). Teammates are always sensed via radio, including their hull state, and incoming <b>bullets are heard</b> at long range. Everything feeds a small <b>recurrent neural network</b> that outputs steering, throttle and trigger.</p>
+                <p>Cars take <b>3 hits</b> to destroy, and <b>every landed hit pays</b> the shooter and stings the victim — fitness flows from skirmishes, not just confirmed kills, which makes marksmanship evolvable and cuts the luck out of selection. The killing blow pays extra, and anyone who recently softened the target up earns an <b>assist</b>. Hull damage <b>slowly repairs</b> after a few unhit seconds, so pulling back behind cover to heal is a real tactic. <b>Near misses</b> earn graded credit, firing blind costs a little, and grinding against a wall drains fitness at an accelerating rate — getting stuck is bred out, hiding is not. Camping still has a clock: partway through each round a <b>danger zone</b> closes toward the arena center, and lingering outside it is fatal.</p>
+                <p><b>Free-for-all</b> is every car for itself with one gene pool. <b>Team battle</b> pits red against blue with <b>two gene pools co-evolving</b> against each other. A subtlety: selection happens <i>within</i> each team's pool, so a bonus shared equally by the whole team cancels out and selects for nothing — cooperation only evolves through rewards that land on individuals, like <b>assists for focus fire</b> and surviving a won round. <b>Friendly fire is on and costly</b>, so trigger discipline has to evolve along with aggression.</p>
+                <p>Training is <b>neuroevolution</b>: each generation fights <b>three rounds</b> from fresh spawn points (averaging out luck), and the fittest seed the next generation with mutated copies of their network weights. Expect hundreds of generations at high speed before clear tactics show — watch for wounded cars breaking off to heal, pairs pushing together, and ambushes at corners. Turn on <i>Eval mode</i> to freeze learning and test the evolved brains on other arenas or the other mode.</p>
+            </details>
+        </aside>
+    </main>
+</div>
+<script src="main.js"></script>
+</body>
+</html>
