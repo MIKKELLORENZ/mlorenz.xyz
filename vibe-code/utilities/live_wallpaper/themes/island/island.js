@@ -70,7 +70,8 @@
                         dy: -r * (0.45 + r2() * 0.15),
                         r: r,
                     });
-                    widthAccum += r * 0.7;
+                    // Varied puff spacing per step so cloud silhouettes differ.
+                    widthAccum += r * (0.55 + r2() * 0.35);
                 }
                 this.clouds.push({
                     phase: r2(),
@@ -105,13 +106,20 @@
                 });
             }
             this.shells = [];
+            // Balanced type deck (shuffled) so the beach never ends up with
+            // 5 identical fans from independent rolls.
+            const shellDeck = ['fan', 'fan', 'fan', 'spiral', 'spiral', 'spiral', 'conch', 'conch'];
+            for (let i = shellDeck.length - 1; i > 0; i--) {
+                const j = (r3() * (i + 1)) | 0;
+                [shellDeck[i], shellDeck[j]] = [shellDeck[j], shellDeck[i]];
+            }
             for (let i = 0; i < 8; i++) {
                 this.shells.push({
                     x: 0.18 + r3() * 0.62,
                     yJ: (r3() - 0.5) * 6,
                     size: 1.8 + r3() * 2.2,
                     rot: r3() * Math.PI * 2,
-                    kind: r3() < 0.45 ? 'fan' : (r3() < 0.7 ? 'spiral' : 'conch'),
+                    kind: shellDeck[i],
                 });
             }
             this.driftwoods = [
@@ -213,7 +221,12 @@
             this.castawayX = this.castawayBaseX;
             this.campfireX = w * 0.48;
             this.campfireY = this.islandY - 2;
-            this.castUnit = Math.max(3.0, Math.min(5.0, h / 200));
+            // Relaxed upper clamp so the castaway keeps growing with the
+            // viewport instead of stalling at ~1000px height.
+            this.castUnit = Math.max(3.0, Math.min(7.5, h / 200));
+            // Scene scale for props authored in fixed pixels (palm, boats,
+            // gulls, campfire, beach decor) so they track the castaway.
+            this.sc = this.sceneScale(720, 0.85, 2.0);
         }
 
         // ===================== Sky / atmosphere =====================
@@ -587,17 +600,20 @@
                 const col = this.lightIsSun ? '255, 220, 160' : '210, 220, 255';
                 const startY = this.horizonY + 2;
                 const endY = h;
+                // Two nested solid fills per row read like a soft gradient
+                // under 'lighter' blending, without allocating ~h/4 radial
+                // gradients per frame (matters at 1440p+).
                 for (let y = startY; y < endY; y += 4) {
                     const k = (y - startY) / (endY - startY);
                     const wob = Math.sin(t * 0.003 + k * 8) * (6 + k * 14);
                     const wob2 = Math.sin(t * 0.0042 + k * 13) * (3 + k * 6);
                     const width = (1 - k) * 38 + 16;
                     const a = (1 - k) * 0.20 * (1 - night * 0.35);
-                    const grad = c.createRadialGradient(lx + wob + wob2, y, 2, lx + wob + wob2, y, width);
-                    grad.addColorStop(0, `rgba(${col}, ${a})`);
-                    grad.addColorStop(1, `rgba(${col}, 0)`);
-                    c.fillStyle = grad;
-                    c.fillRect(lx + wob - width, y - 2, width * 2, 4);
+                    const cx2 = lx + wob + wob2;
+                    c.fillStyle = `rgba(${col}, ${(a * 0.30).toFixed(3)})`;
+                    c.fillRect(cx2 - width, y - 2, width * 2, 4);
+                    c.fillStyle = `rgba(${col}, ${(a * 0.45).toFixed(3)})`;
+                    c.fillRect(cx2 - width * 0.38, y - 2, width * 0.76, 4);
                 }
                 c.restore();
             }
@@ -731,10 +747,11 @@
             // Driftwood
             for (const dw of this.driftwoods) {
                 const dwX = dw.x * w;
-                const dwY = this.islandY + 4;
+                const dwY = this.islandY + 4 * this.sc;
                 c.save();
                 c.translate(dwX, dwY);
                 c.rotate(dw.ang);
+                c.scale(this.sc, this.sc);
                 c.fillStyle = this.mixColor('#5a3a22', '#0a0604', night);
                 c.fillRect(-dw.len * 0.5, -dw.thick * 0.5, dw.len, dw.thick);
                 c.fillStyle = this.mixColor('#3a2210', '#000', night);
@@ -766,10 +783,11 @@
             for (let i = 0; i < this.pebbles.length; i++) {
                 const p = this.pebbles[i];
                 const px = p.x * w;
-                const py = this.islandY + 8 + p.yJ;
+                const py = this.islandY + (8 + p.yJ) * this.sc;
                 c.save();
                 c.translate(px, py);
                 c.rotate(p.rot);
+                c.scale(this.sc, this.sc);
                 c.fillStyle = p.shade > 0.55 ? pebCol : pebDk;
                 c.beginPath();
                 c.ellipse(0, 0, p.size, p.size * 0.55, 0, 0, Math.PI * 2);
@@ -786,10 +804,11 @@
             for (let i = 0; i < this.shells.length; i++) {
                 const sh = this.shells[i];
                 const sx = sh.x * w;
-                const sy = this.islandY + 10 + sh.yJ;
+                const sy = this.islandY + (10 + sh.yJ) * this.sc;
                 c.save();
                 c.translate(sx, sy);
                 c.rotate(sh.rot);
+                c.scale(this.sc, this.sc);
                 if (sh.kind === 'fan') {
                     const fanBody = this.mixColor('#f3d8b0', '#1a120a', night);
                     c.fillStyle = fanBody;
@@ -853,17 +872,18 @@
             const tuftHl = this.mixColor('#88b070', '#10180e', night);
             const tuftMid = this.mixColor('#5a8050', '#0a160c', night);
             const wind = Math.sin(t * 0.0014 + this.windPhase) * 0.18;
-            c.lineWidth = 1.0;
+            c.lineWidth = 1.0 * this.sc;
             for (let i = 0; i < this.tufts.length; i++) {
                 const tf = this.tufts[i];
+                const tfSize = tf.size * this.sc;
                 const tx = tf.x * w;
-                const ty = this.islandY + 4 + tf.yJ;
+                const ty = this.islandY + (4 + tf.yJ) * this.sc;
                 for (let k = 0; k < tf.blades; k++) {
                     const ang = (k - (tf.blades - 1) / 2) * 0.22 + wind * (0.4 + tf.bendK * 0.7);
-                    const tipX = tx + Math.sin(ang) * tf.size;
-                    const tipY = ty - Math.cos(ang) * tf.size;
-                    const ctrlX = tx + Math.sin(ang * 0.6) * tf.size * 0.4 + ang * 1.2;
-                    const ctrlY = ty - tf.size * 0.55;
+                    const tipX = tx + Math.sin(ang) * tfSize;
+                    const tipY = ty - Math.cos(ang) * tfSize;
+                    const ctrlX = tx + Math.sin(ang * 0.6) * tfSize * 0.4 + ang * 1.2;
+                    const ctrlY = ty - tfSize * 0.55;
                     let col = tuftCol;
                     if (k === Math.floor(tf.blades / 2)) col = tuftHl;
                     else if (k === Math.floor(tf.blades / 2) + 1) col = tuftMid;
@@ -876,7 +896,7 @@
                 // base dot
                 c.fillStyle = this.mixColor(tuftCol, '#000', 0.4);
                 c.beginPath();
-                c.arc(tx, ty, 1.2, 0, Math.PI * 2);
+                c.arc(tx, ty, 1.2 * this.sc, 0, Math.PI * 2);
                 c.fill();
             }
         }
@@ -887,8 +907,8 @@
             // Place the SOS on the highest, driest part of the sand between the campfire and the palm.
             // Bigger cells + darker volcanic stones so it reads clearly against the warm sand.
             const baseX = w * 0.555;
-            const baseY = this.islandY - 11;   // above the sand crest at this x, well clear of the foam
-            const cell = 6;
+            const baseY = this.islandY - 11 * this.sc;   // above the sand crest at this x, well clear of the foam
+            const cell = 6 * this.sc;
             const stoneCol = this.mixColor('#221814', '#000', night);
             const stoneEdge = this.mixColor('#0a0604', '#000', night);
             const stoneHi = this.mixColor('#5a4636', '#0a0604', night);
@@ -896,25 +916,26 @@
             for (const s of this.sosStones) {
                 const sx = baseX + s.gx * cell;
                 const sy = baseY + s.gy * cell;
+                const sj = s.sizeJ * this.sc;
                 // shadow
                 c.fillStyle = `rgba(20, 12, 6, ${0.32 * (1 - night * 0.5)})`;
                 c.beginPath();
-                c.ellipse(sx + 0.6, sy + 0.8, 2.4 * s.sizeJ, 0.8 * s.sizeJ, 0, 0, Math.PI * 2);
+                c.ellipse(sx + 0.6, sy + 0.8, 2.4 * sj, 0.8 * sj, 0, 0, Math.PI * 2);
                 c.fill();
                 // outer ring
                 c.fillStyle = stoneEdge;
                 c.beginPath();
-                c.ellipse(sx, sy, 2.4 * s.sizeJ, 1.6 * s.sizeJ, 0, 0, Math.PI * 2);
+                c.ellipse(sx, sy, 2.4 * sj, 1.6 * sj, 0, 0, Math.PI * 2);
                 c.fill();
                 // stone body
                 c.fillStyle = stoneCol;
                 c.beginPath();
-                c.ellipse(sx, sy, 2.0 * s.sizeJ, 1.3 * s.sizeJ, 0, 0, Math.PI * 2);
+                c.ellipse(sx, sy, 2.0 * sj, 1.3 * sj, 0, 0, Math.PI * 2);
                 c.fill();
                 // top hilite (catching sun)
                 c.fillStyle = this.colorWithAlpha(stoneHi, 0.65);
                 c.beginPath();
-                c.ellipse(sx - 0.6 * s.sizeJ, sy - 0.5 * s.sizeJ, 0.9 * s.sizeJ, 0.4 * s.sizeJ, 0, 0, Math.PI * 2);
+                c.ellipse(sx - 0.6 * sj, sy - 0.5 * sj, 0.9 * sj, 0.4 * sj, 0, 0, Math.PI * 2);
                 c.fill();
             }
         }
@@ -961,31 +982,58 @@
                 const dir = Math.random() < 0.5 ? 1 : -1;
                 const r = Math.random();
                 const kind = r < 0.6 ? 'sail' : (r < 0.85 ? 'rowboat' : 'fisher');
+                // Per-boat character: hull tint, sail tint, sail billow.
+                const hullPalette = ['#2a2418', '#23304a', '#3a1e1a', '#1e3026'];
+                const sailPalette = ['#f4ecd2', '#e8dcc0', '#dce8e4', '#f0e0c8'];
                 this.boats.push({
                     x: dir > 0 ? -120 : this.width + 120,
                     y: this.horizonY + 6 + Math.random() * 18,
                     dir,
-                    speed: (kind === 'sail' ? 16 : kind === 'fisher' ? 13 : 9) + Math.random() * 8,
+                    speed: ((kind === 'sail' ? 16 : kind === 'fisher' ? 13 : 9) + Math.random() * 8) * this.sc,
                     kind,
                     bobPhase: Math.random() * Math.PI * 2,
+                    hullBase: hullPalette[(Math.random() * hullPalette.length) | 0],
+                    sailBase: sailPalette[(Math.random() * sailPalette.length) | 0],
+                    billow: 0.75 + Math.random() * 0.55,
                     wake: [],
                 });
                 this.nextBoatMs = 28000 + Math.random() * 26000;
             }
             this.boats = this.boats.filter(b => {
                 b.x += b.dir * b.speed * (dt / 1000);
-                if (b.x < -180 || b.x > this.width + 180) return false;
-                const bob = Math.sin(t * 0.002 + b.bobPhase) * 1.2;
+                if (b.x < -180 * this.sc || b.x > this.width + 180 * this.sc) return false;
+                const bob = Math.sin(t * 0.002 + b.bobPhase) * 1.2 * this.sc;
                 // Drop wake points
                 if (Math.random() < 0.5) {
-                    b.wake.push({ x: b.x - b.dir * 18, y: b.y + 6, life: 1, dir: b.dir });
+                    b.wake.push({ x: b.x - b.dir * 18 * this.sc, y: b.y + 6 * this.sc, life: 1, dir: b.dir });
                     if (b.wake.length > 18) b.wake.shift();
                 }
                 // Draw wake first (behind boat)
                 this.drawWake(b.wake, dt, night);
-                this.drawBoat(b.x, b.y + bob, b.dir, b.kind, night);
+                this.drawBoatReflection(b, bob, night);
+                this.drawBoat(b, bob, night);
                 return true;
             });
+        }
+
+        // Dim flattened mirror of the hull on the water below the boat.
+        drawBoatReflection(b, bob, night) {
+            const c = this.ctx;
+            const hullW = (b.kind === 'sail' ? 26 : b.kind === 'fisher' ? 22 : 20) * this.sc;
+            const y = b.y + bob + 10 * this.sc;
+            c.save();
+            c.globalAlpha = 0.15 * (1 - night * 0.4);
+            c.fillStyle = this.mixColor(b.hullBase, '#0a0804', night * 0.7);
+            c.beginPath();
+            c.ellipse(b.x, y, hullW * 0.9, 3.2 * this.sc, 0, 0, Math.PI * 2);
+            c.fill();
+            // Faint mast/sail streak below sailing boats.
+            if (b.kind === 'sail') {
+                c.globalAlpha = 0.08 * (1 - night * 0.4);
+                c.fillStyle = this.mixColor(b.sailBase, '#1a1612', night);
+                c.fillRect(b.x - 2 * this.sc + b.dir * 2 * this.sc, y, 4 * this.sc, 16 * this.sc);
+            }
+            c.restore();
         }
 
         drawWake(wake, dt, night) {
@@ -1004,18 +1052,21 @@
             }
         }
 
-        drawBoat(x, y, dir, kind, night) {
+        drawBoat(b, bob, night) {
             const c = this.ctx;
-            const hullCol = this.mixColor('#2a2418', '#0a0804', night);
+            const { dir, kind } = b;
+            const hullCol = this.mixColor(b.hullBase, '#0a0804', night);
             const hullLite = this.mixColor(hullCol, '#fff', 0.22);
             const mastCol = this.mixColor('#3a2a18', '#0a0604', night);
             c.save();
-            c.translate(x, y);
-            c.scale(dir, 1);
+            c.translate(b.x, b.y + bob);
+            // Hulls are authored in fixed local px — keep proportional.
+            c.scale(dir * this.sc, this.sc);
 
             if (kind === 'sail') {
-                const sailCol = this.mixColor('#f4ecd2', '#1a1612', night);
+                const sailCol = this.mixColor(b.sailBase, '#1a1612', night);
                 const sailSh = this.mixColor(sailCol, '#000', 0.20);
+                const bil = b.billow;
                 // Hull
                 c.fillStyle = hullCol;
                 c.beginPath();
@@ -1034,11 +1085,11 @@
                 c.beginPath();
                 c.moveTo(2, 0); c.lineTo(2, -34);
                 c.stroke();
-                // Main sail — curved (filled with a slight billow)
+                // Main sail — curved, with per-boat billow variation
                 c.fillStyle = sailCol;
                 c.beginPath();
                 c.moveTo(2, -34);
-                c.quadraticCurveTo(14, -28, 20, -4);
+                c.quadraticCurveTo(2 + 12 * bil, -28, 2 + 18 * bil, -4);
                 c.lineTo(2, -2);
                 c.closePath();
                 c.fill();
@@ -1046,7 +1097,7 @@
                 c.fillStyle = sailSh;
                 c.beginPath();
                 c.moveTo(2, -34);
-                c.quadraticCurveTo(8, -22, 6, -2);
+                c.quadraticCurveTo(2 + 6 * bil, -22, 2 + 4 * bil, -2);
                 c.lineTo(2, -2);
                 c.closePath();
                 c.fill();
@@ -1054,7 +1105,7 @@
                 c.fillStyle = sailCol;
                 c.beginPath();
                 c.moveTo(2, -28);
-                c.quadraticCurveTo(-8, -16, -14, -3);
+                c.quadraticCurveTo(2 - 10 * bil, -16, 2 - 16 * bil, -3);
                 c.lineTo(2, -3);
                 c.closePath();
                 c.fill();
@@ -1145,6 +1196,9 @@
             c.save();
             c.translate(x, baseY);
             c.rotate(lean + wind * 0.5);
+            // Whole palm (trunk + fronds + coconuts) is authored in fixed
+            // local px — scale it so it keeps pace with the castaway.
+            c.scale(this.sc, this.sc);
 
             const trunkH = 168;
 
@@ -1557,7 +1611,9 @@
                 }
             }
             // Vertical offset: trunk is ~168px tall, climb up to ~150px (near crown)
-            this.castawayYOffset = -150 * this.climbPhase;
+            // Climb height tracks the scaled palm trunk (168px * scene scale,
+            // minus a margin so the castaway tops out under the crown).
+            this.castawayYOffset = -150 * this.sc * this.climbPhase;
         }
 
         // ----- Swim update (wade in, swim out, shark appears, panic-flee back) -----
@@ -2807,13 +2863,15 @@
             this.nextSmokeMs -= dt;
             if (this.nextSmokeMs <= 0) {
                 this.smokePuffs.push({
-                    x: this.campfireX + (Math.random() - 0.5) * 4,
-                    y: this.campfireY - 24 * Math.sqrt(lvl),
+                    x: this.campfireX + (Math.random() - 0.5) * 4 * this.sc,
+                    y: this.campfireY - 24 * Math.sqrt(lvl) * this.sc,
                     life: 1.0,
-                    vy: -8 - Math.random() * 4,
-                    drift: (Math.random() - 0.5) * 4,
-                    size: 4 + Math.random() * 3,
+                    vy: (-8 - Math.random() * 4) * this.sc,
+                    drift: (Math.random() - 0.5) * 4 * this.sc,
+                    size: (4 + Math.random() * 3) * this.sc,
                 });
+                // Cap pool size in long sessions (oldest puffs are faintest).
+                if (this.smokePuffs.length > 40) this.smokePuffs.shift();
                 // Smoke comes in puffs less frequently as the fire dies
                 this.nextSmokeMs = (400 + Math.random() * 400) / Math.max(0.25, lvl);
             }
@@ -2843,10 +2901,10 @@
                     x: dir > 0 ? -40 : this.width + 40,
                     y: this.horizonY * (0.10 + altK * 0.42),
                     dir,
-                    speed: 28 + altK * 50 + Math.random() * 20,
+                    speed: (28 + altK * 50 + Math.random() * 20) * this.sc,
                     flapPhase: Math.random() * Math.PI * 2,
                     flapSpeed: 4 + Math.random() * 4,
-                    scale: 0.5 + altK * 0.85,
+                    scale: (0.5 + altK * 0.85) * this.sc,
                     glide: Math.random() < 0.3, // some gulls glide rather than flap
                 });
                 this.nextGullMs = 7000 + Math.random() * 12000;
@@ -2902,9 +2960,9 @@
                 const dir = Math.random() < 0.5 ? 1 : -1;
                 this.crabs.push({
                     x: dir > 0 ? this.width * 0.12 : this.width * 0.86,
-                    y: this.islandY + 14 + Math.random() * 6,
+                    y: this.islandY + (14 + Math.random() * 6) * this.sc,
                     dir,
-                    speed: 16 + Math.random() * 8,
+                    speed: (16 + Math.random() * 8) * this.sc,
                     legPhase: 0,
                     life: 1.0,
                 });
@@ -3046,9 +3104,9 @@
                 this.fishJumps.push({
                     type: 'fish',
                     x,
-                    y: this.horizonY + 60 + Math.random() * 60,
-                    vx: (Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * 20),
-                    vy: -80 - Math.random() * 30,
+                    y: this.horizonY + (60 + Math.random() * 60) * this.sc,
+                    vx: (Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * 20) * this.sc,
+                    vy: (-80 - Math.random() * 30) * this.sc,
                     life: 1.0,
                     apex: -1,
                 });
@@ -3059,19 +3117,19 @@
                 if (f.type === 'splash') {
                     f.life -= dt / 700;
                     if (f.life <= 0) return false;
-                    const r = (1 - f.life) * 10;
+                    const r = (1 - f.life) * 10 * this.sc;
                     const a = f.life * 0.7 * (1 - night * 0.3);
                     c.strokeStyle = `rgba(240, 250, 255, ${a})`;
-                    c.lineWidth = 1.2;
+                    c.lineWidth = 1.2 * this.sc;
                     c.beginPath();
                     c.ellipse(f.x, f.y, r, r * 0.35, 0, 0, Math.PI * 2);
                     c.stroke();
                     return true;
                 } else {
-                    f.vy += 220 * (dt / 1000);
+                    f.vy += 220 * this.sc * (dt / 1000);
                     f.x += f.vx * (dt / 1000);
                     f.y += f.vy * (dt / 1000);
-                    const enterY = this.horizonY + 60;
+                    const enterY = this.horizonY + 60 * this.sc;
                     if (f.y >= enterY && f.vy > 0) {
                         // splash on re-entry
                         this.fishJumps.push({ type: 'splash', x: f.x, y: enterY, life: 1.0 });
@@ -3085,6 +3143,7 @@
                     c.translate(f.x, f.y);
                     c.rotate(ang);
                     if (f.vx < 0) c.scale(1, -1);
+                    c.scale(this.sc, this.sc);
                     c.fillStyle = bodyCol;
                     c.beginPath();
                     c.ellipse(0, 0, 6, 2.4, 0, 0, Math.PI * 2);

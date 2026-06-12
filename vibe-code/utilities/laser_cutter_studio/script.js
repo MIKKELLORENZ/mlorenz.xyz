@@ -14,8 +14,8 @@ const LCS = (window.LCS = {});
     const MM_PER_PX = MM_PER_INCH / DPI;
 
     const DEFAULT_LAYERS = [
-        { name: 'Cut',     color: '#ef4444', opType: 'cut',     power: 60, speed: 600,  passes: 1, airAssist: true  },
-        { name: 'Engrave', color: '#000000', opType: 'engrave', power: 30, speed: 3000, passes: 1, airAssist: false },
+        { name: 'Cut',     color: '#ef4444', opType: 'cut',     power: 100, speed: 800,  passes: 1, airAssist: true  },
+        { name: 'Engrave', color: '#000000', opType: 'engrave', power: 70,  speed: 6000, passes: 1, airAssist: false },
         { name: 'Score',   color: '#3b82f6', opType: 'score',   power: 15, speed: 1500, passes: 1, airAssist: false },
     ];
 
@@ -205,6 +205,9 @@ const LCS = (window.LCS = {});
             selection: true,
             stopContextMenu: true,
             fireRightClick: true,
+            // Slack (screen px) around per-pixel hit tests so thin outline strokes
+            // stay easy to grab — tolerance lives on the canvas, not the object
+            targetFindTolerance: 10,
         });
         LCS.canvas.fabric = canvas;
 
@@ -613,6 +616,156 @@ const LCS = (window.LCS = {});
 
         LCS.state.on('layers:changed', render);
         LCS.state.on('layer:active', render);
+        // Object list lives in this panel: follow canvas membership + selection
+        let renderTimer = null;
+        const scheduleRender = () => { clearTimeout(renderTimer); renderTimer = setTimeout(render, 50); };
+        LCS.state.on('object:added', scheduleRender);
+        LCS.state.on('object:removed', scheduleRender);
+        LCS.state.on('selection:change', updateSelectedRows);
+    }
+
+    // ===== object list under each layer =====
+    const TYPE_META = {
+        rect: ['square', 'Rectangle'],
+        ellipse: ['circle', 'Ellipse'],
+        circle: ['circle', 'Circle'],
+        line: ['minus', 'Line'],
+        polyline: ['pen-tool', 'Polyline'],
+        polygon: ['pen-tool', 'Polygon'],
+        path: ['pen-tool', 'Path'],
+        group: ['group', 'Group'],
+        image: ['image', 'Image'],
+        'i-text': ['type', 'Text'], text: ['type', 'Text'], textbox: ['type', 'Text'],
+    };
+
+    function objMeta(o) {
+        let [icon, label] = TYPE_META[o.type] || ['box', 'Object'];
+        if (o.sourceType === 'traced') { icon = 'spline'; label = 'Traced'; }
+        if ((o.type === 'i-text' || o.type === 'text' || o.type === 'textbox') && o.text) {
+            const t = o.text.replace(/\s+/g, ' ').trim();
+            if (t) label = `“${t.slice(0, 14)}${t.length > 14 ? '…' : ''}”`;
+        }
+        return { icon, label };
+    }
+
+    function userObjects() {
+        const fab = LCS.canvas.fabric;
+        if (!fab) return [];
+        return fab.getObjects().filter(o =>
+            !o._lcsBed && !o._lcsGrid && !o._lcsPreview && !o._lcsNodeHandle && !o._lcsPenWorking);
+    }
+
+    function updateSelectedRows(sel) {
+        const ids = new Set((sel || []).map(o => o.objectId));
+        document.querySelectorAll('#layer-list .obj-row').forEach(r =>
+            r.classList.toggle('selected', ids.has(r.dataset.objectId)));
+    }
+
+    function objRow(o, layer) {
+        const { icon, label } = objMeta(o);
+        const selected = LCS.canvas.fabric && LCS.canvas.fabric.getActiveObjects().includes(o);
+        const row = el('div', { class: 'obj-row' + (selected ? ' selected' : '') + (layer.locked ? ' locked' : '') });
+        row.dataset.objectId = o.objectId;
+        row.draggable = !layer.locked;
+        const grip = el('span', { class: 'obj-grip' }); grip.innerHTML = '<i data-lucide="grip-vertical"></i>';
+        const ic = el('span', { class: 'obj-icon' }); ic.innerHTML = `<i data-lucide="${icon}"></i>`;
+        const name = el('div', { class: 'obj-name', text: o.lcsName || label });
+        name.title = 'Double-click to rename';
+        row.appendChild(grip); row.appendChild(ic); row.appendChild(name);
+
+        row.onclick = () => {
+            if (layer.locked) return;
+            const fab = LCS.canvas.fabric;
+            LCS.ui.suppressNextTabSwitch = true; // keep the user on the Layers tab
+            fab.setActiveObject(o);
+            fab.requestRenderAll();
+        };
+        name.ondblclick = (e) => { e.stopPropagation(); startRename(name, o, label); };
+
+        row.addEventListener('dragstart', ev => {
+            ev.dataTransfer.setData('text/lcs-object', o.objectId);
+            ev.dataTransfer.effectAllowed = 'move';
+            row.classList.add('dragging');
+        });
+        row.addEventListener('dragend', () => {
+            row.classList.remove('dragging');
+            clearDropMarkers();
+        });
+        return row;
+    }
+
+    function startRename(nameEl, o, fallback) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'obj-rename';
+        input.value = o.lcsName || fallback;
+        nameEl.replaceWith(input);
+        input.focus();
+        input.select();
+        let done = false;
+        const commit = () => {
+            if (done) return; done = true;
+            o.lcsName = input.value.trim() || null;
+            LCS.state.emit('object:modified'); // history snapshot picks up the name
+            render();
+        };
+        input.onblur = commit;
+        input.onkeydown = ev => {
+            ev.stopPropagation();
+            if (ev.key === 'Enter') commit();
+            else if (ev.key === 'Escape') { done = true; render(); }
+        };
+        input.onclick = ev => ev.stopPropagation();
+    }
+
+    function clearDropMarkers() {
+        document.querySelectorAll('#layer-list .obj-row').forEach(r => r.classList.remove('drop-above', 'drop-below'));
+    }
+
+    function wireObjDnD(listEl, layer) {
+        listEl.addEventListener('dragover', ev => {
+            if (!ev.dataTransfer.types.includes('text/lcs-object')) return;
+            ev.preventDefault();
+            ev.dataTransfer.dropEffect = 'move';
+            clearDropMarkers();
+            const rows = Array.from(listEl.querySelectorAll('.obj-row:not(.dragging)'));
+            const before = rows.find(r => ev.clientY < r.getBoundingClientRect().top + r.offsetHeight / 2);
+            if (before) before.classList.add('drop-above');
+            else if (rows.length) rows[rows.length - 1].classList.add('drop-below');
+        });
+        listEl.addEventListener('drop', ev => {
+            if (!ev.dataTransfer.types.includes('text/lcs-object')) return;
+            ev.preventDefault();
+            const rows = Array.from(listEl.querySelectorAll('.obj-row:not(.dragging)'));
+            const before = rows.find(r => ev.clientY < r.getBoundingClientRect().top + r.offsetHeight / 2);
+            applyObjectDrop(ev.dataTransfer.getData('text/lcs-object'), layer, before ? before.dataset.objectId : null);
+        });
+    }
+
+    function applyObjectDrop(objectId, targetLayer, beforeObjectId) {
+        const fab = LCS.canvas.fabric;
+        const obj = userObjects().find(o => o.objectId === objectId);
+        if (!obj || obj.objectId === beforeObjectId) { clearDropMarkers(); return; }
+        if (targetLayer.locked) { LCS.util.toast('Layer is locked', 'warn'); clearDropMarkers(); return; }
+        if (obj.layerId !== targetLayer.id) {
+            obj.layerId = targetLayer.id;
+            applyLayerToObject(obj, targetLayer);
+        }
+        // New top-first order for the target layer
+        const topFirst = userObjects().filter(o => o.layerId === targetLayer.id).reverse().filter(o => o !== obj);
+        let idx = beforeObjectId ? topFirst.findIndex(o => o.objectId === beforeObjectId) : topFirst.length;
+        if (idx < 0) idx = topFirst.length;
+        topFirst.splice(idx, 0, obj);
+        // Permute this layer's objects within their existing global stack slots so
+        // other layers' stacking is untouched (_objects is the live stack array)
+        const bottomFirst = topFirst.slice().reverse();
+        const all = fab._objects;
+        const slots = [];
+        all.forEach((o, i) => { if (bottomFirst.includes(o)) slots.push(i); });
+        slots.forEach((slot, k) => { all[slot] = bottomFirst[k]; });
+        fab.requestRenderAll();
+        LCS.state.emit('object:modified');
+        render();
     }
 
     function render() {
@@ -621,10 +774,19 @@ const LCS = (window.LCS = {});
         host.innerHTML = '';
         const state = LCS.state.get();
         state.layers.forEach(layer => {
-            const item = el('div', { class: 'layer-item' + (layer.id === state.activeLayerId ? ' active' : '') });
+            const objs = userObjects().filter(o => o.layerId === layer.id).reverse(); // topmost first
+            const item = el('div', { class: 'layer-item' + (layer.id === state.activeLayerId ? ' active' : '') + (layer.locked ? ' locked' : '') });
+            item.title = 'Right-click to ' + (layer.locked ? 'unlock' : 'lock');
             const swatch = el('div', { class: 'layer-color', style: `background:${layer.color}` });
             const name = el('div', { class: 'layer-name', text: layer.name });
-            const meta = el('div', { class: 'layer-meta', text: `${layer.opType} · ${layer.power}% · ${layer.speed}` });
+            const metaText = `${layer.opType} · ${layer.power}% · ${layer.speed}` + (objs.length ? ` · ${objs.length} obj` : '');
+            const meta = el('div', { class: 'layer-meta', text: metaText });
+            const chev = el('button', { class: 'layer-toggle layer-chevron' + (objs.length ? '' : ' hidden'), title: layer.objectsCollapsed ? 'Show objects' : 'Hide objects' });
+            chev.innerHTML = `<i data-lucide="${layer.objectsCollapsed ? 'chevron-right' : 'chevron-down'}"></i>`;
+            chev.onclick = (e) => { e.stopPropagation(); layer.objectsCollapsed = !layer.objectsCollapsed; render(); };
+            const lock = el('button', { class: 'layer-toggle' + (layer.locked ? '' : ' off'), title: layer.locked ? 'Unlock layer' : 'Lock layer' });
+            lock.innerHTML = `<i data-lucide="${layer.locked ? 'lock' : 'lock-open'}"></i>`;
+            lock.onclick = (e) => { e.stopPropagation(); toggleLock(layer); };
             const vis = el('button', { class: 'layer-toggle' + (layer.visible ? '' : ' off'), title: 'Toggle visibility' });
             vis.innerHTML = `<i data-lucide="${layer.visible ? 'eye' : 'eye-off'}"></i>`;
             vis.onclick = (e) => { e.stopPropagation(); layer.visible = !layer.visible; setObjectsVisibility(layer); LCS.state.emit('layers:changed'); };
@@ -632,9 +794,19 @@ const LCS = (window.LCS = {});
             const col = el('div', { style: 'flex:1; min-width:0' });
             col.appendChild(name); col.appendChild(meta);
             item.appendChild(col);
+            item.appendChild(chev);
+            item.appendChild(lock);
             item.appendChild(vis);
             item.onclick = () => LCS.state.setActiveLayer(layer.id);
+            item.oncontextmenu = (e) => { e.preventDefault(); toggleLock(layer); };
             host.appendChild(item);
+
+            if (objs.length && !layer.objectsCollapsed) {
+                const listEl = el('div', { class: 'layer-objects' });
+                objs.forEach(o => listEl.appendChild(objRow(o, layer)));
+                wireObjDnD(listEl, layer);
+                host.appendChild(listEl);
+            }
         });
         // Populate properties layer picker
         const pLayer = $('#p-layer');
@@ -666,6 +838,26 @@ const LCS = (window.LCS = {});
             if (o.layerId === layer.id) o.visible = layer.visible;
         });
         fab.requestRenderAll();
+    }
+
+    function toggleLock(layer) {
+        layer.locked = !layer.locked;
+        const fab = LCS.canvas.fabric;
+        if (fab) {
+            fab.getObjects().forEach(o => {
+                if (o.layerId === layer.id) {
+                    o.selectable = !layer.locked;
+                    o.evented = !layer.locked;
+                }
+            });
+            // Drop any locked objects from the current selection
+            if (layer.locked && fab.getActiveObjects().some(o => o.layerId === layer.id)) {
+                fab.discardActiveObject();
+            }
+            fab.requestRenderAll();
+        }
+        LCS.util.toast(`Layer "${layer.name}" ${layer.locked ? 'locked' : 'unlocked'}`, layer.locked ? '' : 'success');
+        LCS.state.emit('layers:changed');
     }
 
     function addLayer() {
@@ -740,6 +932,8 @@ const LCS = (window.LCS = {});
 
     function applyLayerToObject(obj, layer) {
         if (obj._lcsBed || obj._lcsGrid) return;
+        obj.selectable = !layer.locked;
+        obj.evented = !layer.locked;
         const isImage = obj.type === 'image' || obj.type === 'Image';
         if (!isImage) {
             // vector: stroke = layer color
@@ -777,6 +971,18 @@ const LCS = (window.LCS = {});
         obj.objectId = obj.objectId || uid('obj');
         obj.layerId = layer ? layer.id : LCS.state.activeLayer().id;
         obj.opType = null; // null -> inherit
+        // Outline-only vectors (cut/score outlines): hit-test the stroke pixels, not the
+        // bounding box, so a click in the empty interior falls through to whatever is
+        // inside instead of grabbing the surrounding outline.
+        const isText = obj.type === 'i-text' || obj.type === 'text' || obj.type === 'textbox';
+        const isImage = obj.type === 'image' || obj.type === 'Image';
+        const noFill = !obj.fill || obj.fill === 'transparent';
+        if (noFill && !isText && !isImage) {
+            obj.perPixelTargetFind = true;
+            // Expand the interactive bbox a few screen px so clicks landing dead-on or
+            // just outside the stroke still register (pixel check has 10px tolerance)
+            obj.padding = 6;
+        }
         LCS.layers.applyLayerToObject(obj, layer || LCS.state.activeLayer());
     }
 
@@ -1115,7 +1321,8 @@ const LCS = (window.LCS = {});
             img._origSrc = dataUrl;
             img._origWidth = img.width;
             img._origHeight = img.height;
-            img._imgParams = { mode: 'grayscale', algo: 'floyd', threshold: 128, contrast: 0, brightness: 0, invert: false };
+            if (name) img.lcsName = name;
+            img._imgParams = { mode: 'grayscale', algo: 'floyd', threshold: 128, contrast: 0, brightness: 0, invert: false, traceAlgo: 'otsu' };
             img.sourceType = 'image';
             LCS.objects.addToCanvas(img, LCS.state.activeLayer());
             reprocess(img);
@@ -1303,6 +1510,184 @@ const LCS = (window.LCS = {});
         });
     }
 
+    // === BINARIZATION FOR TRACING ===
+    // Otsu's method: histogram-based automatic global threshold
+    function otsuThreshold(L, n) {
+        const hist = new Float64Array(256);
+        for (let i = 0; i < n; i++) hist[Math.max(0, Math.min(255, L[i] | 0))]++;
+        let sum = 0;
+        for (let t = 0; t < 256; t++) sum += t * hist[t];
+        // Track the plateau of maximal variance and return its midpoint — with a small
+        // ink class the variance is flat across the whole gap between ink and paper,
+        // and picking the first t would put same-valued pixels on the wrong side.
+        let sumB = 0, wB = 0, maxVar = -1, first = 128, last = 128;
+        for (let t = 0; t < 256; t++) {
+            wB += hist[t];
+            if (wB === 0) continue;
+            const wF = n - wB;
+            if (wF === 0) break;
+            sumB += t * hist[t];
+            const mB = sumB / wB, mF = (sum - sumB) / wF;
+            const v = wB * wF * (mB - mF) * (mB - mF);
+            if (v > maxVar) { maxVar = v; first = t; last = t; }
+            else if (v === maxVar) { last = t; }
+        }
+        return Math.round((first + last) / 2);
+    }
+
+    // Adaptive mean: pixel is dark if below its local-window mean minus a small offset.
+    // Handles sketches with uneven lighting / shaded paper that defeat a global threshold.
+    function adaptiveBinarize(L, w, h) {
+        const W = w + 1;
+        const I = new Float64Array(W * (h + 1));
+        for (let y = 0; y < h; y++) {
+            let row = 0;
+            for (let x = 0; x < w; x++) {
+                row += L[y * w + x];
+                I[(y + 1) * W + (x + 1)] = I[y * W + (x + 1)] + row;
+            }
+        }
+        const win = Math.max(8, Math.round(Math.max(w, h) / 24)); // half-window
+        const C = 8; // offset: how much darker than local mean a pixel must be
+        const out = new Uint8Array(w * h);
+        for (let y = 0; y < h; y++) {
+            const y0 = Math.max(0, y - win), y1 = Math.min(h - 1, y + win);
+            for (let x = 0; x < w; x++) {
+                const x0 = Math.max(0, x - win), x1 = Math.min(w - 1, x + win);
+                const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+                const s = I[(y1 + 1) * W + (x1 + 1)] - I[y0 * W + (x1 + 1)]
+                        - I[(y1 + 1) * W + x0] + I[y0 * W + x0];
+                out[y * w + x] = (L[y * w + x] * area <= s - C * area) ? 0 : 255;
+            }
+        }
+        return out;
+    }
+
+    // Load the ORIGINAL image (plus brightness/contrast/invert), downscale to maxDim,
+    // and binarize with the selected trace method — never the displayed dither, which
+    // traces into speckle noise. Returns binarized ImageData plus stats.
+    async function prepareBinarized(img, maxDim) {
+        const params = img._imgParams || {};
+        const src = img._origSrc || (img.getSrc && img.getSrc()) || (img._element && img._element.src);
+        if (!src) throw new Error('Image source missing');
+        const raw = await loadImagePromise(src);
+
+        const ds = Math.min(1, maxDim / Math.max(raw.width, raw.height));
+        const w = Math.max(1, Math.round(raw.width * ds));
+        const h = Math.max(1, Math.round(raw.height * ds));
+        const off = document.createElement('canvas');
+        off.width = w; off.height = h;
+        const ctx = off.getContext('2d');
+        // White fill so transparent pixels count as background, not content
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(raw, 0, 0, w, h);
+        const data = ctx.getImageData(0, 0, w, h);
+        applyAdjust(data, params);
+
+        const L = toLuma(data);
+        const algo = params.traceAlgo || 'otsu';
+        let bin, usedT = null;
+        if (algo === 'adaptive') {
+            bin = adaptiveBinarize(L, w, h);
+        } else {
+            usedT = algo === 'manual' ? (params.threshold ?? 128) : otsuThreshold(L, w * h);
+            bin = new Uint8Array(w * h);
+            for (let i = 0; i < bin.length; i++) bin[i] = L[i] < usedT ? 0 : 255;
+        }
+        // Write the clean black & white image back for the tracer
+        const p = data.data;
+        let darkCount = 0;
+        for (let i = 0, j = 0; i < p.length; i += 4, j++) {
+            const v = bin[j];
+            if (v === 0) darkCount++;
+            p[i] = p[i + 1] = p[i + 2] = v;
+            p[i + 3] = 255;
+        }
+        return { data, w, h, algo, usedT, darkCount };
+    }
+
+    // Trace binarized ImageData and combine every dark contour into ONE multi-subpath
+    // d string (even-odd handles holes). Returns { d, pathCount }.
+    function traceBinarizedToPathD(data) {
+        // Exact two-colour palette (imagetracer expects {r,g,b,a} objects via `pal`);
+        // input is already pure B&W so one quant cycle is enough.
+        const options = {
+            ltres: 1,
+            qtres: 1,
+            pathomit: 8,
+            rightangleenhance: true,
+            linefilter: true,
+            strokewidth: 0,
+            colorquantcycles: 1,
+            pal: [{ r: 0, g: 0, b: 0, a: 255 }, { r: 255, g: 255, b: 255, a: 255 }],
+        };
+        const td = ImageTracer.imagedataToTracedata(data, options);
+
+        // Keep only the dark layer — the light layer is background and would
+        // otherwise contribute a full-image rectangle
+        let combinedD = '';
+        let pathCount = 0;
+        for (let i = 0; i < td.layers.length; i++) {
+            const c = td.palette[i]; // {r,g,b,a} object
+            const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+            if (c.a < 16 || lum > 127) continue;
+            for (const contour of td.layers[i]) {
+                if (!contour.segments || contour.segments.length < 3) continue;
+                const d = segmentsToPathD(contour.segments);
+                if (d) { combinedD += d + ' '; pathCount++; }
+            }
+        }
+        return { d: combinedD.trim(), pathCount };
+    }
+
+    // Debounced mini-preview of the trace result in the properties panel
+    let previewTimer = null;
+    let previewSeq = 0;
+    function schedulePreview(img) {
+        if (!document.getElementById('img-trace-preview')) return;
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(() => updateTracePreview(img), 250);
+    }
+
+    async function updateTracePreview(img) {
+        const cv = document.getElementById('img-trace-preview');
+        if (!cv || !img || !window.ImageTracer) return;
+        const seq = ++previewSeq;
+        try {
+            // Small enough to re-trace on every slider nudge
+            const { data, w, h, darkCount } = await prepareBinarized(img, 280);
+            if (seq !== previewSeq) return; // a newer preview superseded this one
+            const maxW = 264, maxH = 190;
+            const s = Math.min(maxW / w, maxH / h);
+            cv.width = Math.max(1, Math.round(w * s));
+            cv.height = Math.max(1, Math.round(h * s));
+            const ctx = cv.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, cv.width, cv.height);
+            let pathCount = 0;
+            if (darkCount > 0 && darkCount < w * h) {
+                const res = traceBinarizedToPathD(data);
+                if (seq !== previewSeq) return;
+                pathCount = res.pathCount;
+                if (pathCount) {
+                    ctx.save();
+                    ctx.scale(s, s);
+                    ctx.fillStyle = '#111111';
+                    ctx.fill(new Path2D(res.d), 'evenodd');
+                    ctx.restore();
+                }
+            }
+            const note = document.getElementById('img-trace-preview-note');
+            if (note) {
+                note.textContent = pathCount
+                    ? `Trace preview — ${pathCount} contour${pathCount > 1 ? 's' : ''}`
+                    : (darkCount === w * h ? 'All dark — raise threshold / Invert' : 'Nothing dark enough to trace');
+            }
+        } catch (e) {
+            console.warn('trace preview failed', e);
+        }
+    }
+
     // Trace an image into individual vector paths
     async function traceToVector(img) {
         if (!window.ImageTracer) { toast('ImageTracer not loaded', 'danger'); return; }
@@ -1314,65 +1699,22 @@ const LCS = (window.LCS = {});
         }, 30000);
         const done = () => { clearTimeout(safetyTimer); progress('', '', false); };
         try {
-            // Always trace the processed (post-threshold / post-dither) image
-            const src = (img.getSrc && img.getSrc()) || (img._element && img._element.src);
-            if (!src) throw new Error('Image source missing');
-            const raw = await loadImagePromise(src);
+            // Cap size: tracing is O(pixels) and detail beyond ~1600px doesn't survive cutting
+            const { data, w, h, algo, usedT, darkCount } = await prepareBinarized(img, 1600);
+            if (darkCount === 0) { done(); toast('Nothing dark enough to trace — lower the threshold or check Invert', 'warn'); return; }
+            if (darkCount === w * h) { done(); toast('Whole image is dark — raise the threshold or check Invert', 'warn'); return; }
 
-            const off = document.createElement('canvas');
-            off.width = raw.width; off.height = raw.height;
-            const ctx = off.getContext('2d');
-            // White fill so fully-transparent pixels (threshold mode) don't trace as content
-            ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, off.width, off.height);
-            ctx.drawImage(raw, 0, 0);
-            const data = ctx.getImageData(0, 0, off.width, off.height);
-
-            progress('Tracing to vector', 'Extracting contours...', 0.45);
+            progress('Tracing to vector', 'Extracting contours...', 0.5);
             await new Promise(r => setTimeout(r, 10));
-
-            // Threshold-mode: force exact B&W palette so sampling can't drift toward grey.
-            // Non-threshold: sample 4 colors, mild path-length filter to drop noise.
-            const isThreshold = img._imgParams && img._imgParams.mode === 'threshold';
-            const options = {
-                ltres: 1,
-                qtres: 1,
-                pathomit: isThreshold ? 4 : 8,
-                rightangleenhance: true,
-                linefilter: true,
-                strokewidth: 0,
-                ...(isThreshold
-                    ? { colorsampling: 0, numberofcolors: 2,
-                        specpalette: [[0,0,0,255],[255,255,255,255]] }
-                    : { colorsampling: 1, numberofcolors: 4 }),
-            };
-            const td = ImageTracer.imagedataToTracedata(data, options);
-
-            // Drop near-white / transparent layers (background)
-            const kept = [];
-            for (let i = 0; i < td.layers.length; i++) {
-                const c = td.palette[i];
-                const lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-                if (c[3] < 16 || lum > 235) continue;
-                kept.push({ contours: td.layers[i], color: c });
-            }
-            if (!kept.length) { done(); toast('No shapes to trace (image is empty / all white)', 'warn'); return; }
 
             // Combine every contour into ONE multi-subpath d string so the result is a single
             // fabric.Path — no group/matrix gymnastics, and gcode generation takes the well-tested
             // path branch. The path renders as one solid silhouette (even-odd handles holes).
             // Fill is forced black: the visible colour on canvas is only for preview; actual
             // engraving power/speed come from the assigned layer, not from this fill.
-            let combinedD = '';
-            let pathCount = 0;
+            const { d: combinedD, pathCount } = traceBinarizedToPathD(data);
             const traceColor = '#000000';
-            for (const { contours } of kept) {
-                for (const contour of contours) {
-                    if (!contour.segments || contour.segments.length < 3) continue;
-                    const d = segmentsToPathD(contour.segments);
-                    if (d) { combinedD += d + ' '; pathCount++; }
-                }
-            }
-            if (!pathCount) { done(); toast('Tracing produced no paths', 'warn'); return; }
+            if (!pathCount) { done(); toast('No shapes to trace (image is empty / all white)', 'warn'); return; }
 
             progress('Tracing to vector', `Finalising ${pathCount} contour${pathCount > 1 ? 's' : ''}...`, 0.8);
             await new Promise(r => setTimeout(r, 10));
@@ -1393,12 +1735,17 @@ const LCS = (window.LCS = {});
                     originX: 'left',
                     originY: 'top',
                 });
-                // Fit over where the source image was
-                const sX = imgW / Math.max(1, path.width);
-                const sY = imgH / Math.max(1, path.height);
-                path.set({ left: imgLeft, top: imgTop, scaleX: sX, scaleY: sY });
+                // Map trace-canvas pixels onto the image's canvas footprint. Scaling the
+                // path's own bbox to imgW/imgH would stretch content that doesn't span
+                // the full image, so scale by canvas ratio and offset by the bbox origin.
+                const sX = imgW / w;
+                const sY = imgH / h;
+                const bbMinX = path.pathOffset.x - path.width / 2;
+                const bbMinY = path.pathOffset.y - path.height / 2;
+                path.set({ left: imgLeft + bbMinX * sX, top: imgTop + bbMinY * sY, scaleX: sX, scaleY: sY });
                 path.setCoords();
                 path.sourceType = 'traced';
+                if (img.lcsName) path.lcsName = img.lcsName + ' (traced)';
                 LCS.objects.attach(path, defaultLayer);
                 fab.add(path);
                 fab.setActiveObject(path);
@@ -1407,7 +1754,8 @@ const LCS = (window.LCS = {});
                 fab.remove(img);
                 fab.requestRenderAll();
                 done();
-                toast(`Traced — ${pathCount} contour${pathCount > 1 ? 's' : ''} merged into one path`, 'success');
+                const how = algo === 'adaptive' ? 'adaptive' : (algo === 'manual' ? `threshold ${usedT}` : `auto threshold ${usedT}`);
+                toast(`Traced (${how}) — ${pathCount} contour${pathCount > 1 ? 's' : ''} merged into one path`, 'success');
             } catch (innerErr) {
                 console.error(innerErr);
                 done();
@@ -1420,7 +1768,7 @@ const LCS = (window.LCS = {});
         }
     }
 
-    LCS.image = { init, importImageFile, addImageFromDataUrl, reprocess, traceToVector, segmentsToPathD };
+    LCS.image = { init, importImageFile, addImageFromDataUrl, reprocess, traceToVector, schedulePreview, segmentsToPathD };
 })();
 
 // ============================================================
@@ -1621,10 +1969,9 @@ const LCS = (window.LCS = {});
         const tracedata = ImageTracer.imagedataToTracedata(imgData, options);
         // Drop near-white layers (the background) so paths arrive clean
         const kept = tracedata.layers.map((layer, i) => {
-            const c = tracedata.palette[i];
-            const lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-            const alpha = c[3];
-            if (alpha < 16) return null;
+            const c = tracedata.palette[i]; // {r,g,b,a} object
+            const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+            if (c.a < 16) return null;
             if (lum > 235) return null;
             return { layer, color: c, index: i };
         }).filter(Boolean);
@@ -1633,8 +1980,7 @@ const LCS = (window.LCS = {});
         const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${off.width}" height="${off.height}" viewBox="0 0 ${off.width} ${off.height}">`];
         let pathCount = 0;
         for (const { layer, color } of kept) {
-            const [r, g, b] = color;
-            const hex = LCS.util.rgbToHex(r, g, b);
+            const hex = LCS.util.rgbToHex(color.r, color.g, color.b);
             for (const segs of layer) {
                 if (!segs.segments || segs.segments.length < 3) continue;
                 const d = segmentsToPathD(segs.segments);
@@ -1968,6 +2314,15 @@ const LCS = (window.LCS = {});
                     appendLines(lines, r.lines);
                     totalBurnMm += r.burnMm; totalTravelMm += r.travelMm;
                     lastPt = r.lastPt;
+                } else if (opType === 'engrave' && hasSolidFill(o)) {
+                    // Solidly-filled vectors (traced art, filled imports, text): scanline-fill
+                    // the interior — outlining them would leave the black areas unburned
+                    progress('Generating GCode', `Filling ${layer.name}...`, 0.3);
+                    await new Promise(r => setTimeout(r, 10));
+                    const r = fillVectorObject(o, layer, S);
+                    appendLines(lines, r.lines);
+                    totalBurnMm += r.burnMm; totalTravelMm += r.travelMm;
+                    lastPt = r.lastPt;
                 } else {
                     const r = vectorizeObject(o, layer, S, opType);
                     appendLines(lines, r.lines);
@@ -2039,6 +2394,82 @@ const LCS = (window.LCS = {});
 
     function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 
+    // ===== FILL ENGRAVE (vector shapes with a solid fill) =====
+    // Open strokes (lines, pen paths) and grouped outlines must NOT be area-filled;
+    // fabric defaults fill to black for some types, so gate on type as well.
+    function hasSolidFill(o) {
+        if (o.type === 'line' || o.type === 'polyline' || o.type === 'group') return false;
+        if (o.type === 'image' || o.type === 'Image') return false;
+        return typeof o.fill === 'string' && o.fill !== '' && o.fill !== 'transparent';
+    }
+
+    // Boustrophedon scanline fill of the object's contours (even-odd, so holes in
+    // traced paths and glyphs stay unburned). Spacing follows the machine's raster
+    // interval, same as image engraving.
+    function fillVectorObject(obj, layer, S) {
+        const lines = [];
+        const m = LCS.state.machine();
+        const polys = flattenToPolylines(obj);
+        if (!polys.length) return { lines, burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } };
+
+        // Closed edge list in world px (modulo wraps open contours shut; zero-length
+        // closing edges are ignored by the straddle test below)
+        const edges = [];
+        let minY = Infinity, maxY = -Infinity;
+        for (const poly of polys) {
+            if (poly.length < 3) continue;
+            for (let i = 0; i < poly.length; i++) {
+                const a = poly[i], b = poly[(i + 1) % poly.length];
+                edges.push([a, b]);
+                if (a.y < minY) minY = a.y;
+                if (a.y > maxY) maxY = a.y;
+            }
+        }
+        if (!edges.length) return { lines, burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } };
+
+        const stepPx = m.rasterInterval * PX_PER_MM;
+        const feed = layer.speed;
+        const passes = layer.passes || 1;
+        const minSpanPx = 0.02 * PX_PER_MM;
+        let burnMm = 0, travelMm = 0, lastPt = null;
+        let forward = true;
+
+        for (let pass = 0; pass < passes; pass++) {
+            if (passes > 1) lines.push(`; Pass ${pass + 1}/${passes}`);
+            for (let y = minY + stepPx / 2; y <= maxY; y += stepPx) {
+                const xs = [];
+                for (const [a, b] of edges) {
+                    // half-open straddle test keeps vertex hits from double-counting
+                    if ((a.y <= y) !== (b.y <= y)) {
+                        xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
+                    }
+                }
+                if (xs.length < 2) continue;
+                xs.sort((p, q) => p - q);
+                const spans = [];
+                for (let k = 0; k + 1 < xs.length; k += 2) {
+                    if (xs[k + 1] - xs[k] > minSpanPx) spans.push([xs[k], xs[k + 1]]);
+                }
+                if (!spans.length) continue;
+                const order = forward ? spans : spans.slice().reverse();
+                for (const [x0, x1] of order) {
+                    const sx = forward ? x0 : x1, ex = forward ? x1 : x0;
+                    const startMm = toMachineMm({ x: sx, y });
+                    const endMm = toMachineMm({ x: ex, y });
+                    lines.push(dialect.rapid(startMm.x, startMm.y, m.travelFeed));
+                    if (lastPt) travelMm += dist(lastPt, startMm);
+                    lines.push(dialect.laserOn(S));
+                    lines.push(dialect.cut(endMm.x, endMm.y, feed, S));
+                    lines.push(dialect.laserOff());
+                    burnMm += dist(startMm, endMm);
+                    lastPt = endMm;
+                }
+                forward = !forward;
+            }
+        }
+        return { lines, burnMm, travelMm, lastPt: lastPt || { x: 0, y: 0 } };
+    }
+
     function flattenToPolylines(obj) {
         // Return array of polylines (each is array of {x,y} in Fabric px, world coords)
         const mat = obj.calcTransformMatrix();
@@ -2050,9 +2481,34 @@ const LCS = (window.LCS = {});
         if (obj.type === 'rect') {
             const w = obj.width, h = obj.height;
             // Fabric renders rects centered around local (0,0): (-w/2,-h/2) → (w/2,h/2)
-            const pts = [[-w/2,-h/2],[w/2,-h/2],[w/2,h/2],[-w/2,h/2],[-w/2,-h/2]]
-                .map(([x,y]) => fabric.util.transformPoint({ x, y }, mat));
-            return [pts];
+            const rx = Math.min(obj.rx || 0, w / 2);
+            const ry = Math.min(obj.ry || 0, h / 2);
+            let local;
+            if (rx > 0.01 && ry > 0.01) {
+                // Rounded corners: sample each quarter-ellipse finely enough for the chord tol
+                local = [];
+                const sc = Math.max(Math.abs(obj.scaleX || 1), Math.abs(obj.scaleY || 1));
+                const steps = Math.max(6, Math.ceil((Math.PI / 2) * Math.max(rx, ry) * sc / tol));
+                const corner = (cx, cy, a0) => {
+                    for (let i = 0; i <= steps; i++) {
+                        const a = a0 + (i / steps) * (Math.PI / 2);
+                        local.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]);
+                    }
+                };
+                local.push([-w/2 + rx, -h/2]);
+                local.push([w/2 - rx, -h/2]);
+                corner(w/2 - rx, -h/2 + ry, -Math.PI / 2);
+                local.push([w/2, h/2 - ry]);
+                corner(w/2 - rx, h/2 - ry, 0);
+                local.push([-w/2 + rx, h/2]);
+                corner(-w/2 + rx, h/2 - ry, Math.PI / 2);
+                local.push([-w/2, -h/2 + ry]);
+                corner(-w/2 + rx, -h/2 + ry, Math.PI);
+                local.push([-w/2 + rx, -h/2]); // close
+            } else {
+                local = [[-w/2,-h/2],[w/2,-h/2],[w/2,h/2],[-w/2,h/2],[-w/2,-h/2]];
+            }
+            return [local.map(([x, y]) => fabric.util.transformPoint({ x, y }, mat))];
         }
         if (obj.type === 'ellipse' || obj.type === 'circle') {
             const rx = obj.rx ?? obj.radius, ry = obj.ry ?? obj.radius;
@@ -2651,7 +3107,7 @@ const LCS = (window.LCS = {});
         const fab = LCS.canvas.fabric;
         if (!fab) return;
         const data = {
-            canvas: fab.toDatalessJSON(['objectId', 'layerId', 'opType', 'sourceType', '_imgParams', '_origSrc', '_origWidth', '_origHeight']),
+            canvas: fab.toDatalessJSON(['objectId', 'layerId', 'opType', 'sourceType', 'lcsName', '_cornerRadiusMm', '_imgParams', '_origSrc', '_origWidth', '_origHeight']),
             layers: JSON.parse(JSON.stringify(LCS.state.layers())),
             activeLayerId: LCS.state.get().activeLayerId,
         };
@@ -2817,6 +3273,7 @@ const LCS = (window.LCS = {});
                     o._imgParams[field] = cast($(id).value);
                     LCS.image.reprocess(o);
                 });
+                if (sel.length) LCS.image.schedulePreview(sel[0]);
                 if (valLabel) $(valLabel).textContent = $(id).value;
             });
         };
@@ -2832,10 +3289,48 @@ const LCS = (window.LCS = {});
                 o._imgParams.invert = $('#img-invert').checked;
                 LCS.image.reprocess(o);
             });
+            if (sel.length) LCS.image.schedulePreview(sel[0]);
+        });
+        // Trace method only affects the trace step — no reprocess/re-render needed
+        $('#img-trace-algo').addEventListener('change', () => {
+            const sel = LCS.canvas.fabric.getActiveObjects().filter(o => o.type === 'image');
+            sel.forEach(o => {
+                if (!o._imgParams) o._imgParams = {};
+                o._imgParams.traceAlgo = $('#img-trace-algo').value;
+            });
+            if (sel.length) LCS.image.schedulePreview(sel[0]);
         });
         $('#img-trace-btn').addEventListener('click', () => {
             const sel = LCS.canvas.fabric.getActiveObjects().filter(o => o.type === 'image');
             sel.forEach(o => LCS.image.traceToVector(o));
+        });
+
+        // Rectangle corner radius. Stored in mm so the visual radius stays put when the
+        // rect is scaled; rx/ry are divided by scale (and clamped to half the side).
+        const applyRectRadius = (o, mm) => {
+            const maxMm = Math.min(o.getScaledWidth(), o.getScaledHeight()) / 2 * LCS.config.MM_PER_PX;
+            const v = Math.max(0, Math.min(+mm || 0, maxMm));
+            o._cornerRadiusMm = v;
+            const px = v * LCS.config.PX_PER_MM;
+            o.set({ rx: px / (o.scaleX || 1), ry: px / (o.scaleY || 1) });
+            o.dirty = true;
+        };
+        $('#p-rect-radius').addEventListener('input', () => {
+            const sel = LCS.canvas.fabric.getActiveObjects().filter(o => o.type === 'rect');
+            if (!sel.length) return;
+            sel.forEach(o => applyRectRadius(o, $('#p-rect-radius').value));
+            LCS.canvas.fabric.requestRenderAll();
+            LCS.state.emit('object:modified');
+        });
+        // Re-derive rx/ry after interactive scaling so the radius keeps its mm value
+        LCS.state.on('object:modified', () => {
+            const fab = LCS.canvas.fabric;
+            if (!fab) return;
+            let changed = false;
+            fab.getActiveObjects().forEach(o => {
+                if (o.type === 'rect' && o._cornerRadiusMm) { applyRectRadius(o, o._cornerRadiusMm); changed = true; }
+            });
+            if (changed) fab.requestRenderAll();
         });
 
         // Text
@@ -2861,6 +3356,7 @@ const LCS = (window.LCS = {});
             common.style.display = 'none';
             imgGroup.style.display = 'none';
             textGroup.style.display = 'none';
+            $('#props-rect').style.display = 'none';
             return;
         }
         empty.style.display = 'none';
@@ -2887,6 +3383,14 @@ const LCS = (window.LCS = {});
             $('#img-contrast').value = p.contrast ?? 0; $('#img-contrast-val').textContent = $('#img-contrast').value;
             $('#img-brightness').value = p.brightness ?? 0; $('#img-brightness-val').textContent = $('#img-brightness').value;
             $('#img-invert').checked = !!p.invert;
+            $('#img-trace-algo').value = p.traceAlgo || 'otsu';
+            LCS.image.schedulePreview(o);
+        }
+        const rectGroup = $('#props-rect');
+        rectGroup.style.display = (o.type === 'rect') ? '' : 'none';
+        if (o.type === 'rect') {
+            const mm = o._cornerRadiusMm ?? ((o.rx || 0) * (o.scaleX || 1) * LCS.config.MM_PER_PX);
+            $('#p-rect-radius').value = (+mm).toFixed(1);
         }
         textGroup.style.display = (o.type === 'i-text' || o.type === 'text' || o.type === 'textbox') ? '' : 'none';
         if (textGroup.style.display !== 'none') {
@@ -2896,8 +3400,9 @@ const LCS = (window.LCS = {});
             $('#t-weight').value = o.fontWeight || 'normal';
         }
 
-        // Switch to Props tab when selecting
-        document.querySelector('.panel-tab[data-tab="props"]').click();
+        // Switch to Props tab when selecting (unless selection came from the layers panel)
+        if (LCS.ui.suppressNextTabSwitch) LCS.ui.suppressNextTabSwitch = false;
+        else document.querySelector('.panel-tab[data-tab="props"]').click();
     }
 
     function wireMachine() {
@@ -2992,6 +3497,23 @@ const LCS = (window.LCS = {});
                         }, ['objectId', 'layerId', 'opType', 'sourceType', '_imgParams', '_origSrc']);
                     });
                 }
+                return;
+            }
+            if (e.key.startsWith('Arrow')) {
+                const fab = LCS.canvas.fabric;
+                const sel = fab.getActiveObject();
+                if (!sel) return;
+                e.preventDefault();
+                // 1mm per press; Shift = 10mm, Alt = 0.1mm for fine placement
+                const stepMm = e.shiftKey ? 10 : (e.altKey ? 0.1 : 1);
+                const d = stepMm * LCS.config.PX_PER_MM;
+                const dx = e.key === 'ArrowLeft' ? -d : e.key === 'ArrowRight' ? d : 0;
+                const dy = e.key === 'ArrowUp' ? -d : e.key === 'ArrowDown' ? d : 0;
+                sel.set({ left: sel.left + dx, top: sel.top + dy });
+                sel.setCoords();
+                fab.requestRenderAll();
+                LCS.state.emit('object:modified');
+                updateProps(fab.getActiveObjects());
                 return;
             }
             switch (e.key.toLowerCase()) {

@@ -111,7 +111,11 @@
                 const ww = 0.06 + rand() * 0.07;
                 const tallness = rand() < 0.4 ? 0.85 + rand() * 0.45 : 0.55 + rand() * 0.3;
                 const hh = ww * tallness;
-                const archetype = pickArchetype(rand);
+                // Reroll once if the archetype repeats its neighbour, so the
+                // row doesn't form blocks of identical house styles.
+                let archetype = pickArchetype(rand);
+                const prev = this.houses.length > 0 ? this.houses[this.houses.length - 1].archetype : null;
+                if (archetype === prev) archetype = pickArchetype(rand);
                 const isModern = archetype === 'modern_mono' || archetype === 'kawara_hip' || archetype === 'townhouse' || archetype === 'apartment';
                 const r1 = rand(), r2 = rand();
                 const isMachiya = archetype === 'machiya';
@@ -211,7 +215,7 @@
                     x: x,
                     depth: 1,
                     h: 0.34 + prand() * 0.04,
-                    tag: `NK-${(217 + i * 13) % 999}`,
+                    tag: `NK-${String(100 + ((prand() * 900) | 0))}`,
                     transformer: transformerCount > 0,
                     transformerCount,
                     spliceBox: prand() < 0.35,
@@ -381,6 +385,9 @@
             // Backward-compat references.
             this.streetY = this.roadY;
             this.mountainY = this.horizonY + 4;
+            // Sprite scale for road/wire actors authored in fixed local px
+            // (kei truck, cat, crows, cyclist, shinkansen, …).
+            this.as = this.sceneScale(720, 0.85, 2.0);
 
             // Allocate reflection offscreen.
             const reflW = Math.max(64, Math.floor(w));
@@ -1121,8 +1128,8 @@
                 }
                 return;
             }
-            this.shinkansen.x += this.shinkansen.dir * this.shinkansen.speed * (dt / 1000);
-            const limit = this.shinkansen.cars * 64 + 180;
+            this.shinkansen.x += this.shinkansen.dir * this.shinkansen.speed * this.as * (dt / 1000);
+            const limit = (this.shinkansen.cars * 64 + 180) * this.as;
             if (this.shinkansen.x < -limit || this.shinkansen.x > this.width + limit) {
                 this.shinkansen = null;
             }
@@ -1133,8 +1140,8 @@
             const carW = 58, carH = 12;
             const nLen = 46;  // long pointy nose typical of N700/E5
             c.save();
-            c.translate(s.x, baseY - carH * 0.5);
-            c.scale(s.dir, 1);
+            c.translate(s.x, baseY - carH * 0.5 * this.as);
+            c.scale(s.dir * this.as, this.as);
 
             // Color palette by series.
             const palette = s.series === 1
@@ -2163,15 +2170,22 @@
                 const intensity = lampOn * hs.flickerOn;
                 c.fillStyle = `rgba(255, 200, 110, ${0.85 * intensity})`;
                 c.fillRect(wx, wy, wWid, wHei);
-                // Glow
+                // Glow — one shared origin-anchored gradient, positioned via
+                // translate and dimmed via globalAlpha, instead of allocating
+                // a radial gradient per lit window per frame.
+                if (!this._winGlowGrad) {
+                    const g = c.createRadialGradient(0, 0, 2, 0, 0, 36);
+                    g.addColorStop(0, 'rgba(255, 200, 110, 0.5)');
+                    g.addColorStop(1, 'rgba(255, 200, 110, 0)');
+                    this._winGlowGrad = g;
+                }
                 c.save();
                 c.globalCompositeOperation = 'lighter';
-                const gr = c.createRadialGradient(wx + wWid * 0.5, wy + wHei * 0.5, 2, wx + wWid * 0.5, wy + wHei * 0.5, 36);
-                gr.addColorStop(0, `rgba(255, 200, 110, ${0.5 * intensity})`);
-                gr.addColorStop(1, 'rgba(255, 200, 110, 0)');
-                c.fillStyle = gr;
+                c.globalAlpha = intensity;
+                c.translate(wx + wWid * 0.5, wy + wHei * 0.5);
+                c.fillStyle = this._winGlowGrad;
                 c.beginPath();
-                c.arc(wx + wWid * 0.5, wy + wHei * 0.5, 36, 0, Math.PI * 2);
+                c.arc(0, 0, 36, 0, Math.PI * 2);
                 c.fill();
                 c.restore();
                 // Curtain silhouette (occasional walking past).
@@ -2680,12 +2694,17 @@
                 } else if (cr.state === 'flying') {
                     cr.flightT += dt;
                     const dur = 1800;
-                    const k = this.clamp(cr.flightT / dur, 0, 1);
-                    const arc = Math.sin(k * Math.PI) * 30;
+                    const kLin = this.clamp(cr.flightT / dur, 0, 1);
+                    // Smoothstep easing: the crow accelerates off the perch
+                    // and decelerates into the landing instead of snapping.
+                    const k = kLin * kLin * (3 - 2 * kLin);
+                    const arc = Math.sin(k * Math.PI) * 30 * this.as;
                     const fx = cr.flightFromX + (cr.flightToX - cr.flightFromX) * k;
                     const fy = cr.flightFromY + (cr.flightToY - cr.flightFromY) * k - arc;
-                    this.drawCrowFlying(fx, fy, cr.flightDir, t, i);
-                    if (k >= 1) {
+                    // Wings fold as it settles on the wire (last ~20%).
+                    const flapAmp = kLin > 0.8 ? this.clamp((1 - kLin) / 0.2, 0, 1) : 1;
+                    this.drawCrowFlying(fx, fy, cr.flightDir, t, i, flapAmp);
+                    if (kLin >= 1) {
                         cr.perch = cr.targetPerch;
                         cr.state = 'perched';
                         cr.nextHopT = CONFIG.CROW_HOP_INTERVAL_MIN + Math.random() * (CONFIG.CROW_HOP_INTERVAL_MAX - CONFIG.CROW_HOP_INTERVAL_MIN);
@@ -2720,6 +2739,7 @@
             const c = this.ctx;
             c.save();
             c.translate(x, y);
+            c.scale(this.as, this.as);
             c.fillStyle = '#0a080c';
             // Body (oval)
             c.beginPath();
@@ -2758,13 +2778,13 @@
             c.restore();
         }
 
-        drawCrowFlying(x, y, dir, t, i) {
+        drawCrowFlying(x, y, dir, t, i, flapAmp = 1) {
             const c = this.ctx;
             c.save();
             c.translate(x, y);
             // Sprite native orientation has head/beak on the LEFT; flip so
             // the head leads the flight direction.
-            c.scale(-dir, 1);
+            c.scale(-dir * this.as, this.as);
             c.fillStyle = '#0a080c';
             // Body
             c.beginPath();
@@ -2778,8 +2798,8 @@
             c.beginPath();
             c.moveTo(-7, -1); c.lineTo(-10, -0.5); c.lineTo(-7, 0);
             c.closePath(); c.fill();
-            // Wings — flapping
-            const flap = Math.sin(t * 0.018 + i) * 0.7;
+            // Wings — flapping (amplitude folds toward 0 on landing)
+            const flap = Math.sin(t * 0.018 + i) * 0.7 * flapAmp;
             c.beginPath();
             c.moveTo(-3, -1);
             c.quadraticCurveTo(-1, -8 + flap * 5, 4, -3 + flap * 3);
@@ -3158,9 +3178,10 @@
                 }
                 return;
             }
-            this.keiTruck.x += this.keiTruck.dir * this.keiTruck.speed * (dt / 1000);
+            // Speed scales with sprite size so motion reads correctly.
+            this.keiTruck.x += this.keiTruck.dir * this.keiTruck.speed * this.as * (dt / 1000);
             this.keiTruck.bounce += dt;
-            if (this.keiTruck.x < -100 || this.keiTruck.x > this.width + 100) {
+            if (this.keiTruck.x < -100 * this.as || this.keiTruck.x > this.width + 100 * this.as) {
                 this.keiTruck = null;
                 return;
             }
@@ -3172,7 +3193,7 @@
             c.translate(k.x, y + wobble);
             // Sprite native orientation has the cab (front) on the LEFT;
             // flip so the cab leads in the direction of motion.
-            c.scale(-k.dir, 1);
+            c.scale(-k.dir * this.as, this.as);
             // Body silhouette shadow under truck
             c.fillStyle = 'rgba(10, 8, 6, 0.55)';
             c.fillRect(-26, 8, 56, 2);
@@ -3290,7 +3311,7 @@
                 }
             } else if (cat.state === 'walking') {
                 const speed = 0.015 + Math.random() * 0.001; // slight jitter
-                cat.x += speed * cat.dir * (dt / 1000);
+                cat.x += speed * cat.dir * this.as * (dt / 1000);
                 cat.gait += dt;
                 cat.nextChange -= dt;
                 // Occasionally pause to sit mid-stroll.
@@ -3310,7 +3331,7 @@
             c.translate(cx, cy);
             // Sprite is drawn facing LEFT in native form; flip so head leads
             // the movement direction (dir=+1 means moving right → face right).
-            c.scale(-cat.dir, 1);
+            c.scale(-cat.dir * this.as, this.as);
             c.fillStyle = cat.coat;
             if (cat.state === 'walking') {
                 const gait = Math.sin(cat.gait * 0.012);
@@ -3397,11 +3418,12 @@
             const paddyTop = this.paddyY;
             const paddyBot = this.paddyBot;
 
-            // Water base
+            // Water base — leans harder into the sky color so dawn/dusk
+            // visibly reflects in the flooded paddy.
             const water = c.createLinearGradient(0, paddyTop, 0, paddyBot);
-            water.addColorStop(0, this.mixColor('#5a6850', this.sky.horizon, 0.20));
-            water.addColorStop(0.5, this.mixColor('#3a4a3a', this.sky.horizon, 0.10));
-            water.addColorStop(1, '#2a3828');
+            water.addColorStop(0, this.mixColor('#5a6850', this.sky.horizon, 0.42));
+            water.addColorStop(0.5, this.mixColor('#3a4a3a', this.sky.horizon, 0.22));
+            water.addColorStop(1, this.mixColor('#2a3828', this.sky.horizon, 0.08));
             c.fillStyle = water;
             c.fillRect(0, paddyTop, w, paddyBot - paddyTop);
 
@@ -3496,7 +3518,7 @@
             for (let row = 0; row < rowCount; row++) {
                 const rowK = row / (rowCount - 1);
                 const py = paddyTop + 6 + rowK * (paddyBot - paddyTop - 8) * 0.92;
-                const phBase = 4 + rowK * 6;
+                const phBase = (4 + rowK * 6) * this.as;
                 const plantsPerRow = Math.floor(30 + rowK * 60);
                 // Row hue shifts slightly with depth.
                 const hueK = 0.45 + rowK * 0.25;
@@ -4106,7 +4128,7 @@
                 return;
             }
             const k = this.cyclist;
-            k.x += k.dir * k.speed * (dt / 1000);
+            k.x += k.dir * k.speed * this.as * (dt / 1000);
             k.pedal += dt;
             if (k.x < -60 || k.x > this.width + 60) {
                 this.cyclist = null;
@@ -4118,7 +4140,7 @@
             c.translate(k.x, y);
             // Sprite native orientation has the basket/handlebar (front) on the
             // LEFT; flip so the front leads in the direction of motion.
-            c.scale(-k.dir, 1);
+            c.scale(-k.dir * this.as, this.as);
             // Wheels.
             const wheelR = 4.5;
             const pedalRot = (k.pedal * 0.012) % (Math.PI * 2);
@@ -4255,7 +4277,7 @@
                 return;
             }
             const m = this.moped;
-            m.x += m.dir * m.speed * (dt / 1000);
+            m.x += m.dir * m.speed * this.as * (dt / 1000);
             m.bob += dt;
             if (m.x < -60 || m.x > this.width + 60) {
                 this.moped = null;
@@ -4268,7 +4290,7 @@
             c.translate(m.x, y + wob);
             // Sprite native orientation has the front fairing on the LEFT;
             // flip so the front leads in the direction of motion.
-            c.scale(-m.dir, 1);
+            c.scale(-m.dir * this.as, this.as);
             // Shadow.
             c.fillStyle = 'rgba(10, 8, 6, 0.5)';
             c.fillRect(-12, 7, 26, 1.5);
@@ -4368,7 +4390,7 @@
                 return;
             }
             const ch = this.schoolChild;
-            ch.x += ch.dir * ch.speed * (dt / 1000);
+            ch.x += ch.dir * ch.speed * this.as * (dt / 1000);
             ch.step += dt;
             if (ch.x < -30 || ch.x > this.width + 30) {
                 this.schoolChild = null;
@@ -4379,7 +4401,7 @@
             const step = Math.sin(ch.step * 0.012);
             c.save();
             c.translate(ch.x, y);
-            c.scale(ch.dir, 1);
+            c.scale(ch.dir * this.as, this.as);
             // Legs.
             c.strokeStyle = '#1a1410';
             c.lineWidth = 1;
@@ -4528,7 +4550,7 @@
                 e.stateT = 0;
             }
             if (e.state === 'flying') {
-                e.x += e.dir * 0.04 * (dt / 1000);
+                e.x += e.dir * 0.04 * this.as * (dt / 1000);
                 e.y -= 0.02 * (dt / 1000);
                 if (e.x < -0.05 || e.x > 1.05 || e.y < 0.40) {
                     this._egret = null;
@@ -4543,7 +4565,7 @@
             c.translate(px, py);
             // Sprite native orientation has head/beak on the LEFT; flip so
             // the bird faces (and flies) in the direction of its dir vector.
-            c.scale(-e.dir, 1);
+            c.scale(-e.dir * this.as, this.as);
             if (e.state === 'standing') {
                 const bob = Math.sin(t * 0.001 + e.bobPhase) * 0.4;
                 // Legs.

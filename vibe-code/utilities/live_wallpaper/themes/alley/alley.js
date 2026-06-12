@@ -38,12 +38,13 @@
     // Kanji for the storefront sign.
     const SHOP_NAME_KANA = 'なかむら観魚店';
     const SHOP_TEL = 'TEL 03-X576';
-    const FONT_SIGN = "700 18px 'Yu Gothic UI','Yu Gothic','Hiragino Kaku Gothic ProN','Meiryo','MS Gothic',sans-serif";
-    const FONT_SIGN_SUB = "600 8px 'Helvetica Neue','Arial',sans-serif";
-    const FONT_TINY = "600 7px 'Yu Gothic UI','Meiryo','MS Gothic',sans-serif";
+    const KANA_STACK = "'Yu Gothic UI','Yu Gothic','Hiragino Kaku Gothic ProN','Meiryo','MS Gothic',sans-serif";
 
     // Fish silhouette types.
     const FISH_TYPES = ['koi', 'koi', 'goldfish', 'goldfish', 'tetra', 'tetra', 'tetra', 'angel'];
+    // Local-coordinate body length (units) per type — used to convert a
+    // desired body length (fraction of tank width) into the sprite scale.
+    const FISH_UNIT_LEN = { koi: 9.8, goldfish: 9.8, tetra: 5.6, angel: 5.4 };
 
     class AlleyWallpaper extends Wallpaper {
 
@@ -86,6 +87,13 @@
                     flickerPhase: randW() * Math.PI * 2,
                     // TV-lit windows have a slight color shift over time.
                     tv: randW() < 0.4,
+                    // Per-window character so the row doesn't read as 4 clones.
+                    wk: 0.85 + randW() * 0.30,     // width factor
+                    hk: 0.90 + randW() * 0.20,     // height factor
+                    sill: randW() < 0.6,            // concrete sill ledge
+                    rail: randW() < 0.4,            // small balcony rail
+                    curtain: randW() < 0.5 ? '#161426' : '#121a20', // curtain tint
+                    halfOpen: randW() < 0.35,       // one curtain pulled aside
                 });
             }
 
@@ -97,28 +105,52 @@
                 const n = 4 + Math.floor(randF() * 3);
                 for (let k = 0; k < n; k++) {
                     const type = FISH_TYPES[(randF() * FISH_TYPES.length) | 0];
+                    const dir = randF() < 0.5 ? 1 : -1;
                     fish.push({
                         type,
                         // Normalized x within tank.
                         x: randF(),
                         baseY: 0.20 + randF() * 0.60,
                         y: 0.50,
-                        speed: 0.04 + randF() * 0.10,
-                        dir: randF() < 0.5 ? 1 : -1,
+                        // Cruise speed: fraction of tank width per second.
+                        speed: type === 'tetra' ? 0.06 + randF() * 0.06
+                             : type === 'koi' ? 0.030 + randF() * 0.030
+                             : 0.04 + randF() * 0.05,
+                        dir,
+                        // Rendered direction eases toward dir → smooth turns.
+                        dirRender: dir,
+                        // Body length as a fraction of tank width.
+                        rel: type === 'tetra' ? 0.035 + randF() * 0.014
+                           : type === 'goldfish' ? 0.065 + randF() * 0.020
+                           : type === 'angel' ? 0.075 + randF() * 0.020
+                           : 0.100 + randF() * 0.030, // koi
                         phase: randF() * Math.PI * 2,
-                        size: type === 'tetra' ? 1.4 + randF() * 0.6
-                            : type === 'goldfish' ? 2.0 + randF() * 0.8
-                            : type === 'angel' ? 2.4 + randF() * 0.6
-                            : 2.6 + randF() * 0.8, // koi
                         hue: type === 'koi' ? (randF() < 0.5 ? 20 : 10)
                            : type === 'goldfish' ? 30
                            : type === 'tetra' ? 210
                            : 0,
                         bodyTone: 0.6 + randF() * 0.4,
+                        // Behavior state: koi pause, tetras dart.
+                        vFactor: 1,
+                        pauseMs: 0,
+                        dart: 0,
+                        nextEventMs: 3000 + randF() * 6000,
+                    });
+                }
+                // Gravel pebbles — organic scatter, resize-safe fractions.
+                const pebbles = [];
+                for (let p = 0; p < 14; p++) {
+                    pebbles.push({
+                        xk: randF() * 0.96 + 0.01,
+                        yo: 1 + randF() * 4,
+                        r: 1.5 + randF() * 1.5,
+                        a: 0.35 + randF() * 0.4,
+                        warm: randF() < 0.3,
                     });
                 }
                 this.tanks.push({
                     fish,
+                    pebbles,
                     // Bubble streams; each tank has a bubbler.
                     bubbles: [],
                     nextBubbleMs: 200 + randF() * 800,
@@ -152,6 +184,9 @@
                 phase: 0,
                 // Direction they face (-1 = left toward shop, +1 = right).
                 facing: -1,
+                // Rendered facing lerps toward `facing` so turns read as a
+                // brief squash instead of an instant mirror flip.
+                facingRender: -1,
                 // Occasional turn to face the other way.
                 nextTurnMs: 12000 + Math.random() * 18000,
                 // Head bob amplitude.
@@ -167,6 +202,7 @@
                 // Drift around the lamp on a noisy lissajous.
                 t: 0,
                 visible: true,
+                alpha: 1, // fades toward visible ? 1 : 0 — no popping
                 nextToggleMs: 18000 + Math.random() * 18000,
             };
 
@@ -213,6 +249,11 @@
         resize(w, h) {
             super.resize(w, h);
 
+            // Sprite scale: actors/props are authored in fixed local pixels
+            // (sized for a ~720p frame); this keeps them proportional to the
+            // storefront, which lays out as w/h fractions.
+            this.s = this.sceneScale(720, 0.8, 2.2);
+
             // Layout proportions — the fish shop occupies the central two-
             // thirds; a small vending alcove sits to its left and an alley
             // gap leads off to the right.
@@ -258,7 +299,7 @@
             const rightRight = this.shopRight - sw * 0.04;
 
             // Vending machine to the left of shop.
-            const vmW = Math.min(w * 0.05, 64);
+            const vmW = Math.min(w * 0.05, 64 * this.s);
             const vmH = (this.groundY - this.awningBotY) * 0.85;
             const vmX = this.shopLeft - vmW - 18;
             const vmY = this.groundY - vmH;
@@ -281,10 +322,27 @@
 
             // Planters along the curb — placed to flank, not block, the scooter.
             this._planterPositions = [
-                { x: tanksLeft + tanksW * 0.18, y: this.groundY - 2, w: 48 },
-                { x: tanksLeft + tanksW * 0.78, y: this.groundY - 2, w: 28 },
-                { x: rightLeft + (rightRight - rightLeft) * 0.88, y: this.groundY - 2, w: 44 },
+                { x: tanksLeft + tanksW * 0.18, y: this.groundY - 2, w: 48 * this.s },
+                { x: tanksLeft + tanksW * 0.78, y: this.groundY - 2, w: 28 * this.s },
+                { x: rightLeft + (rightRight - rightLeft) * 0.88, y: this.groundY - 2, w: 44 * this.s },
             ];
+
+            // Responsive fonts — sized from the storefront, clamped so the
+            // sign always fits the awning at narrow widths.
+            const signPx = Math.max(12, Math.round(sw * 0.040));
+            this._fontSign = `700 ${signPx}px ${KANA_STACK}`;
+            this._fontSignSub = `600 ${Math.max(7, Math.round(signPx * 0.45))}px 'Helvetica Neue','Arial',sans-serif`;
+            this._fontNoren = `700 ${Math.max(9, Math.round(doorW * 0.115))}px ${KANA_STACK}`;
+            this._fontLantern = `700 ${Math.max(7, Math.round(8 * this.s))}px ${KANA_STACK}`;
+            // measureText clamp: shrink the sign font until the kana title
+            // fits in ~60% of the awning width (leaves room for breathing).
+            this.ctx.font = this._fontSign;
+            let fitPx = signPx;
+            while (fitPx > 11 && this.ctx.measureText(SHOP_NAME_KANA).width > sw * 0.62) {
+                fitPx -= 1;
+                this.ctx.font = `700 ${fitPx}px ${KANA_STACK}`;
+            }
+            if (fitPx !== signPx) this._fontSign = `700 ${fitPx}px ${KANA_STACK}`;
 
             this._layout = {
                 sw, upperTop, upperBot, lowerTop, lowerBot,
@@ -297,6 +355,50 @@
                 scooterX, scooterY,
                 personX, personY,
             };
+
+            // ---- Static gradient cache (geometry fixed until next resize) ----
+            const c = this.ctx;
+            const g = {};
+            // Tank water (same gradient for both tanks — relative to tank y).
+            g.tankWater = [];
+            for (const ty of [tankTopY, tank2TopY]) {
+                const tg = c.createLinearGradient(0, ty, 0, ty + tankH);
+                tg.addColorStop(0, '#2c8cd0');
+                tg.addColorStop(0.5, '#3aa8e4');
+                tg.addColorStop(1, '#1a5c8a');
+                g.tankWater.push(tg);
+            }
+            // Awning panel.
+            g.awning = c.createLinearGradient(0, this.awningTopY, 0, this.awningTopY + this.awningH);
+            g.awning.addColorStop(0, '#3aa0e0');
+            g.awning.addColorStop(0.6, '#287cbc');
+            g.awning.addColorStop(1, '#1c5a98');
+            // Ground wet-pavement fill.
+            g.ground = c.createLinearGradient(0, this.groundY, 0, h);
+            g.ground.addColorStop(0, '#0a0e1a');
+            g.ground.addColorStop(0.4, '#0e1424');
+            g.ground.addColorStop(1, '#04080f');
+            // Doorway interior backdrop.
+            g.doorway = c.createLinearGradient(0, doorTopY, 0, doorBotY);
+            g.doorway.addColorStop(0, '#3c5878');
+            g.doorway.addColorStop(0.6, '#1a2c4a');
+            g.doorway.addColorStop(1, '#0a1024');
+            // Streetlamp bulb.
+            g.lampBulb = null; // built in drawStreetlamp once coords known
+            this._g = g;
+
+            // Seeded puddles on the wet pavement (positions as fractions).
+            const randPud = this.rng(5150);
+            this._puddles = [];
+            for (let i = 0; i < 2; i++) {
+                this._puddles.push({
+                    xk: 0.30 + randPud() * 0.45,
+                    yk: 0.30 + randPud() * 0.55, // fraction of ground strip height
+                    w: (40 + randPud() * 70) * this.s,
+                    h: (5 + randPud() * 6) * this.s,
+                    phase: randPud() * Math.PI * 2,
+                });
+            }
         }
 
         currentAtmo(t) {
@@ -337,6 +439,16 @@
                 this.person.facing *= -1;
                 this.person.nextTurnMs = 12000 + Math.random() * 18000;
             }
+            // Ease the rendered facing through 0 (~250ms full turn).
+            {
+                const p = this.person;
+                const step = (dt / 125) * Math.sign(p.facing - p.facingRender);
+                if (step !== 0) {
+                    p.facingRender = step > 0
+                        ? Math.min(p.facing, p.facingRender + step)
+                        : Math.max(p.facing, p.facingRender + step);
+                }
+            }
 
             // ---- Update cat ----
             this.updateCat(dt);
@@ -371,6 +483,15 @@
                 this.moth.visible = !this.moth.visible;
                 this.moth.nextToggleMs = 16000 + Math.random() * 24000;
             }
+            // Fade alpha toward the visibility target (~600ms) so the moth
+            // never pops mid-orbit.
+            {
+                const target = this.moth.visible ? 1 : 0;
+                const step = dt / 600;
+                this.moth.alpha = target > this.moth.alpha
+                    ? Math.min(target, this.moth.alpha + step)
+                    : Math.max(target, this.moth.alpha - step);
+            }
 
             // ---- Scooter sway ----
             this.scooterPhase += dt * 0.0006;
@@ -396,7 +517,7 @@
             // 8) Upper-floor windows
             this.drawUpperWindows(t);
             // 9) Storefront — the rich detailed part
-            this.drawAquariums(t);
+            this.drawAquariums(t, dt);
             this.drawDoorway(t);
             this.drawRightPane(t);
             // 10) Awning + sign
@@ -407,6 +528,7 @@
             // 12) Hanging shop lantern by the door
             this.drawHangingLantern(t);
             // 13) Curb / ground
+            this._reflT = t;
             this.drawGround(atmo);
             // 14) Scooter (drawn before planters so a planter can sit in front)
             this.drawScooter();
@@ -421,7 +543,7 @@
             // 19) Light pool from streetlamp onto wet ground
             this.drawLightPool(atmo);
             // 20) Moth around streetlamp
-            if (this.moth.visible) this.drawMoth();
+            if (this.moth.alpha > 0.01) this.drawMoth();
             // 21) Drifting light gnats in light pool
             this.drawGnats(t);
             // 22) Drizzle
@@ -579,6 +701,31 @@
                 c.fillRect(sx | 0, L.upperBot + 2, 1, L.lowerBot - L.upperBot - 4);
             }
 
+            // Weathering — faint horizontal streak bands across the upper
+            // facade (rain staining), seeded so they're stable.
+            if (!this._weatherBands) {
+                const randWb = this.rng(6107);
+                this._weatherBands = [];
+                for (let k = 0; k < 5; k++) {
+                    this._weatherBands.push({
+                        yk: 0.12 + randWb() * 0.80,
+                        a: 0.04 + randWb() * 0.07,
+                        light: randWb() < 0.4,
+                        hk: 0.01 + randWb() * 0.02,
+                    });
+                }
+            }
+            const upperH = L.upperBot - this.roofY;
+            for (const wb of this._weatherBands) {
+                c.fillStyle = wb.light ? `rgba(110, 130, 170, ${wb.a})` : `rgba(0, 0, 0, ${wb.a * 1.6})`;
+                c.fillRect(this.shopLeft, this.roofY + wb.yk * upperH, L.sw, Math.max(1.5, wb.hk * upperH));
+            }
+            // Drip stains running down from the roofline.
+            c.fillStyle = 'rgba(0, 0, 0, 0.10)';
+            c.fillRect(this.shopLeft + L.sw * 0.13, this.roofY, 2, upperH * 0.34);
+            c.fillRect(this.shopLeft + L.sw * 0.71, this.roofY, 2.5, upperH * 0.26);
+            c.fillRect(this.shopLeft + L.sw * 0.92, this.roofY, 1.5, upperH * 0.45);
+
             // Subtle horizontal joist where upper floor meets the awning area.
             c.fillStyle = '#060a18';
             c.fillRect(this.shopLeft, L.upperBot - 1, L.sw, 2);
@@ -588,22 +735,35 @@
             const c = this.ctx;
             const L = this._layout;
             const upperRowH = L.upperBot - L.upperTop;
-            const winW = L.sw * 0.18;
-            const winH = upperRowH * 0.55;
+            const baseWinW = L.sw * 0.18;
+            const baseWinH = upperRowH * 0.55;
             const winSpacing = L.sw * 0.05;
-            const totalWinW = winW * 4 + winSpacing * 3;
+            const totalWinW = baseWinW * 4 + winSpacing * 3;
             const startX = this.shopLeft + (L.sw - totalWinW) * 0.5;
-            const winY = L.upperTop + (upperRowH - winH) * 0.5;
 
             for (let i = 0; i < 4; i++) {
-                const wx = startX + i * (winW + winSpacing);
                 const win = this.upperWindows[i];
+                // Per-window size variation (centered in its slot).
+                const winW = baseWinW * win.wk;
+                const winH = baseWinH * win.hk;
+                const slotX = startX + i * (baseWinW + winSpacing);
+                const wx = slotX + (baseWinW - winW) * 0.5;
+                const winY = L.upperTop + (upperRowH - winH) * 0.5;
                 // Frame.
                 c.fillStyle = '#060a16';
                 c.fillRect(wx - 1, winY - 1, winW + 2, winH + 2);
                 // Pane background — deep night reflection.
                 c.fillStyle = '#080c1a';
                 c.fillRect(wx, winY, winW, winH);
+                // Curtain tint behind the glass (unlit windows aren't pure void).
+                c.fillStyle = win.curtain;
+                if (win.halfOpen) {
+                    c.fillRect(wx + 1, winY + 1, winW * 0.45, winH - 2);
+                } else {
+                    c.globalAlpha = 0.5;
+                    c.fillRect(wx + 1, winY + 1, winW - 2, winH - 2);
+                    c.globalAlpha = 1;
+                }
                 // If lit, draw warm interior glow with shifting brightness.
                 if (win.lit) {
                     let brightness = 1;
@@ -628,6 +788,25 @@
                 c.fillStyle = '#0a0e1c';
                 c.fillRect(wx + winW * 0.5 - 0.5, winY, 1, winH);
                 c.fillRect(wx, winY + winH * 0.5 - 0.5, winW, 1);
+                // Concrete sill ledge under some windows.
+                if (win.sill) {
+                    c.fillStyle = '#1c2436';
+                    c.fillRect(wx - 2, winY + winH + 1, winW + 4, 3);
+                    c.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                    c.fillRect(wx - 2, winY + winH + 4, winW + 4, 1.5);
+                }
+                // Small balcony rail in front of some windows.
+                if (win.rail) {
+                    c.fillStyle = '#10182c';
+                    const railH = winH * 0.34;
+                    const railY = winY + winH - railH;
+                    c.fillRect(wx - 2, railY, winW + 4, 1.5);
+                    c.fillRect(wx - 2, railY + railH - 1, winW + 4, 1.5);
+                    const bars = Math.max(4, Math.round(winW / 7));
+                    for (let b = 0; b <= bars; b++) {
+                        c.fillRect(wx - 2 + (b / bars) * (winW + 4), railY, 1, railH);
+                    }
+                }
                 // Soft outer glow if lit.
                 if (win.lit) {
                     c.save();
@@ -648,7 +827,7 @@
         // =========================================================
         // STOREFRONT: AQUARIUMS
         // =========================================================
-        drawAquariums(t) {
+        drawAquariums(t, dt) {
             const c = this.ctx;
             const L = this._layout;
             const { tanksLeft, tanksW, tankH, tankTopY, tank2TopY } = L;
@@ -661,7 +840,7 @@
             for (let i = 0; i < 2; i++) {
                 const tankY = i === 0 ? tankTopY : tank2TopY;
                 const tank = this.tanks[i];
-                this.drawSingleTank(tanksLeft, tankY, tanksW, tankH, tank, t);
+                this.drawSingleTank(tanksLeft, tankY, tanksW, tankH, tank, t, dt, i);
             }
 
             // Brushed-metal trim between tanks.
@@ -677,14 +856,11 @@
             c.fillRect(tanksLeft - 4, tankTopY + tankH * 2 + 1, tanksW + 8, 3);
         }
 
-        drawSingleTank(x, y, w, h, tank, t) {
+        drawSingleTank(x, y, w, h, tank, t, dt, tankIdx) {
             const c = this.ctx;
             // Water gradient — bright cyan/teal in middle, deeper at edges.
-            const grad = c.createLinearGradient(x, y, x, y + h);
-            grad.addColorStop(0, '#2c8cd0');
-            grad.addColorStop(0.5, '#3aa8e4');
-            grad.addColorStop(1, '#1a5c8a');
-            c.fillStyle = grad;
+            // Geometry is resize-static, so the gradient comes from the cache.
+            c.fillStyle = this._g.tankWater[tankIdx];
             c.fillRect(x, y, w, h);
 
             // Caustic light bands on the bottom — shift over time.
@@ -708,10 +884,10 @@
             const gravelH = h * 0.10;
             c.fillStyle = '#0a3050';
             c.fillRect(x, y + h - gravelH, w, gravelH);
-            // A few pebble dots in the gravel.
-            for (let k = 0; k < 8; k++) {
-                c.fillStyle = 'rgba(60, 100, 140, 0.6)';
-                c.fillRect(x + ((k * 13 + 7) % w), y + h - gravelH + 2 + (k % 3), 2, 2);
+            // Pebbles — pre-generated per tank in init() (organic scatter).
+            for (const peb of tank.pebbles) {
+                c.fillStyle = `rgba(${peb.warm ? '110, 120, 140' : '60, 100, 140'}, ${peb.a})`;
+                c.fillRect(x + peb.xk * w, y + h - gravelH + peb.yo, peb.r, peb.r);
             }
 
             // Plants in the back — vertical undulating lines.
@@ -746,7 +922,7 @@
 
             // Fish.
             for (const fish of tank.fish) {
-                this.drawFish(x, y, w, h, fish, t);
+                this.drawFish(x, y, w, h, fish, t, dt);
             }
 
             // Tank reflection sheen on the glass front (subtle vertical bands).
@@ -766,23 +942,61 @@
             c.fillRect(x, y + 2, w, 1);
         }
 
-        drawFish(tx, ty, tw, th, fish, t) {
+        drawFish(tx, ty, tw, th, fish, t, dt) {
             const c = this.ctx;
-            // Update position.
-            fish.x += (fish.dir * fish.speed * 0.016);
-            if (fish.x > 1) { fish.x = 1; fish.dir = -1; }
-            if (fish.x < 0) { fish.x = 0; fish.dir = 1; }
+
+            // ---- Per-type behavior events ----
+            fish.nextEventMs -= dt;
+            if (fish.nextEventMs <= 0) {
+                if (fish.type === 'koi') {
+                    // Koi linger in place for a while.
+                    fish.pauseMs = 1500 + Math.random() * 2500;
+                    fish.nextEventMs = 6000 + Math.random() * 9000;
+                } else if (fish.type === 'tetra') {
+                    // Tetras dart in quick bursts, sometimes reversing.
+                    fish.dart = 1;
+                    if (Math.random() < 0.4) fish.dir *= -1;
+                    fish.nextEventMs = 2500 + Math.random() * 5000;
+                } else {
+                    // Goldfish/angel occasionally meander the other way.
+                    if (Math.random() < 0.3) fish.dir *= -1;
+                    fish.nextEventMs = 4000 + Math.random() * 6000;
+                }
+            }
+            if (fish.pauseMs > 0) fish.pauseMs -= dt;
+            fish.dart = Math.max(0, fish.dart - dt / 900);
+
+            // Speed envelope eases into/out of pauses.
+            const vTarget = fish.pauseMs > 0 ? 0.06 : 1;
+            fish.vFactor += (vTarget - fish.vFactor) * Math.min(1, dt / 400);
+
+            // ---- Movement (dt-based; eased wall turns) ----
+            if (fish.x > 0.96) fish.dir = -1;
+            else if (fish.x < 0.04) fish.dir = 1;
+            // dirRender eases toward dir over ~400ms → the fish visibly
+            // decelerates, swings round, and accelerates out of the turn.
+            const dstep = (dt / 200) * Math.sign(fish.dir - fish.dirRender);
+            if (dstep !== 0) {
+                fish.dirRender = dstep > 0
+                    ? Math.min(fish.dir, fish.dirRender + dstep)
+                    : Math.max(fish.dir, fish.dirRender + dstep);
+            }
+            const v = fish.speed * fish.vFactor * (1 + fish.dart * (fish.type === 'tetra' ? 2.4 : 0));
+            fish.x = this.clamp(fish.x + fish.dirRender * v * (dt / 1000), 0, 1);
             fish.y = this.clamp(fish.baseY + Math.sin(t * 0.0009 + fish.phase) * 0.06, 0.12, 0.86);
 
             const fx = tx + fish.x * tw;
             const fy = ty + fish.y * th;
-            const dir = fish.dir;
-            const sz = fish.size;
-            const wig = Math.sin(t * 0.012 + fish.phase) * 0.6;
+            // Sprite scale from desired body length (fraction of tank width).
+            const sz = (fish.rel * tw) / FISH_UNIT_LEN[fish.type];
+            // Tail wiggle speeds up while darting.
+            const wig = Math.sin(t * (0.012 + fish.dart * 0.012) + fish.phase) * 0.6;
 
             c.save();
             c.translate(fx, fy);
-            c.scale(dir, 1);
+            // Squash through the turn; never collapse to zero width.
+            const sxAbs = Math.max(0.15, Math.abs(fish.dirRender));
+            c.scale((fish.dirRender < 0 ? -1 : 1) * sxAbs, 1);
 
             // Body color — silhouette colors derived from type/hue.
             let bodyCol;
@@ -871,16 +1085,34 @@
             c.fillRect(doorLeft - 3, doorTopY - 3, doorW + 6, doorBotY - doorTopY + 6);
 
             // Inside-doorway glow — warm light spilling from the shop.
-            const grad = c.createLinearGradient(doorLeft, doorTopY, doorLeft, doorBotY);
-            grad.addColorStop(0, '#3c5878');
-            grad.addColorStop(0.6, '#1a2c4a');
-            grad.addColorStop(1, '#0a1024');
-            c.fillStyle = grad;
+            c.fillStyle = this._g.doorway;
             c.fillRect(doorLeft, doorTopY, doorW, doorBotY - doorTopY);
 
-            // Hint of an interior figure / counter silhouette.
+            // ---- Interior hints: this is an aquarium shop inside too ----
+            const doorH = doorBotY - doorTopY;
+            // Faint blue glow from interior tanks along the left interior wall.
+            const tankGlow = c.createLinearGradient(doorLeft, 0, doorLeft + doorW * 0.55, 0);
+            tankGlow.addColorStop(0, 'rgba(60, 150, 210, 0.22)');
+            tankGlow.addColorStop(1, 'rgba(60, 150, 210, 0)');
+            c.fillStyle = tankGlow;
+            c.fillRect(doorLeft, doorTopY + doorH * 0.30, doorW * 0.55, doorH * 0.45);
+            // Shelf lines receding into the shop.
+            c.fillStyle = 'rgba(120, 170, 210, 0.16)';
+            c.fillRect(doorLeft + 3, doorTopY + doorH * 0.38, doorW * 0.40, 1);
+            c.fillRect(doorLeft + 3, doorTopY + doorH * 0.52, doorW * 0.36, 1);
+            c.fillRect(doorLeft + 3, doorTopY + doorH * 0.66, doorW * 0.32, 1);
+            // Tiny bright tank rectangles on the shelves.
+            c.fillStyle = 'rgba(120, 200, 240, 0.20)';
+            c.fillRect(doorLeft + doorW * 0.08, doorTopY + doorH * 0.40, doorW * 0.14, doorH * 0.09);
+            c.fillRect(doorLeft + doorW * 0.26, doorTopY + doorH * 0.54, doorW * 0.11, doorH * 0.08);
+            // Counter silhouette on the right interior side.
             c.fillStyle = 'rgba(8, 12, 24, 0.85)';
-            c.fillRect(doorLeft + 4, doorTopY + 30, doorW - 8, doorBotY - doorTopY - 34);
+            c.fillRect(doorLeft + doorW * 0.58, doorTopY + doorH * 0.55, doorW * 0.40, doorH * 0.45);
+            c.fillStyle = 'rgba(40, 56, 80, 0.5)';
+            c.fillRect(doorLeft + doorW * 0.58, doorTopY + doorH * 0.55, doorW * 0.40, 2);
+            // Floor shadow band at the threshold.
+            c.fillStyle = 'rgba(4, 8, 16, 0.6)';
+            c.fillRect(doorLeft, doorBotY - doorH * 0.10, doorW, doorH * 0.10);
 
             // Sliding door track at bottom.
             c.fillStyle = '#4a5060';
@@ -889,40 +1121,41 @@
             // Noren (split fabric curtain) hanging from the top of the doorway.
             this.drawNoren(doorLeft, doorTopY, doorW, t);
 
-            // Door-side menu/notice posters.
+            // Door-side menu/notice posters (scaled with scene).
+            const ps = this.s;
             // Left poster (red with kanji bar).
             c.fillStyle = '#cc3a2a';
-            c.fillRect(doorLeft - 12, doorTopY + 10, 10, 26);
+            c.fillRect(doorLeft - 12 * ps, doorTopY + 10, 10 * ps, 26 * ps);
             c.fillStyle = '#fff';
-            c.fillRect(doorLeft - 11, doorTopY + 14, 8, 1.5);
-            c.fillRect(doorLeft - 11, doorTopY + 20, 8, 1.5);
-            c.fillRect(doorLeft - 11, doorTopY + 26, 8, 1.5);
+            c.fillRect(doorLeft - 11 * ps, doorTopY + 10 + 4 * ps, 8 * ps, 1.5);
+            c.fillRect(doorLeft - 11 * ps, doorTopY + 10 + 10 * ps, 8 * ps, 1.5);
+            c.fillRect(doorLeft - 11 * ps, doorTopY + 10 + 16 * ps, 8 * ps, 1.5);
             // Right poster (blue with white text).
             c.fillStyle = '#3a78a8';
-            c.fillRect(doorRight + 2, doorTopY + 8, 12, 30);
+            c.fillRect(doorRight + 2, doorTopY + 8, 12 * ps, 30 * ps);
             c.fillStyle = '#fff';
-            c.fillRect(doorRight + 4, doorTopY + 12, 8, 1.5);
-            c.fillRect(doorRight + 4, doorTopY + 18, 6, 1);
-            c.fillRect(doorRight + 4, doorTopY + 22, 8, 1.5);
-            c.fillRect(doorRight + 4, doorTopY + 28, 5, 1);
+            c.fillRect(doorRight + 2 + 2 * ps, doorTopY + 8 + 4 * ps, 8 * ps, 1.5);
+            c.fillRect(doorRight + 2 + 2 * ps, doorTopY + 8 + 10 * ps, 6 * ps, 1);
+            c.fillRect(doorRight + 2 + 2 * ps, doorTopY + 8 + 14 * ps, 8 * ps, 1.5);
+            c.fillRect(doorRight + 2 + 2 * ps, doorTopY + 8 + 20 * ps, 5 * ps, 1);
         }
 
         drawNoren(doorLeft, doorTopY, doorW, t) {
             const c = this.ctx;
             // Noren is a horizontal cloth banner split into 3 vertical panels.
-            const norenH = 40;
+            const norenH = 40 * this.s;
             const norenY = doorTopY + 4;
             const panels = 3;
             const panelW = doorW / panels;
-            const sway = Math.sin(t * 0.001) * 1.5;
             // Top hanging bar.
             c.fillStyle = '#1a1a22';
             c.fillRect(doorLeft - 2, norenY - 2, doorW + 4, 2);
-            // Panels.
+            // Panels — a traveling wave passes across the cloth so each
+            // panel leads/lags its neighbour like fabric in a light draft.
             for (let i = 0; i < panels; i++) {
                 const px = doorLeft + i * panelW + 1;
                 const pw = panelW - 2;
-                const localSway = sway * (i === 1 ? 0.4 : 1.0);
+                const localSway = Math.sin(t * 0.001 - i * 0.9) * (1.2 + i * 0.25) * this.s;
                 // Panel base (dark blue indigo).
                 c.fillStyle = '#1a3a5e';
                 c.fillRect(px + localSway, norenY, pw, norenH);
@@ -932,20 +1165,22 @@
                 c.fillRect(px + pw - 1 + localSway, norenY, 1, norenH);
                 // Kanji glyph (single character) painted in white on each panel.
                 c.save();
-                c.font = "700 12px 'Yu Gothic UI', 'Meiryo', sans-serif";
+                c.font = this._fontNoren;
                 c.textAlign = 'center';
                 c.textBaseline = 'middle';
                 c.fillStyle = '#f0e8d0';
                 const glyphs = ['観', '魚', '店'];
-                c.fillText(glyphs[i], px + pw * 0.5 + localSway, norenY + 14);
+                c.fillText(glyphs[i], px + pw * 0.5 + localSway, norenY + norenH * 0.35);
                 c.restore();
             }
-            // Bottom edge fringe (small jagged line).
+            // Bottom edge fringe — each tassel follows its panel's wave phase.
             c.fillStyle = '#0a2244';
             for (let i = 0; i < panels * 6; i++) {
-                const fx = doorLeft + (i / (panels * 6)) * doorW;
-                const fh = (i % 2 === 0) ? 2 : 3;
-                c.fillRect(fx + sway * 0.4, norenY + norenH, 1.5, fh);
+                const k = i / (panels * 6);
+                const fx = doorLeft + k * doorW;
+                const fh = ((i % 2 === 0) ? 2 : 3) * this.s;
+                const fringeSway = Math.sin(t * 0.001 - k * panels * 0.9) * 0.6 * this.s;
+                c.fillRect(fx + fringeSway, norenY + norenH, 1.5, fh);
             }
         }
 
@@ -1016,12 +1251,8 @@
             c.fillStyle = '#0a1830';
             c.fillRect(this.shopLeft - 8, awnTop - 3, L.sw + 16, 3);
 
-            // Main awning panel.
-            const grad = this.ctx.createLinearGradient(0, awnTop, 0, awnTop + awnH);
-            grad.addColorStop(0, '#3aa0e0');
-            grad.addColorStop(0.6, '#287cbc');
-            grad.addColorStop(1, '#1c5a98');
-            c.fillStyle = grad;
+            // Main awning panel (cached gradient — geometry is resize-static).
+            c.fillStyle = this._g.awning;
             c.fillRect(this.shopLeft - 8, awnTop, L.sw + 16, awnH);
 
             // Highlight band along the top.
@@ -1064,7 +1295,7 @@
             c.textBaseline = 'middle';
 
             // Main kanji title.
-            c.font = FONT_SIGN;
+            c.font = this._fontSign;
             c.fillStyle = '#f0f4fc';
             c.textAlign = 'left';
             const titleX = this.shopLeft + 8;
@@ -1076,7 +1307,7 @@
             c.fillText(SHOP_NAME_KANA, titleX, titleY);
 
             // Sub-line (telephone).
-            c.font = FONT_SIGN_SUB;
+            c.font = this._fontSignSub;
             c.fillStyle = '#c8dceb';
             c.fillText(SHOP_TEL, titleX, awnTop + awnH * 0.78);
 
@@ -1128,7 +1359,7 @@
             c.fillRect(acX + acW, acY + acH - 4, 3, 2);
             // Drip line dangling.
             c.fillStyle = '#2a2a2a';
-            c.fillRect(acX + acW * 0.85, acY + acH, 1, 14);
+            c.fillRect(acX + acW * 0.85, acY + acH, 1, 14 * this.s);
         }
 
         // =========================================================
@@ -1137,13 +1368,14 @@
         drawHangingLantern(t) {
             const c = this.ctx;
             const L = this._layout;
-            // Hanging from the awning above the doorway.
-            const lx = L.doorLeft + L.doorW * 0.5;
-            const sway = Math.sin(t * 0.0007) * 1.2;
+            // Hanging from the awning, offset right of the door's center so
+            // it doesn't cover the noren's middle kanji.
+            const lx = L.doorLeft + L.doorW * 0.82;
+            const sway = Math.sin(t * 0.0007) * 1.2 * this.s;
             const cordTop = this.awningBotY + 2;
-            const lanternTop = cordTop + 12;
-            const lanternH = 18;
-            const lanternW = 14;
+            const lanternTop = cordTop + 12 * this.s;
+            const lanternH = 18 * this.s;
+            const lanternW = 14 * this.s;
             // Cord.
             c.fillStyle = '#1a1010';
             c.fillRect(lx - 0.5 + sway * 0.3, cordTop, 1, lanternTop - cordTop);
@@ -1169,7 +1401,7 @@
             c.fillRect(lanX - 1, lanternTop + lanternH, lanternW + 2, 2);
             // White kanji on the lantern (single character).
             c.save();
-            c.font = "700 8px 'Yu Gothic UI', 'Meiryo', sans-serif";
+            c.font = this._fontLantern;
             c.textAlign = 'center';
             c.textBaseline = 'middle';
             c.fillStyle = '#fff0d0';
@@ -1178,12 +1410,13 @@
             // Soft glow halo.
             c.save();
             c.globalCompositeOperation = 'lighter';
-            const halo = c.createRadialGradient(lx + sway, lanternTop + lanternH * 0.5, 0, lx + sway, lanternTop + lanternH * 0.5, 40);
+            const haloR = 40 * this.s;
+            const halo = c.createRadialGradient(lx + sway, lanternTop + lanternH * 0.5, 0, lx + sway, lanternTop + lanternH * 0.5, haloR);
             halo.addColorStop(0, 'rgba(255, 140, 100, 0.40)');
             halo.addColorStop(0.5, 'rgba(255, 100, 80, 0.15)');
             halo.addColorStop(1, 'rgba(255, 80, 60, 0)');
             c.fillStyle = halo;
-            c.fillRect(lx + sway - 40, lanternTop - 8, 80, lanternH + 24);
+            c.fillRect(lx + sway - haloR, lanternTop - haloR * 0.4, haloR * 2, lanternH + haloR);
             c.restore();
         }
 
@@ -1193,38 +1426,58 @@
         drawGround(atmo) {
             const c = this.ctx;
             const w = this.width, h = this.height;
-            // Wet pavement gradient.
-            const grad = c.createLinearGradient(0, this.groundY, 0, h);
-            grad.addColorStop(0, '#0a0e1a');
-            grad.addColorStop(0.4, '#0e1424');
-            grad.addColorStop(1, '#04080f');
-            c.fillStyle = grad;
+            // Wet pavement (cached gradient).
+            c.fillStyle = this._g.ground;
             c.fillRect(0, this.groundY, w, h - this.groundY);
             // Curb edge — slight highlight where curb meets road.
             c.fillStyle = 'rgba(60, 80, 110, 0.30)';
             c.fillRect(0, this.groundY, w, 1);
-            // Subtle vertical reflections under the storefront (lit windows reflecting).
+
+            // ---- Wet reflections: wobbling vertical slices, konbini-style ----
+            // Each zone reflects the light source above it; slices shift
+            // sideways with a slow sine so the water reads as wet, not painted.
+            const L = this._layout;
+            const groundH = h - this.groundY;
+            const tRef = this._reflT || 0;
             c.save();
             c.globalCompositeOperation = 'lighter';
-            // Aquarium reflection — cyan band.
-            const L = this._layout;
-            const aqRefl = c.createLinearGradient(0, this.groundY, 0, h);
-            aqRefl.addColorStop(0, 'rgba(60, 160, 220, 0.18)');
-            aqRefl.addColorStop(1, 'rgba(60, 160, 220, 0)');
-            c.fillStyle = aqRefl;
-            c.fillRect(L.tanksLeft - 4, this.groundY, L.tanksW + 8, h - this.groundY);
-            // Awning blue glow reflection (mild, full width).
-            const awnRefl = c.createLinearGradient(0, this.groundY, 0, this.groundY + 60);
-            awnRefl.addColorStop(0, 'rgba(60, 140, 200, 0.08)');
-            awnRefl.addColorStop(1, 'rgba(60, 140, 200, 0)');
-            c.fillStyle = awnRefl;
-            c.fillRect(this.shopLeft - 8, this.groundY, L.sw + 16, 60);
-            // Doorway warm spill.
-            const doorRefl = c.createLinearGradient(0, this.groundY, 0, this.groundY + 36);
-            doorRefl.addColorStop(0, 'rgba(220, 160, 120, 0.10)');
-            doorRefl.addColorStop(1, 'rgba(220, 160, 120, 0)');
-            c.fillStyle = doorRefl;
-            c.fillRect(L.doorLeft, this.groundY, L.doorW, 36);
+            const zones = [
+                // Aquarium cyan glow — the dominant reflection.
+                { x: L.tanksLeft - 4, w: L.tanksW + 8, rgb: '60, 160, 220', a: 0.30, depth: groundH },
+                // Awning blue, soft and shallow.
+                { x: this.shopLeft - 8, w: L.sw + 16, rgb: '60, 140, 200', a: 0.10, depth: 60 * this.s },
+                // Doorway warm spill.
+                { x: L.doorLeft, w: L.doorW, rgb: '220, 160, 120', a: 0.25, depth: 42 * this.s },
+                // Vending machine cool spill.
+                { x: L.vmX - 2, w: L.vmW + 4, rgb: '140, 180, 250', a: 0.18, depth: 50 * this.s },
+            ];
+            const yStep = Math.max(2, Math.round(3 * this.s));
+            for (const z of zones) {
+                const rows = Math.min(z.depth, groundH);
+                for (let yy = 0; yy < rows; yy += yStep) {
+                    const k = yy / rows;
+                    const wob = Math.sin(tRef * 0.0012 + yy * 0.22 + z.x) * (1 + k * 4) * this.s;
+                    const a = z.a * (1 - k) * (1 - k);
+                    if (a < 0.01) continue;
+                    c.fillStyle = `rgba(${z.rgb}, ${a.toFixed(3)})`;
+                    c.fillRect(z.x + wob, this.groundY + yy, z.w, yStep);
+                }
+            }
+
+            // Puddles — sky-toned ellipses with a light shimmer.
+            for (const pud of this._puddles) {
+                const px = pud.xk * w;
+                const py = this.groundY + pud.yk * groundH;
+                c.fillStyle = 'rgba(60, 90, 140, 0.18)';
+                c.beginPath();
+                c.ellipse(px, py, pud.w, pud.h, 0, 0, Math.PI * 2);
+                c.fill();
+                const shim = 0.5 + 0.5 * Math.sin(tRef * 0.0009 + pud.phase);
+                c.fillStyle = `rgba(160, 200, 250, ${0.05 + shim * 0.07})`;
+                c.beginPath();
+                c.ellipse(px - pud.w * 0.2, py - pud.h * 0.2, pud.w * 0.55, pud.h * 0.4, 0, 0, Math.PI * 2);
+                c.fill();
+            }
             c.restore();
 
             // Some tiny pavement cracks/scuffs.
@@ -1242,10 +1495,18 @@
 
         drawPlanters() {
             const c = this.ctx;
-            for (const planter of this._planterPositions) {
-                const { x, y, w } = planter;
+            const s = this.s;
+            // Hydrangea palettes keyed by the per-puff hue chosen in init().
+            const PUFF_COLORS = {
+                pink: ['#d04088', '#e870b0', '#a02868'],
+                blue: ['#5878c0', '#8aa8e0', '#3c5898'],
+                magenta: ['#c0488c', '#e078b0', '#982868'],
+            };
+            for (let pi = 0; pi < this._planterPositions.length; pi++) {
+                const { x, y, w } = this._planterPositions[pi];
+                const planter = this.planters[pi % this.planters.length];
                 // Planter box.
-                const pH = 14;
+                const pH = 14 * s;
                 const pW = w;
                 const px = x - pW * 0.5;
                 const py = y - pH;
@@ -1258,27 +1519,28 @@
                 // Soil top.
                 c.fillStyle = '#2a1c14';
                 c.fillRect(px, py, pW, 2);
-                // Flower puffs above.
-                const blooms = pW > 35 ? 7 : 4;
+                // Flower puffs — organic clustering from the per-planter
+                // offsets generated in init(), so no two planters match.
+                const blooms = Math.min(planter.puffs, planter.puffOffsets.length);
                 for (let i = 0; i < blooms; i++) {
-                    const bx = px + 4 + (i / Math.max(1, blooms - 1)) * (pW - 8);
-                    const by = py - 4 - (i % 2) * 2;
-                    // Cluster of 5 small fillRects.
-                    const colors = i % 3 === 0
-                        ? ['#d04088', '#e870b0', '#a02868']
-                        : (i % 3 === 1 ? ['#5878c0', '#8aa8e0', '#3c5898'] : ['#c0488c', '#e078b0', '#982868']);
+                    const off = planter.puffOffsets[i];
+                    const bx = x + off.dx * s * (pW / (48 * s));
+                    const by = py - 3 * s + off.dy * s * 0.5;
+                    const r = off.r * s * 0.9;
+                    const colors = PUFF_COLORS[off.hue];
+                    // Puff body.
                     c.fillStyle = colors[1];
-                    c.fillRect(bx - 4, by - 2, 8, 4);
+                    c.fillRect(bx - r, by - r * 0.5, r * 2, r);
                     c.fillStyle = colors[0];
-                    c.fillRect(bx - 3, by - 4, 6, 2);
-                    c.fillRect(bx - 3, by + 2, 6, 2);
-                    // Tiny darker centers.
+                    c.fillRect(bx - r * 0.75, by - r, r * 1.5, r * 0.5);
+                    c.fillRect(bx - r * 0.75, by + r * 0.5, r * 1.5, r * 0.5);
+                    // Darker floret centers.
                     c.fillStyle = colors[2];
-                    c.fillRect(bx - 1, by - 1, 2, 2);
-                    // Leaf hint.
+                    c.fillRect(bx - r * 0.25, by - r * 0.25, r * 0.5, r * 0.5);
+                    // Leaf hints poking from beneath the puff.
                     c.fillStyle = '#1a4030';
-                    c.fillRect(bx - 5, by + 2, 2, 1);
-                    c.fillRect(bx + 3, by + 2, 2, 1);
+                    c.fillRect(bx - r - 1.5 * s, by + r * 0.5, 2 * s, 1 * s);
+                    c.fillRect(bx + r - 0.5 * s, by + r * 0.5, 2 * s, 1 * s);
                 }
             }
         }
@@ -1293,9 +1555,9 @@
             // Scooter geometry (side view, facing left).
             c.save();
             c.translate(baseX, baseY + wobble);
-            // Scale up — the small pixel units are sized for a tiny preview;
-            // at a normal viewport, the scooter should read ~80–100px wide.
-            c.scale(2.4, 2.4);
+            // Local units are authored at ~1/2.4 of 720p size; the scene
+            // scale keeps the scooter proportional at larger viewports.
+            c.scale(2.4 * this.s, 2.4 * this.s);
 
             // Rear wheel.
             const wheelR = 5;
@@ -1380,7 +1642,10 @@
             c.save();
             c.translate(baseX, baseY);
             // Scale up the figure so the proprietor reads at storefront scale.
-            c.scale(this.person.facing * 2.6, 2.6);
+            // facingRender eases through 0 during turns (brief squash).
+            const fr = this.person.facingRender;
+            const fxAbs = Math.max(0.12, Math.abs(fr));
+            c.scale((fr < 0 ? -1 : 1) * fxAbs * 2.6 * this.s, 2.6 * this.s);
 
             // Pant legs.
             c.fillStyle = '#2a3850';
@@ -1453,7 +1718,8 @@
                 if (this.cat.pauseMs > 0) {
                     this.cat.pauseMs -= dt;
                 } else {
-                    this.cat.x += (this.cat.dir * this.cat.speed * dt) / 1000;
+                    // Speed scales with sprite size so the gait reads right.
+                    this.cat.x += (this.cat.dir * this.cat.speed * this.s * dt) / 1000;
                     this.cat.walkPhase += dt * 0.012;
                     // Random pause.
                     if (Math.random() < 0.001) {
@@ -1472,10 +1738,11 @@
             const c = this.ctx;
             const cat = this.cat;
             const baseY = this.groundY - 2;
+            const catScale = 1.6 * this.s;
             const bob = cat.pauseMs > 0 ? 0 : Math.sin(cat.walkPhase) * 0.5;
             c.save();
-            c.translate(cat.x, baseY + bob);
-            c.scale(cat.dir, 1);
+            c.translate(cat.x, baseY + bob * catScale);
+            c.scale(cat.dir * catScale, catScale);
 
             // Body.
             c.fillStyle = '#1a1a22';
@@ -1501,9 +1768,9 @@
             c.fillRect(7, -7, 0.8, 0.8);
             c.restore();
 
-            // Shadow under cat.
+            // Shadow under cat (centered regardless of direction).
             c.fillStyle = 'rgba(0, 0, 0, 0.4)';
-            c.fillRect(cat.x - 7 * cat.dir, baseY + 0.5, 14, 1);
+            c.fillRect(cat.x - 7 * catScale, baseY + 0.5, 14 * catScale, 1);
         }
 
         // =========================================================
@@ -1514,25 +1781,26 @@
             const L = this._layout;
             const x = L.lampX;
             const topY = L.lampY;
+            const s = this.s;
 
             // Pole.
             c.fillStyle = '#0a0d18';
-            c.fillRect(x - 1.5, topY, 3, this.groundY - topY);
+            c.fillRect(x - 1.5 * s, topY, 3 * s, this.groundY - topY);
             // Slight highlight stripe.
             c.fillStyle = 'rgba(60, 80, 100, 0.3)';
-            c.fillRect(x - 1.5, topY, 1, this.groundY - topY);
+            c.fillRect(x - 1.5 * s, topY, 1 * s, this.groundY - topY);
             // Base.
             c.fillStyle = '#040810';
-            c.fillRect(x - 5, this.groundY - 4, 10, 4);
+            c.fillRect(x - 5 * s, this.groundY - 4 * s, 10 * s, 4 * s);
 
             // Top arm extending right.
             c.fillStyle = '#0a0d18';
-            c.fillRect(x, topY, 18, 1.5);
+            c.fillRect(x, topY, 18 * s, 1.5 * s);
             // Lantern housing — vintage frosted glass.
-            const lhX = x + 16;
-            const lhY = topY - 4;
-            const lhW = 8;
-            const lhH = 14;
+            const lhX = x + 16 * s;
+            const lhY = topY - 4 * s;
+            const lhW = 8 * s;
+            const lhH = 14 * s;
             // Outer dark frame.
             c.fillStyle = '#040810';
             c.fillRect(lhX - 1, lhY - 1, lhW + 2, lhH + 2);
@@ -1550,16 +1818,17 @@
             }
             // Top cap.
             c.fillStyle = '#0a0d18';
-            c.fillRect(lhX - 2, lhY - 3, lhW + 4, 3);
+            c.fillRect(lhX - 2, lhY - 3 * s, lhW + 4, 3 * s);
             // Halo.
             c.save();
             c.globalCompositeOperation = 'lighter';
-            const halo = c.createRadialGradient(lhX + lhW * 0.5, lhY + lhH * 0.5, 0, lhX + lhW * 0.5, lhY + lhH * 0.5, 60);
+            const haloR = 60 * s;
+            const halo = c.createRadialGradient(lhX + lhW * 0.5, lhY + lhH * 0.5, 0, lhX + lhW * 0.5, lhY + lhH * 0.5, haloR);
             halo.addColorStop(0, 'rgba(255, 220, 150, 0.35)');
             halo.addColorStop(0.5, 'rgba(255, 200, 120, 0.10)');
             halo.addColorStop(1, 'rgba(255, 180, 80, 0)');
             c.fillStyle = halo;
-            c.fillRect(lhX - 60, lhY - 60, 120 + lhW, 120 + lhH);
+            c.fillRect(lhX - haloR, lhY - haloR, haloR * 2 + lhW, haloR * 2 + lhH);
             c.restore();
 
             // Save for moth + gnats positioning.
@@ -1573,9 +1842,9 @@
             const cx = this._lampLightCx || (L.lampX + 24);
             // Project a soft elliptical pool onto the wet ground directly below the lamp.
             const poolCx = cx;
-            const poolCy = this.groundY + 8;
-            const poolW = 60;
-            const poolH = 16;
+            const poolCy = this.groundY + 8 * this.s;
+            const poolW = 60 * this.s;
+            const poolH = 16 * this.s;
             c.save();
             c.globalCompositeOperation = 'lighter';
             const grad = c.createRadialGradient(poolCx, poolCy, 0, poolCx, poolCy, poolW);
@@ -1591,36 +1860,41 @@
             const c = this.ctx;
             const cx = this._lampLightCx || 0;
             const cy = this._lampLightCy || 0;
+            const s = this.s;
             // Lissajous-ish orbit.
             const tt = this.moth.t;
-            const mx = cx + Math.cos(tt * 1.7) * 18 + Math.sin(tt * 2.3) * 6;
-            const my = cy + Math.sin(tt * 1.3) * 12 + Math.cos(tt * 2.1) * 4;
+            const mx = cx + (Math.cos(tt * 1.7) * 18 + Math.sin(tt * 2.3) * 6) * s;
+            const my = cy + (Math.sin(tt * 1.3) * 12 + Math.cos(tt * 2.1) * 4) * s;
             // Flutter (rapid wing flap).
             const flap = (Math.sin(tt * 18) + 1) * 0.5;
+            c.save();
+            c.globalAlpha = this.moth.alpha;
             // Body.
             c.fillStyle = '#3a2820';
-            c.fillRect(mx - 0.5, my - 0.5, 1.5, 2);
+            c.fillRect(mx - 0.5 * s, my - 0.5 * s, 1.5 * s, 2 * s);
             // Wings.
             c.fillStyle = `rgba(220, 200, 160, ${0.7 + flap * 0.3})`;
-            c.fillRect(mx - 3, my - 1, 2, 2);
-            c.fillRect(mx + 1.5, my - 1, 2, 2);
+            c.fillRect(mx - 3 * s, my - 1 * s, 2 * s, 2 * s);
+            c.fillRect(mx + 1.5 * s, my - 1 * s, 2 * s, 2 * s);
             // Wing detail.
             c.fillStyle = `rgba(100, 80, 60, ${0.6})`;
-            c.fillRect(mx - 3 + flap, my - 0.5, 1, 1);
-            c.fillRect(mx + 2 - flap, my - 0.5, 1, 1);
+            c.fillRect(mx + (-3 + flap) * s, my - 0.5 * s, 1 * s, 1 * s);
+            c.fillRect(mx + (2 - flap) * s, my - 0.5 * s, 1 * s, 1 * s);
+            c.restore();
         }
 
         drawGnats(t) {
             const c = this.ctx;
             const cx = this._lampLightCx || 0;
             const cy = this._lampLightCy || 0;
+            const s = this.s;
             for (let i = 0; i < this.gnats.length; i++) {
                 const g = this.gnats[i];
                 const tt = t * 0.001 * g.speed + g.phase;
-                const gx = cx + Math.cos(tt) * g.orbitR + Math.sin(tt * 1.7) * 3;
-                const gy = cy + Math.sin(tt) * g.orbitR * 0.5 + g.yOffset;
+                const gx = cx + (Math.cos(tt) * g.orbitR + Math.sin(tt * 1.7) * 3) * s;
+                const gy = cy + (Math.sin(tt) * g.orbitR * 0.5 + g.yOffset) * s;
                 c.fillStyle = `rgba(255, 230, 180, ${0.4 + 0.4 * Math.sin(tt * 6)})`;
-                c.fillRect(gx, gy, 0.8, 0.8);
+                c.fillRect(gx, gy, 0.8 * s, 0.8 * s);
             }
         }
 
@@ -1716,9 +1990,10 @@
         drawDrizzle(t, dt) {
             const c = this.ctx;
             const w = this.width, h = this.height;
+            const s = this.s;
             c.save();
             c.strokeStyle = 'rgba(180, 200, 230, 0.4)';
-            c.lineWidth = 0.7;
+            c.lineWidth = 0.7 * s;
             for (let i = 0; i < this.drizzle.length; i++) {
                 const d = this.drizzle[i];
                 const px = d.x * w;
@@ -1726,10 +2001,10 @@
                 c.globalAlpha = d.alpha;
                 c.beginPath();
                 c.moveTo(px, py);
-                c.lineTo(px - 2, py + d.len);
+                c.lineTo(px - 2 * s, py + d.len * s);
                 c.stroke();
-                d.y += (d.speed * dt) / 1000 / h;
-                d.x -= (dt * 0.05) / w;
+                d.y += (d.speed * s * dt) / 1000 / h;
+                d.x -= (dt * 0.05 * s) / w;
                 if (d.y > 1 || d.x < -0.05) {
                     Object.assign(d, this.makeDrizzle(true));
                 }

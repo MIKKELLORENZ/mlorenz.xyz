@@ -52,6 +52,14 @@
             return x * x * (3 - 2 * x);
         }
 
+        // Viewport-relative scale for sprites drawn in fixed local pixels.
+        // Architecture lays out proportionally (w/h fractions), but actors and
+        // props authored in absolute px need this multiplier to keep their
+        // size relative to buildings consistent across resolutions.
+        sceneScale(ref = 720, lo = 0.8, hi = 2.2) {
+            return this.clamp(this.height / ref, lo, hi);
+        }
+
         // Deterministic [0,1) PRNG (mulberry32) for reproducible scene layouts.
         rng(seed) {
             let s = seed >>> 0;

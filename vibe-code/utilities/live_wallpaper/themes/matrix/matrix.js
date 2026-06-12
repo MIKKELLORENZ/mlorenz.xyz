@@ -103,7 +103,7 @@
 
         resize(w, h) {
             super.resize(w, h);
-            this.baseFontSize = this.clamp(Math.round(w / 90), 14, 22);
+            this.baseFontSize = this.clamp(Math.round(w / 90), 14, 34);
             this.cellW = Math.max(6, Math.round(this.baseFontSize * 0.60));
             this.cellH = Math.max(8, Math.round(this.baseFontSize * 1.05));
             this.gridCols = Math.ceil(w / this.cellW);

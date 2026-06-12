@@ -415,7 +415,6 @@
                 y: seedTop ? Math.random() * -0.25 : Math.random() * 1.0,
                 len: 24 + Math.random() * 26,
                 speed: 700 + Math.random() * 280,
-                drift: 0.18,
                 alpha: 0.40 + Math.random() * 0.30,
                 width: 1.1 + Math.random() * 0.5,
             };
@@ -426,7 +425,6 @@
                 y: seedTop ? Math.random() * -0.25 : Math.random() * 1.0,
                 len: 5 + Math.random() * 8,
                 speed: 360 + Math.random() * 160,
-                drift: 0.14,
                 alpha: 0.10 + Math.random() * 0.18,
                 width: 0.7,
             };
@@ -434,13 +432,23 @@
 
         resize(w, h) {
             super.resize(w, h);
+            // Sprite scale for actors/props authored in fixed local px.
+            this.s = this.sceneScale(720, 0.8, 2.2);
             this.groundY = h * 0.80;
             this.storeY = h * 0.42;
-            this.signCy = this.storeY - 34;
+            this.signCy = this.storeY - 34 * this.s;
             this.storeLeft = w * 0.20;
             this.storeRight = w * 0.78;
 
             const sw = this.storeRight - this.storeLeft;
+            // Responsive fonts — sized from the storefront so signage stays
+            // legible (and proportionate) at every resolution.
+            const kanaStack = "'Yu Gothic UI','Yu Gothic','Hiragino Kaku Gothic ProN','Meiryo','MS Gothic',sans-serif";
+            this._fontKanaBig = `900 ${Math.max(16, Math.round(sw * 0.040))}px ${kanaStack}`;
+            this._fontKanaSub = `700 ${Math.max(8, Math.round(sw * 0.016))}px ${kanaStack}`;
+            this._fontKanaTiny = `700 ${Math.max(6, Math.round(sw * 0.0125))}px ${kanaStack}`;
+            this._fontLatin = `900 ${Math.max(8, Math.round(sw * 0.016))}px 'Helvetica Neue','Arial Black',sans-serif`;
+
             const winLeft = this.storeLeft + sw * 0.06;
             const winRight = this.storeLeft + sw * 0.94;
             const winTop = this.storeY + 22;
@@ -448,7 +456,9 @@
             const winW = winRight - winLeft;
             const winH = winBottom - winTop;
 
-            const doorW = Math.min(sw * 0.20, 130);
+            // Door cap scales with the viewport (the old 130px cap squeezed
+            // the doorway at 1440p+).
+            const doorW = Math.min(sw * 0.20, w * 0.11);
             const doorLeft = this.storeLeft + sw * 0.50 - doorW * 0.5;
 
             const fridgeW = winW * 0.26;
@@ -469,17 +479,19 @@
             // competing with the storefront vertically.
             const vmH = (this.groundY - this.storeY) * 0.74;
             const vmW = vmH * 0.50;
-            const vmX = this.storeLeft - vmW - 22;
+            const vmX = this.storeLeft - vmW - 22 * this.s;
             const vmY = this.groundY - vmH;
             const vm2H = vmH * 0.88;
             const vm2W = vm2H * 0.46;
-            const vm2X = vmX - vm2W - 6;
+            const vm2X = vmX - vm2W - 6 * this.s;
             const vm2Y = this.groundY - vm2H;
 
-            const streetlightX = vm2X - 80;
-            const sandwichX = this.storeLeft - 60;
-            const trashX = this.storeRight + 10;
-            const bikeX = this.storeRight + 96;
+            // Street furniture offsets scale with the scene so the layout
+            // composition holds at any resolution.
+            const streetlightX = vm2X - 80 * this.s;
+            const sandwichX = this.storeLeft - 60 * this.s;
+            const trashX = this.storeRight + 10 * this.s;
+            const bikeX = this.storeRight + 96 * this.s;
 
             this._layout = {
                 sw, winLeft, winRight, winTop, winBottom, winW, winH,
@@ -590,8 +602,17 @@
             this.customerNextMs -= dt;
             if (this.customerNextMs <= 0) {
                 this.customerVisible = !this.customerVisible;
-                this.customerVariant = (Math.random() * 3) | 0;
+                if (this.customerVisible) this.customerVariant = (Math.random() * 3) | 0;
                 this.customerNextMs = 7000 + Math.random() * 14000;
+            }
+            // Fade in/out (~400ms) instead of popping.
+            {
+                const target = this.customerVisible ? 1 : 0;
+                const step = dt / 400;
+                if (this.customerAlpha === undefined) this.customerAlpha = target;
+                this.customerAlpha = target > this.customerAlpha
+                    ? Math.min(target, this.customerAlpha + step)
+                    : Math.max(target, this.customerAlpha - step);
             }
 
             // ---- Sign flickers ----
@@ -637,7 +658,7 @@
             // 11) Counter + register + cashier
             this.drawCounterAndRegister();
             // 12) Browsing customer inside
-            if (this.customerVisible) this.drawBrowsingCustomer(t);
+            if (this.customerAlpha > 0.01) this.drawBrowsingCustomer(t);
             // 13) Window mullion stroke
             this.drawWindowMullion();
             // 14) Side-pane posters
@@ -840,9 +861,17 @@
                     c.fillRect(nx, by - 6, bw * 0.28, 6);
                 }
             }
-            // City windows — meaningfully visible only at night
+            // City windows — meaningfully visible only at night.
+            // Alpha is quantized into a small shared color table so the loop
+            // doesn't build ~240 rgba strings per frame.
             const winK = Math.pow(atmo.dark, 0.7);
             if (winK > 0.05) {
+                if (!this._cityWinColors) {
+                    this._cityWinColors = [];
+                    for (let q = 0; q <= 32; q++) {
+                        this._cityWinColors[q] = `rgba(255, 218, 130, ${(q / 32).toFixed(3)})`;
+                    }
+                }
                 for (let i = 0; i < this.cityWindows.length; i++) {
                     const cw = this.cityWindows[i];
                     const px = cw.x * w;
@@ -850,7 +879,9 @@
                     if (py > this.storeY - 4) continue;
                     let bri = cw.bri;
                     if (cw.flicker) bri *= 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * 0.008 + cw.phase));
-                    c.fillStyle = `rgba(255, 218, 130, ${bri * 0.78 * winK})`;
+                    const q = Math.min(32, Math.round(bri * 0.78 * winK * 32));
+                    if (q === 0) continue;
+                    c.fillStyle = this._cityWinColors[q];
                     c.fillRect(px, py, 1.4, 1.4);
                 }
             }
@@ -1057,7 +1088,7 @@
             }
             // Brand band in the middle of the awning — proper typography
             c.save();
-            c.font = FONT_KANA_SUB;
+            c.font = this._fontKanaSub;
             c.textAlign = 'center';
             c.textBaseline = 'middle';
             c.fillStyle = '#162540';
@@ -1177,9 +1208,9 @@
 
             // Interior gradient (warmer than before, with subtle floor wash)
             const interior = c.createLinearGradient(0, winTop, 0, L.winBottom);
-            interior.addColorStop(0, '#fbf6dc');
-            interior.addColorStop(0.55, '#ecedce');
-            interior.addColorStop(1, '#aab59a');
+            interior.addColorStop(0, '#fdf6d2');
+            interior.addColorStop(0.55, '#f2e8c2');
+            interior.addColorStop(1, '#bdb392');
             c.fillStyle = interior;
             c.fillRect(winLeft, winTop, winW, winH);
 
@@ -1329,7 +1360,7 @@
             // small and proportional, not bulging out
             const salX = rackX + rackW + 8;
             const salY = sa.y + sa.h - 2;
-            const figScale = 1.15;
+            const figScale = 1.15 * this.s;
             c.save();
             c.translate(salX, salY);
             c.scale(figScale, figScale);
@@ -1859,7 +1890,7 @@
             const baseY = L.winBottom - 6;
             const bob = Math.sin(t * 0.0028) * 1.4;
             const stepK = Math.sin(t * 0.004);
-            const figScale = 1.15;
+            const figScale = 1.15 * this.s;
 
             // Variant 0 = bag, 1 = briefcase, 2 = empty hands
             const variant = this.customerVariant;
@@ -1867,6 +1898,7 @@
             const coatColors = ['rgba(30, 36, 44, 0.78)', 'rgba(58, 38, 60, 0.78)', 'rgba(40, 50, 38, 0.78)'];
 
             c.save();
+            c.globalAlpha = this.customerAlpha;
             c.translate(cx, baseY + bob);
             c.scale(figScale, figScale);
 
@@ -2145,7 +2177,14 @@
 
             const cx = doorLeft + doorW * (d.customerDir > 0 ? crossK : (1 - crossK));
             const baseY = winBottom - 6;
-            const figScale = 1.05;
+            const figScale = 1.05 * this.s;
+
+            // Fade with the door phase instead of popping into existence:
+            // ghost-in while opening, solid while open, ghost-out closing.
+            let alpha = 1;
+            if (d.state === 'opening') alpha = d.openProgress;
+            else if (d.state === 'closing') alpha = d.openProgress;
+            c.globalAlpha = Math.max(0, Math.min(1, alpha));
 
             c.translate(cx, baseY);
             c.scale(d.customerDir * figScale, figScale);
@@ -2199,7 +2238,7 @@
             }
             // Centered white kana mark — proper typography
             c.fillStyle = '#fff';
-            c.font = FONT_KANA_TINY;
+            c.font = this._fontKanaTiny;
             c.textAlign = 'center';
             c.textBaseline = 'middle';
             c.fillText('営業中', norenX + norenW * 0.5 + sway, norenY + norenH * 0.5);
@@ -2234,7 +2273,7 @@
             const sw = L.sw;
             const signLeft = this.storeLeft + sw * 0.18;
             const signW = sw * 0.64;
-            const signH = 56;
+            const signH = 56 * this.s;
             const signTop = this.signCy - signH * 0.5;
             const signBot = this.signCy + signH * 0.5;
             const cy = this.signCy;
@@ -2317,14 +2356,14 @@
             // Center brand text — real Japanese typography
             c.save();
             c.fillStyle = '#162540';
-            c.font = FONT_KANA_BIG;
+            c.font = this._fontKanaBig;
             c.textAlign = 'center';
             c.textBaseline = 'middle';
-            c.fillText(BRAND_KANA, signLeft + signW * 0.5, cy - 4);
-            // English sub-text below
+            c.fillText(BRAND_KANA, signLeft + signW * 0.5, cy - 4 * this.s);
+            // English sub-text below (offset scales with the sign)
             c.fillStyle = '#e8392a';
-            c.font = FONT_LATIN;
-            c.fillText(BRAND_LATIN, signLeft + signW * 0.5, cy + 14);
+            c.font = this._fontLatin;
+            c.fillText(BRAND_LATIN, signLeft + signW * 0.5, cy + 16 * this.s);
             c.restore();
 
             c.globalAlpha = 1;
@@ -2397,15 +2436,15 @@
             const sw = L.sw;
             const signLeft = this.storeLeft + sw * 0.18;
             const signW = sw * 0.64;
-            const rowY = this.signCy + 28 + 4;
-            const rowH = 13;
+            const rowY = this.signCy + (28 + 4) * this.s;
+            const rowH = 13 * this.s;
             const darkK = this.atmo ? this.atmo.dark : 1;
             const baseOn = this.tagOn * (0.20 + 0.80 * darkK);
             // Three panels, fractional widths sum to 1.
             const panels = [
-                { w: 0.20, bg: '#0a2c5e', fg: '#ffffff', text: 'ATM',         font: FONT_LATIN,    glow: 'rgba(80, 160, 255,' },
-                { w: 0.30, bg: '#ffcc1f', fg: '#1a1410', text: '宅急便',       font: FONT_KANA_SUB, glow: 'rgba(255, 200, 90,' },
-                { w: 0.50, bg: '#d9241f', fg: '#ffffff', text: '24時間営業',   font: FONT_KANA_SUB, glow: 'rgba(255, 80, 50,'  },
+                { w: 0.20, bg: '#0a2c5e', fg: '#ffffff', text: 'ATM',         font: this._fontLatin,   glow: 'rgba(80, 160, 255,' },
+                { w: 0.30, bg: '#ffcc1f', fg: '#1a1410', text: '宅急便',       font: this._fontKanaSub, glow: 'rgba(255, 200, 90,' },
+                { w: 0.50, bg: '#d9241f', fg: '#ffffff', text: '24時間営業',   font: this._fontKanaSub, glow: 'rgba(255, 80, 50,'  },
             ];
             let px = signLeft;
             const gap = 4;
@@ -2458,10 +2497,10 @@
 
             // Vertical sub-pole sign hanging from sign-stack right edge: "営業中"
             // (now open). Painted as a tall narrow rectangle.
-            const vertX = signLeft + signW + 6;
-            const vertW = 14;
-            const vertY = this.signCy - 24;
-            const vertH = 64;
+            const vertX = signLeft + signW + 6 * this.s;
+            const vertW = 14 * this.s;
+            const vertY = this.signCy - 24 * this.s;
+            const vertH = 64 * this.s;
             c.save();
             c.globalCompositeOperation = 'lighter';
             const vGlow = c.createRadialGradient(vertX + vertW * 0.5, vertY + vertH * 0.5, 2, vertX + vertW * 0.5, vertY + vertH * 0.5, 30);
@@ -2475,7 +2514,7 @@
             c.fillStyle = 'rgba(255, 255, 255, 0.1)';
             c.fillRect(vertX, vertY, 1, vertH);
             c.fillStyle = '#fff';
-            c.font = FONT_KANA_TINY;
+            c.font = this._fontKanaTiny;
             c.textAlign = 'center';
             c.textBaseline = 'middle';
             c.fillText('営', vertX + vertW * 0.5, vertY + vertH * 0.20);
@@ -2490,33 +2529,36 @@
             const c = this.ctx;
             const x = this._streetlightX;
             const baseY = this.groundY;
+            const s = this.s;
             // Pole
             c.fillStyle = '#0a0e16';
-            c.fillRect(x - 1.5, baseY - 130, 3, 130);
+            c.fillRect(x - 1.5 * s, baseY - 130 * s, 3 * s, 130 * s);
             // Decorative band
             c.fillStyle = '#1a2030';
-            c.fillRect(x - 3, baseY - 24, 6, 4);
-            c.fillRect(x - 3, baseY - 60, 6, 2);
+            c.fillRect(x - 3 * s, baseY - 24 * s, 6 * s, 4 * s);
+            c.fillRect(x - 3 * s, baseY - 60 * s, 6 * s, 2 * s);
             // Arm
-            c.fillRect(x, baseY - 130, 18, 3);
+            c.fillRect(x, baseY - 130 * s, 18 * s, 3 * s);
             // Lamp shade
             c.fillStyle = '#161c28';
-            c.fillRect(x + 14, baseY - 140, 8, 12);
+            c.fillRect(x + 14 * s, baseY - 140 * s, 8 * s, 12 * s);
             // Bulb glow
+            const bulbX = x + 18 * s;
+            const bulbY = baseY - 134 * s;
             c.save();
             c.globalCompositeOperation = 'lighter';
-            const grad = c.createRadialGradient(x + 18, baseY - 134, 1, x + 18, baseY - 134, 80);
+            const grad = c.createRadialGradient(bulbX, bulbY, 1, bulbX, bulbY, 80 * s);
             grad.addColorStop(0, 'rgba(255, 220, 140, 0.72)');
             grad.addColorStop(0.5, 'rgba(255, 220, 140, 0.22)');
             grad.addColorStop(1, 'rgba(255, 220, 140, 0)');
             c.fillStyle = grad;
-            c.fillRect(x - 64, baseY - 200, 160, 160);
+            c.fillRect(bulbX - 82 * s, bulbY - 82 * s, 164 * s, 164 * s);
             // Tight bright core
-            const core = c.createRadialGradient(x + 18, baseY - 134, 0.5, x + 18, baseY - 134, 8);
+            const core = c.createRadialGradient(bulbX, bulbY, 0.5, bulbX, bulbY, 8 * s);
             core.addColorStop(0, 'rgba(255, 250, 220, 0.95)');
             core.addColorStop(1, 'rgba(255, 240, 200, 0)');
             c.fillStyle = core;
-            c.fillRect(x + 10, baseY - 142, 18, 18);
+            c.fillRect(bulbX - 9 * s, bulbY - 9 * s, 18 * s, 18 * s);
             c.restore();
 
             // Warm ground puddle under streetlight (separate from zones)
@@ -2524,7 +2566,7 @@
             c.globalCompositeOperation = 'lighter';
             c.fillStyle = 'rgba(255, 200, 130, 0.24)';
             c.beginPath();
-            c.ellipse(x + 18, this.groundY + 22, 100, 18, 0, 0, Math.PI * 2);
+            c.ellipse(bulbX, this.groundY + 22 * s, 100 * s, 18 * s, 0, 0, Math.PI * 2);
             c.fill();
             c.restore();
         }
@@ -2585,13 +2627,17 @@
             // Body
             c.fillStyle = opts.bodyColor;
             c.fillRect(x, y, W, H);
-            // Subtle vertical body shading
+            // Vertical body shading — strong enough that the cabinet reads
+            // as a 3D box rather than a flat color panel.
             const bodyShade = c.createLinearGradient(x, y, x + W, y);
-            bodyShade.addColorStop(0, 'rgba(255,255,255,0.06)');
-            bodyShade.addColorStop(0.5, 'rgba(255,255,255,0)');
-            bodyShade.addColorStop(1, 'rgba(0,0,0,0.18)');
+            bodyShade.addColorStop(0, 'rgba(255,255,255,0.14)');
+            bodyShade.addColorStop(0.45, 'rgba(255,255,255,0)');
+            bodyShade.addColorStop(1, 'rgba(0,0,0,0.30)');
             c.fillStyle = bodyShade;
             c.fillRect(x, y, W, H);
+            // Bright edge highlight on the lit side.
+            c.fillStyle = 'rgba(255,255,255,0.18)';
+            c.fillRect(x, y, 2, H);
 
             // Top illuminated brand band (3-tier)
             c.fillStyle = '#fbcd2a';
@@ -2689,8 +2735,13 @@
         drawSandwichBoard() {
             const c = this.ctx;
             const L = this._layout;
-            const x = L.sandwichX;
-            const baseY = this.groundY;
+            // Anchor at the board's ground point, then draw in design px
+            // under the scene scale so the prop tracks the storefront.
+            c.save();
+            c.translate(L.sandwichX, this.groundY);
+            c.scale(this.s, this.s);
+            const x = 0;
+            const baseY = 0;
             // A-frame body
             c.fillStyle = '#1a1410';
             c.beginPath();
@@ -2719,13 +2770,17 @@
             c.fillStyle = '#0a0c14';
             c.fillRect(x + 5, baseY - 2, 4, 2);
             c.fillRect(x + 23, baseY - 2, 4, 2);
+            c.restore();
         }
 
         drawTrashBins() {
             const c = this.ctx;
             const L = this._layout;
-            const x = L.trashX;
-            const baseY = this.groundY;
+            c.save();
+            c.translate(L.trashX, this.groundY);
+            c.scale(this.s, this.s);
+            const x = 0;
+            const baseY = 0;
             const bins = [
                 { offset: 0,  cap: '#23a85a', label: '燃える', sub: 'BURN' },
                 { offset: 18, cap: '#3a78e8', label: 'ペット', sub: 'PET'  },
@@ -2756,10 +2811,10 @@
                 c.strokeStyle = 'rgba(0, 0, 0, 0.35)';
                 c.lineWidth = 0.6;
                 c.strokeRect(bx + 1.5, baseY - 19.5, 11, 10);
-                // Kanji label
+                // Kanji label (design-px font — the ctx is already scaled)
                 c.save();
                 c.fillStyle = '#16201e';
-                c.font = FONT_KANA_TINY;
+                c.font = "700 7px 'Yu Gothic UI','Meiryo','MS Gothic',sans-serif";
                 c.textAlign = 'center';
                 c.textBaseline = 'middle';
                 c.fillText(b.label, bx + 7, baseY - 16);
@@ -2767,6 +2822,7 @@
                 c.fillText(b.sub, bx + 7, baseY - 11);
                 c.restore();
             }
+            c.restore();
         }
 
         // Tall narrow vertical banner (幟 nobori) flapping in the wind beside
@@ -2775,10 +2831,10 @@
             const c = this.ctx;
             const L = this._layout;
             const baseY = this.groundY;
-            const bx = L.sandwichX - 14;
-            const banH = 96;
-            const banW = 14;
-            const tipY = baseY - banH - 10;
+            const bx = L.sandwichX - 14 * this.s;
+            const banH = 96 * this.s;
+            const banW = 14 * this.s;
+            const tipY = baseY - banH - 10 * this.s;
             // Pole
             c.fillStyle = '#0a0d18';
             c.fillRect(bx + banW * 0.5 - 1, tipY - 4, 2, banH + 14);
@@ -2796,23 +2852,23 @@
             // Subtle inner shading
             c.fillStyle = 'rgba(0, 0, 0, 0.18)';
             c.fillRect(bx + banW - 2, tipY, 2, banH);
-            // Banner text (vertical katakana)
+            // Banner text (vertical katakana) — y stops track the banner height
             c.fillStyle = '#fff8e8';
-            c.font = FONT_KANA_TINY;
+            c.font = this._fontKanaTiny;
             c.textAlign = 'center';
             c.textBaseline = 'middle';
-            c.fillText('新', bx + banW * 0.5 + sway * 0.3, tipY + 14);
-            c.fillText('商', bx + banW * 0.5 + sway * 0.5, tipY + 30);
-            c.fillText('品', bx + banW * 0.5 + sway * 0.7, tipY + 46);
+            c.fillText('新', bx + banW * 0.5 + sway * 0.3, tipY + banH * 0.146);
+            c.fillText('商', bx + banW * 0.5 + sway * 0.5, tipY + banH * 0.313);
+            c.fillText('品', bx + banW * 0.5 + sway * 0.7, tipY + banH * 0.479);
             c.fillStyle = '#ffd34a';
-            c.fillText('セ', bx + banW * 0.5 + sway * 0.6, tipY + 64);
-            c.fillText('ー', bx + banW * 0.5 + sway * 0.5, tipY + 76);
-            c.fillText('ル', bx + banW * 0.5 + sway * 0.4, tipY + 88);
+            c.fillText('セ', bx + banW * 0.5 + sway * 0.6, tipY + banH * 0.667);
+            c.fillText('ー', bx + banW * 0.5 + sway * 0.5, tipY + banH * 0.792);
+            c.fillText('ル', bx + banW * 0.5 + sway * 0.4, tipY + banH * 0.917);
             c.restore();
             // Pole tip ball
             c.fillStyle = '#cfd5d8';
             c.beginPath();
-            c.arc(bx + banW * 0.5, tipY - 4, 2.2, 0, Math.PI * 2);
+            c.arc(bx + banW * 0.5, tipY - 4 * this.s, 2.2 * this.s, 0, Math.PI * 2);
             c.fill();
         }
 
@@ -2821,8 +2877,11 @@
         drawAshtray() {
             const c = this.ctx;
             const L = this._layout;
-            const baseY = this.groundY;
-            const ax = L.trashX + 60;
+            c.save();
+            c.translate(L.trashX + 60 * this.s, this.groundY);
+            c.scale(this.s, this.s);
+            const baseY = 0;
+            const ax = 0;
             // Stand
             c.fillStyle = '#1a1d24';
             c.fillRect(ax, baseY - 26, 9, 26);
@@ -2839,26 +2898,28 @@
             c.fillRect(ax + 5, baseY - 27, 1.4, 0.8);
             c.fillStyle = '#cc6644';
             c.fillRect(ax + 2.4, baseY - 27, 0.5, 0.8);
+            c.restore();
         }
 
         drawBike() {
             // Park a row of 3 mama-chari bikes side-by-side in a rack.
             const c = this.ctx;
             const L = this._layout;
-            const baseY = this.groundY - 4;
+            const s = this.s;
+            const baseY = this.groundY - 4 * s;
             const positions = [
-                { x: L.bikeX,        scale: 1.0, frameTint: '#0a0c14', basketTint: '#1a1c20', tiltDeg: -3, reflector: true,  light: true  },
-                { x: L.bikeX + 38,   scale: 0.95, frameTint: '#14242a', basketTint: '#1a1c20', tiltDeg: 1,  reflector: true,  light: false },
-                { x: L.bikeX + 78,   scale: 1.05, frameTint: '#1a1410', basketTint: '#241c14', tiltDeg: -2, reflector: false, light: false },
+                { x: L.bikeX,            scale: 1.0,  frameTint: '#0a0c14', basketTint: '#1a1c20', tiltDeg: -3, reflector: true,  light: true  },
+                { x: L.bikeX + 38 * s,   scale: 0.95, frameTint: '#14242a', basketTint: '#1a1c20', tiltDeg: 1,  reflector: true,  light: false },
+                { x: L.bikeX + 78 * s,   scale: 1.05, frameTint: '#1a1410', basketTint: '#241c14', tiltDeg: -2, reflector: false, light: false },
             ];
             // U-rack bar behind the bikes
             c.fillStyle = '#1a1d24';
-            c.fillRect(L.bikeX - 12, baseY - 14, 130, 3);
-            c.fillRect(L.bikeX - 12, baseY - 14, 3, 12);
-            c.fillRect(L.bikeX + 115, baseY - 14, 3, 12);
+            c.fillRect(L.bikeX - 12 * s, baseY - 14 * s, 130 * s, 3 * s);
+            c.fillRect(L.bikeX - 12 * s, baseY - 14 * s, 3 * s, 12 * s);
+            c.fillRect(L.bikeX + 115 * s, baseY - 14 * s, 3 * s, 12 * s);
             // Draw each bike
             for (const b of positions) {
-                this.drawSingleBike(b.x, baseY, b.scale, b.frameTint, b.basketTint, b.tiltDeg * Math.PI / 180, b.reflector, b.light);
+                this.drawSingleBike(b.x, baseY, b.scale * s, b.frameTint, b.basketTint, b.tiltDeg * Math.PI / 180, b.reflector, b.light);
             }
         }
 
@@ -3067,6 +3128,9 @@
         drawPuddles(t, atmo, baseOnly) {
             const c = this.ctx;
             const w = this.width, h = this.height;
+            // Blob points are authored in px around the fractional center —
+            // scale them so puddles keep their footprint at any resolution.
+            const ps = this.s;
             for (let i = 0; i < this.puddles.length; i++) {
                 const p = this.puddles[i];
                 const px = p.xk * w;
@@ -3074,20 +3138,20 @@
                 if (baseOnly) {
                     c.fillStyle = 'rgba(18, 22, 30, 0.55)';
                     c.beginPath();
-                    c.moveTo(px + p.pts[0].dx, py + p.pts[0].dy * 0.30);
+                    c.moveTo(px + p.pts[0].dx * ps, py + p.pts[0].dy * 0.30 * ps);
                     for (let k = 1; k < p.pts.length; k++) {
                         const pt = p.pts[k];
-                        c.lineTo(px + pt.dx, py + pt.dy * 0.30);
+                        c.lineTo(px + pt.dx * ps, py + pt.dy * 0.30 * ps);
                     }
                     c.closePath();
                     c.fill();
                     // Inner darker fill for depth
                     c.fillStyle = 'rgba(8, 10, 16, 0.45)';
                     c.beginPath();
-                    c.moveTo(px + p.pts[0].dx * 0.70, py + p.pts[0].dy * 0.22);
+                    c.moveTo(px + p.pts[0].dx * 0.70 * ps, py + p.pts[0].dy * 0.22 * ps);
                     for (let k = 1; k < p.pts.length; k++) {
                         const pt = p.pts[k];
-                        c.lineTo(px + pt.dx * 0.70, py + pt.dy * 0.22);
+                        c.lineTo(px + pt.dx * 0.70 * ps, py + pt.dy * 0.22 * ps);
                     }
                     c.closePath();
                     c.fill();
@@ -3097,10 +3161,10 @@
                     const shimmer = 0.55 + 0.45 * Math.sin(t * 0.003 + p.shimmerPhase);
                     c.fillStyle = `rgba(160, 200, 240, ${0.20 * shimmer})`;
                     c.beginPath();
-                    c.moveTo(px + p.pts[0].dx * 0.85, py + p.pts[0].dy * 0.18);
+                    c.moveTo(px + p.pts[0].dx * 0.85 * ps, py + p.pts[0].dy * 0.18 * ps);
                     for (let k = 1; k < p.pts.length; k++) {
                         const pt = p.pts[k];
-                        c.lineTo(px + pt.dx * 0.85, py + pt.dy * 0.18);
+                        c.lineTo(px + pt.dx * 0.85 * ps, py + pt.dy * 0.18 * ps);
                     }
                     c.closePath();
                     c.fill();
@@ -3259,11 +3323,22 @@
                 else if (z.isVm1 || z.isVm2) alphaScale *= (0.30 + 0.70 * atmo.dark);
 
                 const yStep = z.yStep;
-                for (let y = this.groundY; y < h; y += yStep) {
+                // Color strings only depend on row index + quantized
+                // alphaScale; cache them so we don't build hundreds of
+                // strings per frame (matters at 1440p+).
+                const qKey = Math.round(alphaScale * 64);
+                if (!z._rowColors || z._rowKey !== qKey) {
+                    z._rowColors = [];
+                    for (let y = this.groundY, i = 0; y < h; y += yStep, i++) {
+                        const k = (y - this.groundY) / (h - this.groundY);
+                        z._rowColors[i] = z.rgbaPrefix + ((1 - k) * alphaScale).toFixed(3) + ')';
+                    }
+                    z._rowKey = qKey;
+                }
+                for (let y = this.groundY, i = 0; y < h; y += yStep, i++) {
                     const k = (y - this.groundY) / (h - this.groundY);
                     const wob = Math.sin(t * 0.004 + y * 0.05 + zi * 1.3) * (2 + k * z.ampMul);
-                    const a = (1 - k) * alphaScale;
-                    c.fillStyle = z.rgbaPrefix + a + ')';
+                    c.fillStyle = z._rowColors[i];
                     c.fillRect(z.x + wob, y, z.w, yStep);
                 }
             }
@@ -3491,10 +3566,11 @@
             // Update + render
             for (let i = this.passersby.length - 1; i >= 0; i--) {
                 const p = this.passersby[i];
-                p.x += p.dir * p.speed * (dt / 1000);
+                // Walk speed scales with sprite size so the gait reads right.
+                p.x += p.dir * p.speed * this.s * (dt / 1000);
                 p.bob += dt * 0.012;
                 this.drawPasserby(p.x, this.groundY - 2 + p.yOffset, p.dir, p.bob, p, windNow);
-                if (p.x < -60 || p.x > w + 60) this.passersby.splice(i, 1);
+                if (p.x < -60 * this.s || p.x > w + 60 * this.s) this.passersby.splice(i, 1);
             }
         }
 
@@ -3503,7 +3579,7 @@
             const sway = Math.sin(bob) * 2 + windNow * 0.10;
             const stepL = Math.sin(bob * 1.6) * 1.8;
             // Larger so the figure reads as a person, not an umbrella icon.
-            const figScale = 1.85;
+            const figScale = 1.85 * this.s;
             c.save();
             c.translate(x, baseY);
             c.scale(dir * figScale, figScale);
@@ -3670,7 +3746,8 @@
             }
             if (this.scooter) {
                 const sc = this.scooter;
-                sc.x += sc.dir * sc.speed * (dt / 1000);
+                // Ride speed scales with sprite size.
+                sc.x += sc.dir * sc.speed * this.s * (dt / 1000);
                 sc.bobPhase += dt * 0.014;
 
                 // Determine LHD lane y-position and scale based on direction
@@ -3679,14 +3756,14 @@
                 let sy, sScale;
                 if (sc.dir > 0) { // Left-to-Right: Far lane, closer to curb
                     sy = sidewalkBot + (h - 14 - sidewalkBot) * 0.55;
-                    sScale = 0.85;
+                    sScale = 0.85 * this.s;
                 } else { // Right-to-Left: Near lane, closer to viewer
                     sy = (h - 14) + (h - (h - 14)) * 0.40;
-                    sScale = 1.15;
+                    sScale = 1.15 * this.s;
                 }
 
                 this.drawScooter(sc.x, sy, sc.dir, sScale, sc.bobPhase, sc.boxColor, t);
-                if (sc.x < -100 || sc.x > w + 100) this.scooter = null;
+                if (sc.x < -100 * this.s || sc.x > w + 100 * this.s) this.scooter = null;
             }
         }
 

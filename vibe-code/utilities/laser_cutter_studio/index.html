@@ -220,6 +220,15 @@
                         </div>
                     </div>
 
+                    <!-- rectangle-specific -->
+                    <div id="props-rect" class="props-group" style="display:none">
+                        <div class="pane-sub">Rectangle</div>
+                        <div class="row">
+                            <label>Corner radius (mm)</label>
+                            <input type="number" id="p-rect-radius" step="0.5" min="0" value="0">
+                        </div>
+                    </div>
+
                     <!-- image-specific -->
                     <div id="props-image" class="props-group" style="display:none">
                         <div class="pane-sub">Image Processing</div>
@@ -268,6 +277,19 @@
                         <div class="row check">
                             <input type="checkbox" id="img-invert">
                             <label for="img-invert">Invert</label>
+                        </div>
+                        <div class="pane-sub">Trace to Vector</div>
+                        <div class="row">
+                            <label>Method</label>
+                            <select id="img-trace-algo">
+                                <option value="otsu">Auto threshold (Otsu)</option>
+                                <option value="manual">Manual (Threshold slider)</option>
+                                <option value="adaptive">Adaptive (local)</option>
+                            </select>
+                        </div>
+                        <div class="trace-preview-wrap">
+                            <canvas id="img-trace-preview" width="264" height="190"></canvas>
+                            <div class="trace-preview-note" id="img-trace-preview-note">Trace preview</div>
                         </div>
                         <button class="btn-secondary" id="img-trace-btn">
                             <i data-lucide="spline"></i> Trace to Vector
