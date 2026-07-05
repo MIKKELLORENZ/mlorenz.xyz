@@ -32,6 +32,16 @@
             </div>
             <div class="toolbar-sep"></div>
             <div class="toolbar-group">
+                <button class="tbtn" id="tb-open" title="Open project (Ctrl+O)">
+                    <i data-lucide="folder-open"></i><span>Open</span>
+                </button>
+                <input type="file" id="project-input" accept=".lcsproj,.json,application/json" style="display:none">
+                <button class="tbtn" id="tb-save" title="Save project (Ctrl+S)">
+                    <i data-lucide="save"></i><span>Save</span>
+                </button>
+            </div>
+            <div class="toolbar-sep"></div>
+            <div class="toolbar-group">
                 <button class="tbtn icon-only" id="tb-undo" title="Undo (Ctrl+Z)"><i data-lucide="undo-2"></i></button>
                 <button class="tbtn icon-only" id="tb-redo" title="Redo (Ctrl+Y)"><i data-lucide="redo-2"></i></button>
             </div>

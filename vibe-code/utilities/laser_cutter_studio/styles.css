@@ -118,24 +118,36 @@ textarea { resize: vertical; }
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    padding: 0 12px;
-    gap: 8px;
+    padding: 0 10px;
+    gap: 6px;
     z-index: 20;
+    /* Safety net: never hard-clip the toolbar (e.g. the primary Generate button). On very
+       narrow / high-DPI-scaled windows the responsive rules below collapse labels to icons;
+       if it still doesn't fit, the bar scrolls instead of hiding controls off the edge. */
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
 }
+.topbar::-webkit-scrollbar { height: 6px; }
+.topbar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .brand {
     display: flex; align-items: center; gap: 8px;
     font-weight: 700; font-size: 14px;
-    margin-right: 12px;
+    margin-right: 8px;
     color: var(--text);
+    white-space: nowrap;       /* keep "Laser Cutter Studio" on one line, don't wrap to 3 */
+    flex-shrink: 0;
 }
 .brand-icon { width: 18px; height: 18px; color: var(--accent-2); }
-.toolbar-group { display: flex; gap: 2px; align-items: center; background: var(--bg-2); border-radius: 8px; padding: 3px; border: 1px solid var(--border); }
-.toolbar-sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
-.toolbar-spacer { flex: 1; }
+/* Groups keep their intrinsic size; only the flexible spacer gives up room. */
+.toolbar-group { display: flex; gap: 2px; align-items: center; background: var(--bg-2); border-radius: 8px; padding: 3px; border: 1px solid var(--border); flex-shrink: 0; }
+.toolbar-sep { width: 1px; height: 24px; background: var(--border); margin: 0 3px; flex-shrink: 0; }
+.toolbar-spacer { flex: 1 1 0; min-width: 0; }
 .tbtn {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 6px 10px; border-radius: 6px;
     color: var(--text); font-size: 12px; font-weight: 500;
+    white-space: nowrap;
     transition: background .15s, color .15s;
 }
 .tbtn:hover { background: var(--panel-2); }
@@ -148,6 +160,22 @@ textarea { resize: vertical; }
 .zoom-group .zoom-label {
     font-family: var(--mono); font-size: 11px;
     min-width: 46px; text-align: center; color: var(--text-muted);
+}
+
+/* Responsive toolbar: progressively shed text as the window narrows so every control stays
+   visible (matters on high-DPI / scaled displays where the CSS viewport is small). Order of
+   sacrifice: brand wordmark → secondary button labels → primary button label. Icons remain. */
+@media (max-width: 1550px) {
+    .brand span { display: none; }          /* keep just the zap icon */
+    .brand { margin-right: 4px; }
+}
+@media (max-width: 1450px) {
+    .tbtn:not(.primary) span { display: none; }
+    .tbtn:not(.primary) { padding: 6px; gap: 0; }
+}
+@media (max-width: 1180px) {
+    .tbtn.primary span { display: none; }   /* last resort: Generate becomes its play icon */
+    .tbtn.primary { padding: 6px 8px; }
 }
 
 /* LEFT TOOLS */

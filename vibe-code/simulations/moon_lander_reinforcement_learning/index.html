@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neural Moon Landers</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Neural Moon Landers</h1>
+            <span class="brand-sub">moon_lander physics + neuroevolution</span>
+        </div>
+        <nav id="terrain-tabs" aria-label="Terrain selector">
+            <button class="terrain-tab active" data-terrain="0"><span class="swatch sw-0"></span>Tranquility</button>
+            <button class="terrain-tab" data-terrain="1"><span class="swatch sw-1"></span>Crater Ladder</button>
+            <button class="terrain-tab" data-terrain="2"><span class="swatch sw-2"></span>Basalt Teeth</button>
+            <button class="terrain-tab" data-terrain="3"><span class="swatch sw-3"></span>Needle Rift</button>
+        </nav>
+    </header>
+
+    <main id="layout">
+        <div id="viewport">
+            <canvas id="sim"></canvas>
+            <div id="gen-banner" class="hidden"></div>
+        </div>
+
+        <aside id="panel">
+            <section class="card status-card">
+                <h2>Run Status</h2>
+                <div class="status-meta">
+                    <div class="meta-line"><span>Training mode</span><strong id="status-mode">Reinforcement learning</strong></div>
+                    <div class="meta-line"><span>Policy config</span><strong id="status-policy">Baseline</strong></div>
+                    <div class="meta-line"><span>Seed champion</span><strong id="status-seed">None</strong></div>
+                    <div class="meta-line"><span>Terrain</span><strong id="status-terrain">Tranquility</strong></div>
+                </div>
+                <div class="stats-grid wide-grid">
+                    <div class="stat"><span class="stat-label">Generation</span><span class="stat-value" id="stat-gen">1</span></div>
+                    <div class="stat"><span class="stat-label">Episode</span><span class="stat-value" id="stat-episode">1 / 3</span></div>
+                    <div class="stat"><span class="stat-label">Alive</span><span class="stat-value" id="stat-alive">0/0</span></div>
+                    <div class="stat"><span class="stat-label">Best pads</span><span class="stat-value" id="stat-best-pads">0</span></div>
+                    <div class="stat"><span class="stat-label">Best score</span><span class="stat-value" id="stat-best-score">0</span></div>
+                    <div class="stat"><span class="stat-label">Record pads</span><span class="stat-value" id="stat-record-pads">0</span></div>
+                    <div class="stat"><span class="stat-label">Record score</span><span class="stat-value" id="stat-record-score">0</span></div>
+                    <div class="stat"><span class="stat-label">Fuel</span><span class="stat-value" id="stat-fuel">0%</span></div>
+                    <div class="stat"><span class="stat-label">Oxygen</span><span class="stat-value" id="stat-oxygen">0%</span></div>
+                    <div class="stat"><span class="stat-label">Sim rate</span><span class="stat-value" id="stat-sps">0x</span></div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Score history</h2>
+                <canvas id="chart" width="280" height="110"></canvas>
+            </section>
+
+            <section class="card">
+                <h2>Landing history <span class="hint">best and mean pads</span></h2>
+                <canvas id="landings" width="280" height="90"></canvas>
+            </section>
+
+            <section class="card">
+                <h2>Leader's brain <span class="hint">recurrent net, live</span></h2>
+                <canvas id="net" width="280" height="350"></canvas>
+            </section>
+
+            <section class="card controls">
+                <h2>Training</h2>
+                <div class="row">
+                    <button id="btn-pause" class="btn primary">Pause</button>
+                    <button id="btn-reset" class="btn danger">Reset training</button>
+                </div>
+                <label class="slider-row">
+                    <span>Speed <b id="speed-label">4x</b></span>
+                    <input type="range" id="speed" min="0" max="7" value="3" step="1">
+                </label>
+                <label class="slider-row">
+                    <span>Population <b id="pop-label">64</b> <i class="hint">next gen</i></span>
+                    <input type="range" id="pop" min="24" max="64" value="64" step="8">
+                </label>
+                <label class="slider-row">
+                    <span>Mutation <b id="mut-label">~8 weights</b></span>
+                    <input type="range" id="mut" min="2" max="60" value="8" step="1">
+                </label>
+                <label class="select-block">
+                    <span>Training mode</span>
+                    <select id="training-mode">
+                        <option value="reinforcement" selected>Reinforcement learning</option>
+                        <option value="evolutionary">Evolutionary algorithm</option>
+                    </select>
+                </label>
+                <div class="row split">
+                    <label class="select-row">
+                        <span>Sensors</span>
+                        <select id="sensors">
+                            <option value="leader" selected>Leader + Sensors</option>
+                            <option value="ghosts">Top 12 Ghosts</option>
+                            <option value="all">All Ghosts</option>
+                            <option value="off">Leader Only</option>
+                        </select>
+                    </label>
+                    <label class="check-row" title="Freeze evolution and keep replaying the current population.">
+                        <input type="checkbox" id="eval-mode">
+                        <span>Eval mode</span>
+                    </label>
+                </div>
+            </section>
+
+            <details class="card policy-card" open>
+                <summary>Policy Settings</summary>
+                <p class="policy-note">These values shape reward and guidance behavior. Save them by configuration name and reload them later.</p>
+                <div id="policy-field-grid" class="policy-field-grid"></div>
+                <div class="row">
+                    <input id="policy-config-name" class="text-input" type="text" placeholder="Configuration name">
+                    <button id="btn-save-policy" class="btn">Save config</button>
+                </div>
+                <div class="row split library-row">
+                    <select id="policy-config-list" class="library-select"></select>
+                    <button id="btn-load-policy" class="btn">Load</button>
+                    <button id="btn-delete-policy" class="btn danger">Delete</button>
+                </div>
+            </details>
+
+            <section class="card champion-card">
+                <h2>Champion Library</h2>
+                <p id="champion-note" class="policy-note">No champion seed loaded.</p>
+                <div class="row">
+                    <input id="champion-name" class="text-input" type="text" placeholder="Champion name">
+                    <button id="btn-save-champion" class="btn">Save current best</button>
+                </div>
+                <div class="row split library-row">
+                    <select id="champion-list" class="library-select"></select>
+                    <button id="btn-load-champion" class="btn">Load as seed</button>
+                    <button id="btn-clear-champion" class="btn">Clear seed</button>
+                </div>
+            </section>
+
+            <details class="card about">
+                <summary>How it works</summary>
+                <p>Each lander flies with the same control rules as the original moon lander: gravity is <b>27</b>, the main engine produces <b>65</b> thrust that grows as fuel burns off, the side jets produce <b>27</b> thrust, and the lander only survives contact if its vertical speed stays under <b>57</b> and its angle stays within <b>30 degrees</b>.</p>
+                <p>The sensor stack mirrors your brief. The brain sees <b>7 downward terrain rays</b> plus a short ray-memory snapshot, <b>3 landing-pad neurons</b> when an unclaimed pad is within one viewport of range, and extra state for local velocity, ground-relative motion, acceleration, a dedicated <b>terrain-relative clearance scalar</b>, oxygen, fuel, and recent thruster commands.</p>
+                <p><b>Reinforcement learning</b> uses reward-shaped selection to keep the best brain, mix it with other high performers, and inject some fresh individuals. <b>Evolutionary algorithm</b> is the pure no-gradient mode: the champion survives exactly, 5-7 mutated champion variants appear every generation, fresh random individuals are always added, and crossover children inherit direct weight mixes from the champion and lower-ranked survivors.</p>
+            </details>
+        </aside>
+    </main>
+</div>
+<script src="main.js"></script>
+</body>
+</html>

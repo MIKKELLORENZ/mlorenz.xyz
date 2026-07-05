@@ -155,11 +155,21 @@
         let width = 0;
         let height = 0;
 
+        // The whole frame is redrawn every tick, so every full-screen fill
+        // (background gradient, vignette, scanlines, nebula) costs in
+        // proportion to the canvas backing-store area. On a HiDPI display the
+        // native devicePixelRatio is 2, which means 4x the pixels and 4x the
+        // fill cost for an effect the eye barely resolves on a fast-moving
+        // arcade scene. Capping the ratio is the single biggest win for
+        // smoothness on laptops/4K monitors; 1.5 keeps things crisp while
+        // roughly halving fill cost versus an uncapped dpr of 2.
+        const MAX_PIXEL_RATIO = 1.5;
+
         function resizeCanvas() {
             width = window.innerWidth;
             height = window.innerHeight;
 
-            const dpr = Math.max(1, window.devicePixelRatio || 1);
+            const dpr = Math.min(MAX_PIXEL_RATIO, Math.max(1, window.devicePixelRatio || 1));
             canvas.style.width = width + 'px';
             canvas.style.height = height + 'px';
             canvas.width = Math.floor(width * dpr);
@@ -704,6 +714,15 @@
 
             terrain = points;
 
+            // Precompute the little surface "texture" tick marks once. The
+            // original randomized these every frame, which both wasted work and
+            // made the ground visibly shimmer; baking them keeps them stable.
+            // Only every 5th point draws one, so only those need offsets.
+            for (let i = 0; i < terrain.length; i += 5) {
+                terrain[i].tdx = (Math.random() - 0.5) * 10;
+                terrain[i].tlen = 30 + Math.random() * 20;
+            }
+
             if (landingZones.length > 0) {
                 let startingZone = landingZones[Math.floor(Math.random() * landingZones.length)];
                 lander.x = startingZone.x + startingZone.width / 2;
@@ -1201,30 +1220,64 @@
         let cachedTerrainGradient = null;
         let lastGradientCameraY = null;
         
-        // Pre-create cached gradients for lander (these don't change)
-        let cachedBodyGradient = null;
-        let cachedViewportGradient = null;
-        let cachedFlameGradient = null;
-        
+        // Pre-create cached gradients for the lander. Every one of these is
+        // defined in the lander's local (translated/rotated) coordinate space,
+        // so they never change and can be built once instead of being
+        // re-allocated on every single frame. The fills they produce are
+        // pixel-identical to the originals.
+        let lgHull = null, lgViewport = null, lgLeg = null, lgThruster = null;
+        let lgThrustGlow = null, lgAntennaGlow = null;
+        let lgFlameMain = null, lgFlameOuter = null;
+
         function initLanderGradients() {
-            // Body gradient - static, doesn't depend on position
-            cachedBodyGradient = ctx.createLinearGradient(-15, 0, 15, 0);
-            cachedBodyGradient.addColorStop(0, "#D0D0D8");
-            cachedBodyGradient.addColorStop(0.5, "#F0F0F8");
-            cachedBodyGradient.addColorStop(1, "#D0D0D8");
-            
-            // Viewport gradient
-            cachedViewportGradient = ctx.createRadialGradient(2, -12, 1, 0, -10, 8);
-            cachedViewportGradient.addColorStop(0, "#FFFFFF");
-            cachedViewportGradient.addColorStop(0.3, "#8888FF");
-            cachedViewportGradient.addColorStop(1, "#4444AA");
-            
-            // Flame gradient (centered at typical flame position)
-            cachedFlameGradient = ctx.createRadialGradient(0, 28, 0, 0, 28, 9);
-            cachedFlameGradient.addColorStop(0.0, 'white');
-            cachedFlameGradient.addColorStop(0.25, 'yellow');
-            cachedFlameGradient.addColorStop(0.80, 'orange');
-            cachedFlameGradient.addColorStop(1.0, 'rgba(255, 100, 0, 0.5)');
+            if (lgHull) return; // already built
+
+            lgHull = ctx.createLinearGradient(-20, -20, 20, 15);
+            lgHull.addColorStop(0, '#F8F8FF');
+            lgHull.addColorStop(0.2, '#E8E8F0');
+            lgHull.addColorStop(0.5, '#D8D8E5');
+            lgHull.addColorStop(0.8, '#C8C8D5');
+            lgHull.addColorStop(1, '#B8B8C8');
+
+            lgViewport = ctx.createRadialGradient(1, -12, 1, 0, -10, 8);
+            lgViewport.addColorStop(0, '#FFFFFF');
+            lgViewport.addColorStop(0.2, '#AACCFF');
+            lgViewport.addColorStop(0.5, '#6699DD');
+            lgViewport.addColorStop(1, '#3366AA');
+
+            lgLeg = ctx.createLinearGradient(-20, 8, -20, 25);
+            lgLeg.addColorStop(0, '#888899');
+            lgLeg.addColorStop(0.5, '#666677');
+            lgLeg.addColorStop(1, '#555566');
+
+            lgThruster = ctx.createLinearGradient(-18, -2, -14, -2);
+            lgThruster.addColorStop(0, '#666677');
+            lgThruster.addColorStop(0.5, '#888899');
+            lgThruster.addColorStop(1, '#777788');
+
+            lgThrustGlow = ctx.createRadialGradient(0, 10, 0, 0, 10, 40);
+            lgThrustGlow.addColorStop(0, 'rgba(255, 200, 100, 0.2)');
+            lgThrustGlow.addColorStop(0.5, 'rgba(255, 150, 50, 0.1)');
+            lgThrustGlow.addColorStop(1, 'transparent');
+
+            lgAntennaGlow = ctx.createRadialGradient(0, -31, 0, 0, -31, 6);
+            lgAntennaGlow.addColorStop(0, 'rgba(255, 100, 100, 0.5)');
+            lgAntennaGlow.addColorStop(1, 'transparent');
+
+            // Flame gradients use a representative size; the flame outline is
+            // still randomized per frame for flicker, only the fill is reused.
+            lgFlameOuter = ctx.createRadialGradient(0, 25, 0, 0, 25, 32);
+            lgFlameOuter.addColorStop(0, 'rgba(255, 200, 100, 0.4)');
+            lgFlameOuter.addColorStop(0.5, 'rgba(255, 150, 50, 0.2)');
+            lgFlameOuter.addColorStop(1, 'transparent');
+
+            lgFlameMain = ctx.createRadialGradient(0, 15, 0, 0, 29, 28);
+            lgFlameMain.addColorStop(0.0, '#FFFFFF');
+            lgFlameMain.addColorStop(0.15, '#FFFFAA');
+            lgFlameMain.addColorStop(0.35, '#FFCC44');
+            lgFlameMain.addColorStop(0.6, '#FF8800');
+            lgFlameMain.addColorStop(0.85, '#FF4400');
+            lgFlameMain.addColorStop(1.0, 'rgba(255, 50, 0, 0.3)');
         }
         
         function getTerrainGradient() {
@@ -1278,11 +1331,9 @@
             ctx.fillStyle = bgGradient;
             ctx.fillRect(0, 0, width, height);
 
-            // Initialize lander gradients if not done yet
-            if (!cachedBodyGradient) {
-                initLanderGradients();
-            }
-            
+            // Initialize lander gradients if not done yet (self-guarded)
+            initLanderGradients();
+
             // Draw nebula clouds (very far background)
             for (let cloud of nebulaClouds) {
                 const gradient = ctx.createRadialGradient(cloud.x, cloud.y, 0, cloud.x, cloud.y, cloud.radius);
@@ -1411,17 +1462,18 @@
             }
             ctx.stroke();
             
-            // Draw subtle terrain texture lines
+            // Draw subtle terrain texture lines (precomputed offsets, one path)
             ctx.strokeStyle = 'rgba(100, 100, 110, 0.15)';
             ctx.lineWidth = 1;
-            for (let i = startIdx; i <= endIdx; i += 5) {
-                if (terrain[i]) {
-                    ctx.beginPath();
-                    ctx.moveTo(terrain[i].x, terrain[i].y);
-                    ctx.lineTo(terrain[i].x + (Math.random() - 0.5) * 10, terrain[i].y + 30 + Math.random() * 20);
-                    ctx.stroke();
+            ctx.beginPath();
+            for (let i = startIdx - (startIdx % 5); i <= endIdx; i += 5) {
+                const t = terrain[i];
+                if (t && t.tdx !== undefined) {
+                    ctx.moveTo(t.x, t.y);
+                    ctx.lineTo(t.x + t.tdx, t.y + t.tlen);
                 }
             }
+            ctx.stroke();
 
             // Only draw visible craters (frustum culling) with enhanced visuals
             const viewLeft = cameraX - 50;
@@ -1816,26 +1868,14 @@
                     const flameWidth = 8 + Math.random() * 2;
                     const flameStartY = 5; // Start below body
                     
-                    // Outer glow effect
-                    const outerGlow = ctx.createRadialGradient(0, flameStartY + flameHeight * 0.5, 0, 0, flameStartY + flameHeight * 0.5, flameHeight * 0.8);
-                    outerGlow.addColorStop(0, 'rgba(255, 200, 100, 0.4)');
-                    outerGlow.addColorStop(0.5, 'rgba(255, 150, 50, 0.2)');
-                    outerGlow.addColorStop(1, 'transparent');
-                    ctx.fillStyle = outerGlow;
+                    // Outer glow effect (cached gradient, randomized outline)
+                    ctx.fillStyle = lgFlameOuter;
                     ctx.beginPath();
                     ctx.ellipse(0, flameStartY + flameHeight * 0.4, flameWidth * 2, flameHeight * 0.6, 0, 0, Math.PI * 2);
                     ctx.fill();
 
-                    // Main flame with enhanced gradient
-                    const flameGradient = ctx.createRadialGradient(0, flameStartY + 10, 0, 0, flameStartY + flameHeight * 0.6, flameHeight * 0.7);
-                    flameGradient.addColorStop(0.0, '#FFFFFF');
-                    flameGradient.addColorStop(0.15, '#FFFFAA');
-                    flameGradient.addColorStop(0.35, '#FFCC44');
-                    flameGradient.addColorStop(0.6, '#FF8800');
-                    flameGradient.addColorStop(0.85, '#FF4400');
-                    flameGradient.addColorStop(1.0, 'rgba(255, 50, 0, 0.3)');
-                    
-                    ctx.fillStyle = flameGradient;
+                    // Main flame with enhanced gradient (cached)
+                    ctx.fillStyle = lgFlameMain;
                     ctx.beginPath();
                     ctx.moveTo(0, flameStartY);
                     ctx.bezierCurveTo(
@@ -1928,27 +1968,16 @@
                 }
                 ctx.restore();
                 
-                // Lander glow effect when thrusting
+                // Lander glow effect when thrusting (cached gradient)
                 if (keys['arrowup'] && fuel > 0 && !lander.controlsDisabled) {
-                    const thrustGlow = ctx.createRadialGradient(0, 10, 0, 0, 10, 40);
-                    thrustGlow.addColorStop(0, 'rgba(255, 200, 100, 0.2)');
-                    thrustGlow.addColorStop(0.5, 'rgba(255, 150, 50, 0.1)');
-                    thrustGlow.addColorStop(1, 'transparent');
-                    ctx.fillStyle = thrustGlow;
+                    ctx.fillStyle = lgThrustGlow;
                     ctx.beginPath();
                     ctx.arc(0, 10, 40, 0, Math.PI * 2);
                     ctx.fill();
                 }
-                
-                // Main body hull with enhanced metallic gradient
-                const hullGradient = ctx.createLinearGradient(-20, -20, 20, 15);
-                hullGradient.addColorStop(0, '#F8F8FF');
-                hullGradient.addColorStop(0.2, '#E8E8F0');
-                hullGradient.addColorStop(0.5, '#D8D8E5');
-                hullGradient.addColorStop(0.8, '#C8C8D5');
-                hullGradient.addColorStop(1, '#B8B8C8');
-                
-                ctx.fillStyle = hullGradient;
+
+                // Main body hull with enhanced metallic gradient (cached)
+                ctx.fillStyle = lgHull;
                 ctx.beginPath();
                 ctx.moveTo(-15, -20);
                 ctx.quadraticCurveTo(-18, -20, -18, -15);
@@ -1974,13 +2003,8 @@
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
                 
-                // Viewport with enhanced reflection effect
-                const viewportGradient = ctx.createRadialGradient(1, -12, 1, 0, -10, 8);
-                viewportGradient.addColorStop(0, '#FFFFFF');
-                viewportGradient.addColorStop(0.2, '#AACCFF');
-                viewportGradient.addColorStop(0.5, '#6699DD');
-                viewportGradient.addColorStop(1, '#3366AA');
-                ctx.fillStyle = viewportGradient;
+                // Viewport with enhanced reflection effect (cached)
+                ctx.fillStyle = lgViewport;
                 ctx.beginPath();
                 ctx.arc(0, -10, 7, 0, Math.PI * 2);
                 ctx.fill();
@@ -2012,21 +2036,14 @@
                 ctx.beginPath();
                 ctx.arc(0, -31, 2, 0, Math.PI * 2);
                 ctx.fill();
-                // Antenna tip glow
-                const antennaGlow = ctx.createRadialGradient(0, -31, 0, 0, -31, 6);
-                antennaGlow.addColorStop(0, 'rgba(255, 100, 100, 0.5)');
-                antennaGlow.addColorStop(1, 'transparent');
-                ctx.fillStyle = antennaGlow;
+                // Antenna tip glow (cached)
+                ctx.fillStyle = lgAntennaGlow;
                 ctx.beginPath();
                 ctx.arc(0, -31, 6, 0, Math.PI * 2);
                 ctx.fill();
-                
-                // Landing gear - more detailed with metallic look
-                const legGradient = ctx.createLinearGradient(-20, 8, -20, 25);
-                legGradient.addColorStop(0, '#888899');
-                legGradient.addColorStop(0.5, '#666677');
-                legGradient.addColorStop(1, '#555566');
-                ctx.strokeStyle = legGradient;
+
+                // Landing gear - more detailed with metallic look (cached)
+                ctx.strokeStyle = lgLeg;
                 ctx.lineWidth = 3;
                 
                 // Left leg
@@ -2052,12 +2069,8 @@
                 ctx.ellipse(20, 26, 5, 2, 0, 0, Math.PI * 2);
                 ctx.fill();
 
-                // Side thrusters with nozzle detail
-                const thrusterGradient = ctx.createLinearGradient(-18, -2, -14, -2);
-                thrusterGradient.addColorStop(0, '#666677');
-                thrusterGradient.addColorStop(0.5, '#888899');
-                thrusterGradient.addColorStop(1, '#777788');
-                ctx.fillStyle = thrusterGradient;
+                // Side thrusters with nozzle detail (cached)
+                ctx.fillStyle = lgThruster;
                 ctx.beginPath();
                 ctx.roundRect(-18, -3, 4, 6, 1);
                 ctx.fill();

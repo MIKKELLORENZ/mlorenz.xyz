@@ -13,8 +13,11 @@ const LCS = (window.LCS = {});
     const PX_PER_MM = DPI / MM_PER_INCH;
     const MM_PER_PX = MM_PER_INCH / DPI;
 
+    // Target machine: Atomstack S10 Pro (10 W diode, GRBL/LaserGRBL). It has NO air-assist
+    // hardware, so every default layer must be airAssist:false — a default that implies air
+    // assist would be misleading. (Power/speed left as-is; out of scope for this machine pass.)
     const DEFAULT_LAYERS = [
-        { name: 'Cut',     color: '#ef4444', opType: 'cut',     power: 100, speed: 800,  passes: 1, airAssist: true  },
+        { name: 'Cut',     color: '#ef4444', opType: 'cut',     power: 100, speed: 800,  passes: 1, airAssist: false },
         { name: 'Engrave', color: '#000000', opType: 'engrave', power: 70,  speed: 6000, passes: 1, airAssist: false },
         { name: 'Score',   color: '#3b82f6', opType: 'score',   power: 15, speed: 1500, passes: 1, airAssist: false },
     ];
@@ -24,7 +27,29 @@ const LCS = (window.LCS = {});
         '#3b82f6','#6366f1','#a855f7','#ec4899','#64748b',
     ];
 
-    LCS.config = { DPI, MM_PER_INCH, PX_PER_MM, MM_PER_PX, DEFAULT_LAYERS, PALETTE };
+    // Hard ceiling on emitted G-code lines, sized for the binding constraint: the offline
+    // TF-card + 3.5" touchscreen workflow on the S10 Pro. A ~101k-line / 1.74 MB file was
+    // confirmed to stall at "loading" and never start; an ~8k-line job loads instantly. We
+    // don't know the exact offline ceiling, only that ~101k fails — so 45k is a conservative
+    // offline-safe default with comfortable margin. Tunable; opts.force overrides it for
+    // power users (e.g. when streaming over USB instead of the TF card). See LCS.gcode.generate.
+    const MAX_GCODE_LINES = 45000;
+
+    // Smallest meaningful burn feature, tied to the laser spot. The S10 Pro's spot is
+    // 0.08 × 0.06 mm, so features below ~0.1 mm can't be reproduced; 0.15 mm stays safely
+    // above that. Scanline fills below this are hairlines the beam can't resolve — they only
+    // bloat the file and stitch the head back and forth across sub-kerf gaps. Used to drop
+    // tiny spans and coalesce sub-kerf gaps in LCS.gcode.fillVectorObject.
+    const MIN_FEATURE_MM = 0.15;
+
+    // Gap width above which the shared scanline backend lifts to a G0 rapid instead of
+    // sweeping across the white gap at engrave feed with the beam off (S0). Small/medium
+    // gaps are cheaper to sweep through (no decel/accel of a park); only across a *large*
+    // gap is the engrave-feed crossing slow enough that a rapid wins. 4 mm is a sane middle.
+    const GAP_RAPID_MM = 4;
+
+    LCS.config = { DPI, MM_PER_INCH, PX_PER_MM, MM_PER_PX, DEFAULT_LAYERS, PALETTE,
+                   MAX_GCODE_LINES, MIN_FEATURE_MM, GAP_RAPID_MM };
 })();
 
 // ============================================================
@@ -107,8 +132,15 @@ const LCS = (window.LCS = {});
     const mmToPx = mm => mm * LCS.config.PX_PER_MM;
     const pxToMm = px => px * LCS.config.MM_PER_PX;
 
+    // Human-readable file size from a raw byte count (G-code is ASCII, so 1 char ≈ 1 byte)
+    function fmtBytes(n) {
+        if (n < 1024) return n + ' B';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+        return (n / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
     LCS.util = { $, $$, el, clamp, debounce, uid, download, bus, toast, modal, progress,
-                 hexToRgb, rgbToHex, colorDist, mmToPx, pxToMm };
+                 hexToRgb, rgbToHex, colorDist, mmToPx, pxToMm, fmtBytes };
 })();
 
 // ============================================================
@@ -154,6 +186,10 @@ const LCS = (window.LCS = {});
             bedWidth: 400, bedHeight: 400, units: 'mm',
             origin: 'bottom-left', dialect: 'grbl',
             dpi: 96, travelFeed: 3000, smax: 1000,
+            // 0.1 mm/line: close to the S10 Pro's 0.08 mm spot, so ordinary engraves stay
+            // crisp (a coarse global default would visibly stripe every small job). The
+            // huge-file problem is specific to filling one large detailed image and is solved
+            // per-job by the MAX_GCODE_LINES cap, not by degrading this default. See generate().
             rasterInterval: 0.1,
             gridSpacing: 10, snapTolerance: 6,
         },
@@ -1724,13 +1760,34 @@ const LCS = (window.LCS = {});
 
             try {
                 const fab = LCS.canvas.fabric;
-                const defaultLayer = LCS.state.layers().find(l => l.opType === 'engrave') || LCS.state.activeLayer();
 
-                // One path, all contours as subpaths
+                // Fix 4 — don't silently engrave-fill. Tracing a detailed image and then
+                // scanline-filling the silhouette is exactly what produces 150k-line jobs
+                // that hang the controller. Let the user pick:
+                //   Fill (engrave)  → solid path on the Engrave layer → scanline fill (big).
+                //   Outline (cut/score) → stroked path, no fill → one contour per subpath
+                //                          via vectorizeObject (tiny output).
+                // Close the progress modal first so the blocking confirm isn't hidden behind it.
+                progress('', '', false);
+                const engraveLayer = LCS.state.layers().find(l => l.opType === 'engrave');
+                const outlineLayer = LCS.state.layers().find(l => l.opType === 'score')
+                                  || LCS.state.layers().find(l => l.opType === 'cut');
+                const fillIt = window.confirm(
+                    'Trace complete — how should this burn?\n\n' +
+                    'OK = Fill / Engrave the solid silhouette (scanline fill — can be very ' +
+                    'large G-code on detailed art).\n\n' +
+                    'Cancel = Outline only (Cut/Score the contours — small G-code).');
+                const targetLayer = (fillIt ? engraveLayer : outlineLayer) || LCS.state.activeLayer();
+
+                // One path, all contours as subpaths. For fill we keep a solid black fill
+                // (routes through fillVectorObject); for outline we drop the fill and give it
+                // a visible stroke so hasSolidFill() is false and it routes through
+                // vectorizeObject (outline). attach() recolours the stroke to the layer colour.
                 const path = new fabric.Path(combinedD.trim(), {
-                    fill: traceColor,
-                    stroke: '',
-                    strokeWidth: 0,
+                    fill: fillIt ? traceColor : '',
+                    stroke: fillIt ? '' : targetLayer.color,
+                    strokeWidth: fillIt ? 0 : 1,
+                    strokeUniform: true,
                     fillRule: 'evenodd',
                     originX: 'left',
                     originY: 'top',
@@ -1746,7 +1803,7 @@ const LCS = (window.LCS = {});
                 path.setCoords();
                 path.sourceType = 'traced';
                 if (img.lcsName) path.lcsName = img.lcsName + ' (traced)';
-                LCS.objects.attach(path, defaultLayer);
+                LCS.objects.attach(path, targetLayer);
                 fab.add(path);
                 fab.setActiveObject(path);
 
@@ -1755,7 +1812,8 @@ const LCS = (window.LCS = {});
                 fab.requestRenderAll();
                 done();
                 const how = algo === 'adaptive' ? 'adaptive' : (algo === 'manual' ? `threshold ${usedT}` : `auto threshold ${usedT}`);
-                toast(`Traced (${how}) — ${pathCount} contour${pathCount > 1 ? 's' : ''} merged into one path`, 'success');
+                const mode = fillIt ? `fill → ${targetLayer.name}` : `outline → ${targetLayer.name}`;
+                toast(`Traced (${how}, ${mode}) — ${pathCount} contour${pathCount > 1 ? 's' : ''} merged into one path`, 'success');
             } catch (innerErr) {
                 console.error(innerErr);
                 done();
@@ -2277,7 +2335,9 @@ const LCS = (window.LCS = {});
         }
     }
 
-    async function generate() {
+    // opts.force — skip the MAX_GCODE_LINES safety cap (power-user override). Default
+    // behaviour protects the user: an over-cap job is refused unless they confirm.
+    async function generate(opts = {}) {
         const fab = LCS.canvas.fabric;
         const state = LCS.state.get();
         const m = state.machine;
@@ -2336,13 +2396,61 @@ const LCS = (window.LCS = {});
         const text = lines.join('\n');
         const stats = {
             totalLines: lines.length,
+            // G-code is ASCII, so the joined string length is ~the on-disk byte size.
+            estBytes: text.length,
             burnMm: totalBurnMm, travelMm: totalTravelMm,
             durationSec: estimateDuration(totalBurnMm, totalTravelMm, buckets, m),
         };
+        progress('', '', false);
+
+        // Fix 1 — hard safety net, sized for the offline TF-card path on the S10 Pro (a
+        // ~101k-line file stalled the touchscreen loader). A detailed image routed through
+        // the scanline fill can produce 100k+ lines, so refuse by default and tell the user
+        // *why* and *exactly what to change* — including a concrete coarser interval computed
+        // for this job — rather than handing them a file that hangs the machine. opts.force
+        // lets power users push past it (e.g. streaming over USB instead of the TF card).
+        if (stats.totalLines > LCS.config.MAX_GCODE_LINES && !opts.force) {
+            const cap = LCS.config.MAX_GCODE_LINES;
+            const sizeStr = LCS.util.fmtBytes(stats.estBytes);
+            // Engrave-fill line count scales ~linearly with scanline count, i.e. inversely
+            // with interval. So to land under the cap (aim for 90% of it for headroom):
+            //   suggestedInterval ≈ currentInterval × projectedLines / (cap × 0.9)
+            // Round UP to a tidy 0.05 mm step. Only meaningful when there's engrave content;
+            // a giant vector cut won't shrink by changing the raster interval.
+            const hasEngrave = buckets.engrave.length > 0;
+            const rawSuggest = m.rasterInterval * stats.totalLines / (cap * 0.9);
+            const suggestInterval = Math.ceil(rawSuggest / 0.05) * 0.05;
+            const estAtSuggest = Math.round(stats.totalLines * m.rasterInterval / suggestInterval);
+            const intervalTip = hasEngrave
+                ? `  • Set "Raster line interval" to ~${suggestInterval.toFixed(2)} mm ` +
+                  `(≈${estAtSuggest.toLocaleString()} lines for this image — coarser spacing will look more lined)\n`
+                : '';
+            LCS.util.toast(
+                `Job is ${stats.totalLines.toLocaleString()} lines (${sizeStr}) — above the ` +
+                `${cap.toLocaleString()}-line offline limit. See dialog.`, 'danger');
+            const proceed = window.confirm(
+                `This job is ${stats.totalLines.toLocaleString()} lines (${sizeStr}) — above the ` +
+                `${cap.toLocaleString()}-line limit for offline TF-card loading on the S10 Pro.\n\n` +
+                (hasEngrave
+                    ? `At the current ${m.rasterInterval} mm interval it likely won't load.\n\n`
+                    : `\n`) +
+                `To bring it under the limit:\n` +
+                intervalTip +
+                `  • Engrave a smaller area, or reduce image detail before tracing\n` +
+                `  • Outline the trace on the Cut/Score layer instead of filling it\n\n` +
+                `Export anyway? (may stall the touchscreen at "loading")`);
+            if (!proceed) {
+                // Stash the result so the UI can still report the line count, but signal
+                // refusal to callers (they won't open the export modal / preview).
+                state.gcode = text;
+                state.gcodeStats = stats;
+                return null;
+            }
+        }
+
         state.gcode = text;
         state.gcodeStats = stats;
         state.gcodeSegments = LCS.preview.parse(text);
-        progress('', '', false);
         return { gcode: text, stats };
     }
 
@@ -2394,6 +2502,123 @@ const LCS = (window.LCS = {});
 
     function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 
+    // ===== SHARED SCANLINE EMIT BACKEND =====
+    // Both engrave engines (rasterizeImage, fillVectorObject) reduce their work to the same
+    // primitive: per horizontal scan row, a list of burn spans (worldPx, x0<x1, each with an
+    // optional per-span power for grayscale). This backend owns span cleanup, boustrophedon
+    // ordering and G-code emission, so every optimization lands on both image and traced-
+    // vector engraving at once instead of being duplicated in two places.
+    //
+    // Why a continuous S/S0 sweep instead of lift+rapid per span (the big win):
+    //   The old encoding emitted G0(rapid) + M4 + G1 + M5 — four lines — for EVERY span, and
+    //   parked the head with a full decel/accel between spans on the same row. A dense fill is
+    //   tens of thousands of spans, which is exactly what produced the ~100k-line files that
+    //   stall the offline TF-card loader. Instead we sweep the whole row in one direction under
+    //   a single M4: burn a span at S>0, then cross the white gap to the next span at S0 (beam
+    //   off) WITHOUT lifting — ~2 lines per span-or-gap, smoother motion, roughly half the lines.
+    //
+    // !!! GRBL DYNAMIC-MODE ASSUMPTION: this relies on M4 dynamic laser mode, where `G1 … S0`
+    // turns the beam off for that move and G0 rapids are always beam-off. SMOKE-TEST on the
+    // actual S10 Pro before trusting it on large jobs. Only gaps wider than GAP_RAPID_MM fall
+    // back to a G0 rapid, where crossing at engrave feed would waste real time.
+    function makeScanEmitter(layer) {
+        const m = LCS.state.machine();
+        const feed = layer.speed | 0;
+        const travelFeed = m.travelFeed | 0;
+        const minFeaturePx = LCS.config.MIN_FEATURE_MM * PX_PER_MM;
+        const gapRapidPx = LCS.config.GAP_RAPID_MM * PX_PER_MM;
+
+        const out = [];
+        let burnMm = 0, travelMm = 0, lastPt = null;
+        let forward = true;   // boustrophedon: alternate sweep direction each emitted row
+        let laserOn = false;  // emit M4 exactly once, on the first burn of the object
+        // Modal G-code state — re-emit a token only when it changes (GRBL is modal; restating
+        // identical X/Y/F/S on every line is pure bytes). X advances on every move within a row;
+        // Y is constant down a row and is suppressed after the row's first move; F and S flip
+        // only at burn<->gap and burn<->travel boundaries.
+        let curXStr = null, curYStr = null, curF = null, curS = null;
+
+        function emitMove(code, pt, f, s) {
+            let line = code;
+            const xStr = pt.x.toFixed(3), yStr = pt.y.toFixed(3);
+            if (xStr !== curXStr) { line += ` X${xStr}`; curXStr = xStr; }
+            if (yStr !== curYStr) { line += ` Y${yStr}`; curYStr = yStr; }
+            if (f != null && f !== curF) { line += ` F${f}`; curF = f; }
+            if (s != null) { const sr = Math.round(s); if (sr !== curS) { line += ` S${sr}`; curS = sr; } }
+            if (line === code) return; // degenerate no-op move (shouldn't happen post-cleanup)
+            out.push(line);
+        }
+
+        // Coalesce spans separated by a sub-feature gap into one continuous burn, then drop
+        // spans still narrower than the spot/min-feature (unburnable hairlines). Lifted out of
+        // fillVectorObject so the image path gets the same cleanup (parity with its run-merge).
+        function clean(spans) {
+            if (!spans.length) return spans;
+            const merged = [];
+            for (const s of spans) {
+                const last = merged[merged.length - 1];
+                if (last && s.x0 - last.x1 < minFeaturePx) {
+                    last.x1 = Math.max(last.x1, s.x1);
+                    last.s = Math.max(last.s, s.s); // keep the stronger burn across a hairline gap
+                } else {
+                    merged.push({ x0: s.x0, x1: s.x1, s: s.s });
+                }
+            }
+            return merged.filter(s => s.x1 - s.x0 >= minFeaturePx);
+        }
+
+        function comment(text) { out.push(text); }
+
+        // row = { y: worldPxY, spans: [{x0,x1,s}, …] }, spans sorted ascending by x0.
+        function addRow(row) {
+            const spans = clean(row.spans);
+            if (!spans.length) return;
+            const seq = forward ? spans : spans.slice().reverse();
+
+            // Reposition to the row's start with a rapid (beam off). Boustrophedon keeps this
+            // close to the previous row's exit, so it's mostly just the Y step.
+            const first = seq[0];
+            const entryPt = toMachineMm({ x: forward ? first.x0 : first.x1, y: row.y });
+            if (lastPt) travelMm += dist(lastPt, entryPt);
+            emitMove('G0', entryPt, travelFeed, null);
+            lastPt = entryPt;
+
+            // One M4 for the whole object — dynamic power; subsequent rows stay under it.
+            if (!laserOn) { out.push(dialect.laserOn(first.s)); curS = Math.round(first.s); laserOn = true; }
+
+            for (let i = 0; i < seq.length; i++) {
+                const sp = seq[i];
+                const endPt = toMachineMm({ x: forward ? sp.x1 : sp.x0, y: row.y });
+                emitMove('G1', endPt, feed, sp.s);   // burn this span at its power
+                burnMm += dist(lastPt, endPt);
+                lastPt = endPt;
+                if (i + 1 < seq.length) {
+                    const nx = seq[i + 1];
+                    const gapStartX = forward ? sp.x1 : sp.x0;
+                    const gapEndX = forward ? nx.x0 : nx.x1;
+                    const gapPt = toMachineMm({ x: gapEndX, y: row.y });
+                    if (Math.abs(gapEndX - gapStartX) > gapRapidPx) {
+                        // Large gap: lift to a rapid — crossing at engrave feed would waste time.
+                        emitMove('G0', gapPt, travelFeed, null);
+                    } else {
+                        // Small/medium gap: keep sweeping straight, beam off via S0 (dynamic mode).
+                        emitMove('G1', gapPt, feed, 0);
+                    }
+                    travelMm += dist(lastPt, gapPt);
+                    lastPt = gapPt;
+                }
+            }
+            forward = !forward;
+        }
+
+        function finish() {
+            if (laserOn) out.push(dialect.laserOff()); // beam off at end of object
+            return { lines: out, burnMm, travelMm, lastPt: lastPt || { x: 0, y: 0 } };
+        }
+
+        return { addRow, comment, finish };
+    }
+
     // ===== FILL ENGRAVE (vector shapes with a solid fill) =====
     // Open strokes (lines, pen paths) and grouped outlines must NOT be area-filled;
     // fabric defaults fill to black for some types, so gate on type as well.
@@ -2407,10 +2632,9 @@ const LCS = (window.LCS = {});
     // traced paths and glyphs stay unburned). Spacing follows the machine's raster
     // interval, same as image engraving.
     function fillVectorObject(obj, layer, S) {
-        const lines = [];
         const m = LCS.state.machine();
         const polys = flattenToPolylines(obj);
-        if (!polys.length) return { lines, burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } };
+        if (!polys.length) return { lines: [], burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } };
 
         // Closed edge list in world px (modulo wraps open contours shut; zero-length
         // closing edges are ignored by the straddle test below)
@@ -2425,49 +2649,38 @@ const LCS = (window.LCS = {});
                 if (a.y > maxY) maxY = a.y;
             }
         }
-        if (!edges.length) return { lines, burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } };
+        if (!edges.length) return { lines: [], burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } };
 
         const stepPx = m.rasterInterval * PX_PER_MM;
-        const feed = layer.speed;
         const passes = layer.passes || 1;
-        const minSpanPx = 0.02 * PX_PER_MM;
-        let burnMm = 0, travelMm = 0, lastPt = null;
-        let forward = true;
 
-        for (let pass = 0; pass < passes; pass++) {
-            if (passes > 1) lines.push(`; Pass ${pass + 1}/${passes}`);
-            for (let y = minY + stepPx / 2; y <= maxY; y += stepPx) {
-                const xs = [];
-                for (const [a, b] of edges) {
-                    // half-open straddle test keeps vertex hits from double-counting
-                    if ((a.y <= y) !== (b.y <= y)) {
-                        xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
-                    }
+        // This engine's only job: turn each scan row into a list of interior burn spans
+        // (binary — every span burns at full power S). Span cleanup (sub-feature coalesce/
+        // drop), boustrophedon ordering and the optimized S/S0 sweep all live in the shared
+        // backend, so this path now matches the image path's encoding line-for-line.
+        const rows = [];
+        for (let y = minY + stepPx / 2; y <= maxY; y += stepPx) {
+            const xs = [];
+            for (const [a, b] of edges) {
+                // half-open straddle test keeps vertex hits from double-counting
+                if ((a.y <= y) !== (b.y <= y)) {
+                    xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
                 }
-                if (xs.length < 2) continue;
-                xs.sort((p, q) => p - q);
-                const spans = [];
-                for (let k = 0; k + 1 < xs.length; k += 2) {
-                    if (xs[k + 1] - xs[k] > minSpanPx) spans.push([xs[k], xs[k + 1]]);
-                }
-                if (!spans.length) continue;
-                const order = forward ? spans : spans.slice().reverse();
-                for (const [x0, x1] of order) {
-                    const sx = forward ? x0 : x1, ex = forward ? x1 : x0;
-                    const startMm = toMachineMm({ x: sx, y });
-                    const endMm = toMachineMm({ x: ex, y });
-                    lines.push(dialect.rapid(startMm.x, startMm.y, m.travelFeed));
-                    if (lastPt) travelMm += dist(lastPt, startMm);
-                    lines.push(dialect.laserOn(S));
-                    lines.push(dialect.cut(endMm.x, endMm.y, feed, S));
-                    lines.push(dialect.laserOff());
-                    burnMm += dist(startMm, endMm);
-                    lastPt = endMm;
-                }
-                forward = !forward;
             }
+            if (xs.length < 2) continue;
+            xs.sort((p, q) => p - q);
+            // Pair crossings into interior spans (even-odd fill rule).
+            const spans = [];
+            for (let k = 0; k + 1 < xs.length; k += 2) spans.push({ x0: xs[k], x1: xs[k + 1], s: S });
+            if (spans.length) rows.push({ y, spans });
         }
-        return { lines, burnMm, travelMm, lastPt: lastPt || { x: 0, y: 0 } };
+
+        const em = makeScanEmitter(layer);
+        for (let pass = 0; pass < passes; pass++) {
+            if (passes > 1) em.comment(`; Pass ${pass + 1}/${passes}`);
+            for (const row of rows) em.addRow(row);
+        }
+        return em.finish();
     }
 
     function flattenToPolylines(obj) {
@@ -2737,8 +2950,7 @@ const LCS = (window.LCS = {});
     async function rasterizeImage(obj, layer, S) {
         const m = LCS.state.machine();
         const interval = m.rasterInterval; // mm between scan lines
-        const lines = [];
-        let burnMm = 0, travelMm = 0, lastPt = null;
+        const lines = []; // only referenced by the early-return guards below
 
         // Project object to bitmap at the scan resolution
         const widthMm = obj.getScaledWidth() * MM_PER_PX;
@@ -2777,11 +2989,14 @@ const LCS = (window.LCS = {});
         catch (e) { console.error('getImageData failed (canvas tainted?)', e); return { lines, burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } }; }
 
         const worldLeft = obj.left;
-        let forward = true;
-        const feed = layer.speed;
         const yieldEvery = Math.max(1, Math.round(bh / 200)); // ~200 progress ticks over the image
         console.log(`[raster] ${bw}x${bh} px, interval ${(1/pxPerMm).toFixed(3)} mm`);
 
+        // This engine's only job: per row, merge adjacent same-power burn pixels into runs
+        // (preserving grayscale power per run) and hand them to the shared backend as worldPx
+        // spans. Ordering, the S/S0 sweep and emission are the backend's — identical encoding
+        // to the vector-fill path. Grayscale is carried through via each span's per-span power.
+        const em = makeScanEmitter(layer);
         for (let row = 0; row < bh; row++) {
             const yMmLocal = (row + 0.5) / pxPerMm;
             const yPx = obj.top + yMmLocal * PX_PER_MM;
@@ -2799,23 +3014,13 @@ const LCS = (window.LCS = {});
                 } else { cur = null; }
             }
             if (grp.length) {
-                const emitOrder = forward ? grp : grp.slice().reverse();
-                for (const run of emitOrder) {
-                    const startXmm = forward ? (run.x0 / pxPerMm) : ((run.x1 + 1) / pxPerMm);
-                    const endXmm   = forward ? ((run.x1 + 1) / pxPerMm) : (run.x0 / pxPerMm);
-                    const startPx = { x: worldLeft + startXmm * PX_PER_MM, y: yPx };
-                    const endPx   = { x: worldLeft + endXmm   * PX_PER_MM, y: yPx };
-                    const startMm = toMachineMm(startPx);
-                    const endMm   = toMachineMm(endPx);
-                    lines.push(dialect.rapid(startMm.x, startMm.y, m.travelFeed));
-                    if (lastPt) travelMm += Math.hypot(startMm.x - lastPt.x, startMm.y - lastPt.y);
-                    lines.push(`M4 S${run.s}`);
-                    lines.push(`G1 X${endMm.x.toFixed(3)} Y${endMm.y.toFixed(3)} F${feed|0}`);
-                    burnMm += Math.hypot(endMm.x - startMm.x, endMm.y - startMm.y);
-                    lastPt = endMm;
-                }
-                lines.push(dialect.laserOff());
-                forward = !forward;
+                // Pixel run x0..x1 (inclusive) → worldPx span [x0, x1+1] at the run's power.
+                const spans = grp.map(run => ({
+                    x0: worldLeft + (run.x0 / pxPerMm) * PX_PER_MM,
+                    x1: worldLeft + ((run.x1 + 1) / pxPerMm) * PX_PER_MM,
+                    s: run.s,
+                }));
+                em.addRow({ y: yPx, spans });
             }
             // UNCONDITIONAL yield + progress update — don't lock the UI on blank rows
             if (row % yieldEvery === 0) {
@@ -2823,7 +3028,7 @@ const LCS = (window.LCS = {});
                 await new Promise(r => setTimeout(r, 0));
             }
         }
-        return { lines, burnMm, travelMm, lastPt: lastPt || { x: 0, y: 0 } };
+        return em.finish();
     }
 
     // Export SVG (useful for LightBurn / Glowforge)
@@ -2899,7 +3104,10 @@ const LCS = (window.LCS = {});
             const nx = mX ? +mX[1] : cx, ny = mY ? +mY[1] : cy;
             if (mF) cf = +mF[1];
             if (mS) cs = +mS[1];
-            const travel = code === 0 || !laser;
+            // The optimized scanline sweep keeps M4 active across a whole row and modulates
+            // power: S>0 burns, S0 crosses a white gap with the beam off (GRBL dynamic mode).
+            // So a move is travel if it's a rapid, the laser is off, OR power is currently 0.
+            const travel = code === 0 || !laser || cs <= 0;
             if (mX || mY) {
                 segs.push({ x1: cx, y1: cy, x2: nx, y2: ny, travel, s: cs, f: cf });
                 cx = nx; cy = ny;
@@ -3147,8 +3355,155 @@ const LCS = (window.LCS = {});
         if (idx < stack.length - 1) { idx++; restore(stack[idx]); }
     }
 
+    // Pause/resume snapshotting around a bulk mutation (e.g. loading a project): the churn of
+    // many object:added events would otherwise spam the stack. Callers take one clean snapshot
+    // (or reset) afterwards. Also clears any pending debounce so nothing fires post-resume.
+    function setSuppress(v) {
+        suppress = !!v;
+        if (suppress) { pendingDirty = false; if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; } }
+    }
+    // Throw away undo/redo history and re-baseline on the current canvas — used after a project
+    // load so you can't half-undo back into the previous project.
+    function reset() { stack = []; idx = -1; snapshotNow(); }
+
     LCS.history = { init, snapshot: snapshotNow, flush: flushPending, undo, redo,
-                    debug: () => ({ stack: stack.length, idx }) };
+                    setSuppress, reset, debug: () => ({ stack: stack.length, idx }) };
+})();
+
+// ============================================================
+// LCS.project — save/load a whole project (settings + content) to a .lcsproj file
+// ============================================================
+(() => {
+    const FORMAT = 'laser-cutter-studio-project';
+    const VERSION = 1;
+
+    // Same custom properties the history snapshots persist, so saved objects round-trip
+    // identically (layer/op assignment, traced flag, image params + original source, etc.).
+    // We use full toJSON (not toDatalessJSON) so a project file is fully self-contained —
+    // image pixels and path geometry are embedded as data, not external references.
+    const PROJECT_PROPS = ['objectId', 'layerId', 'opType', 'sourceType', 'lcsName',
+        '_cornerRadiusMm', '_imgParams', '_origSrc', '_origWidth', '_origHeight'];
+
+    function hasUserContent() {
+        const fab = LCS.canvas.fabric;
+        return !!fab && fab.getObjects().some(o =>
+            !o._lcsBed && !o._lcsGrid && !o._lcsPreview && !o._lcsNodeHandle && !o._lcsPenWorking);
+    }
+
+    function serialize() {
+        const fab = LCS.canvas.fabric;
+        LCS.history.flush(); // commit any debounced edit so the file matches what's on screen
+        const state = LCS.state.get();
+        return {
+            format: FORMAT,
+            version: VERSION,
+            app: 'Laser Cutter Studio',
+            savedAt: new Date().toISOString(),
+            // Deep-clone so later edits can't mutate the snapshot before download.
+            machine: JSON.parse(JSON.stringify(state.machine)),
+            layers: JSON.parse(JSON.stringify(state.layers)),
+            activeLayerId: state.activeLayerId,
+            view: { gridVisible: state.gridVisible, snapEnabled: state.snapEnabled },
+            // Bed + grid carry excludeFromExport, so toJSON emits only real user objects.
+            canvas: fab.toJSON(PROJECT_PROPS),
+        };
+    }
+
+    function defaultName() {
+        const d = new Date();
+        const p = n => String(n).padStart(2, '0');
+        return `laser-project-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.lcsproj`;
+    }
+
+    function save() {
+        const fab = LCS.canvas.fabric;
+        if (!fab) return;
+        try {
+            const json = JSON.stringify(serialize());
+            LCS.util.download(defaultName(), json, 'application/json');
+            LCS.util.toast('Project saved', 'success');
+        } catch (e) {
+            console.error('Project save failed', e);
+            LCS.util.toast('Save failed: ' + e.message, 'danger');
+        }
+    }
+
+    function load(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onerror = () => LCS.util.toast('Could not read file', 'danger');
+        reader.onload = () => {
+            let proj;
+            try { proj = JSON.parse(reader.result); }
+            catch (_) { LCS.util.toast('Not a valid project file', 'danger'); return; }
+            if (!proj || proj.format !== FORMAT || !proj.canvas) {
+                LCS.util.toast('Unrecognized project file', 'danger');
+                return;
+            }
+            // Loading replaces everything, so confirm if there's work that would be lost.
+            if (hasUserContent() &&
+                !window.confirm('Open project? This replaces the current canvas and machine settings.')) return;
+            applyProject(proj);
+        };
+        reader.readAsText(file);
+    }
+
+    function applyProject(proj) {
+        const fab = LCS.canvas.fabric;
+        const state = LCS.state.get();
+
+        // Don't record the load churn as undo steps — re-baseline once when it's done.
+        LCS.history.setSuppress(true);
+
+        // Merge machine settings so a file from an older version (missing newer keys) keeps
+        // sane defaults for anything it doesn't specify.
+        Object.assign(state.machine, proj.machine || {});
+        state.layers.length = 0;
+        (proj.layers || []).forEach(l => state.layers.push(l));
+        state.activeLayerId = proj.activeLayerId || (state.layers[0] && state.layers[0].id) || null;
+        if (proj.view) {
+            state.gridVisible = proj.view.gridVisible !== false;
+            state.snapEnabled = proj.view.snapEnabled !== false;
+        }
+
+        fab.loadFromJSON(proj.canvas, () => {
+            // loadFromJSON wiped the canvas (incl. bed/grid); rebuild the non-exported chrome.
+            LCS.canvas.drawBedBackground();
+            LCS.grid.render();
+            LCS.rulers.render();
+
+            // Fabric's JSON doesn't carry lock-driven selectable/evented or the stroke
+            // hit-testing flags we set in objects.attach, so re-derive them from the restored
+            // layers. (This makes load strictly more faithful than a bare loadFromJSON.)
+            const byId = {};
+            state.layers.forEach(l => { byId[l.id] = l; });
+            fab.getObjects().forEach(o => {
+                if (o._lcsBed || o._lcsGrid) return;
+                const layer = byId[o.layerId] || LCS.state.activeLayer();
+                if (layer) LCS.layers.applyLayerToObject(o, layer);
+                const isText = o.type === 'i-text' || o.type === 'text' || o.type === 'textbox';
+                const isImage = o.type === 'image' || o.type === 'Image';
+                const noFill = !o.fill || o.fill === 'transparent';
+                if (noFill && !isText && !isImage) { o.perPixelTargetFind = true; o.padding = 6; }
+            });
+
+            LCS.canvas.fitToBed();
+            fab.discardActiveObject();
+            fab.requestRenderAll();
+
+            // Push restored settings into the panels/toolbar that read from inputs, not state.
+            LCS.ui.syncMachineInputs();
+            LCS.ui.syncViewToggles();
+            LCS.state.emit('layers:changed');
+            LCS.state.emit('selection:change', []);
+
+            LCS.history.setSuppress(false);
+            LCS.history.reset(); // fresh undo baseline = the loaded project
+            LCS.util.toast('Project loaded', 'success');
+        });
+    }
+
+    LCS.project = { save, load, serialize, hasUserContent };
 })();
 
 // ============================================================
@@ -3184,6 +3539,14 @@ const LCS = (window.LCS = {});
             LCS.util.toast('Generating GCode...', '');
             const res = await LCS.gcode.generate();
             if (res) openExportModal(res);
+        });
+        // Project save/load — whole-document (.lcsproj): settings + layers + canvas content
+        $('#tb-save').addEventListener('click', () => LCS.project.save());
+        $('#tb-open').addEventListener('click', () => $('#project-input').click());
+        $('#project-input').addEventListener('change', e => {
+            const f = e.target.files && e.target.files[0];
+            if (f) LCS.project.load(f);
+            e.target.value = ''; // allow re-opening the same file
         });
         $('#tb-undo').addEventListener('click', LCS.history.undo);
         $('#tb-redo').addEventListener('click', LCS.history.redo);
@@ -3460,8 +3823,13 @@ const LCS = (window.LCS = {});
         const { gcode, stats } = res;
         const preview = gcode.split('\n').slice(0, 40).join('\n');
         $('#export-preview').textContent = preview + (gcode.split('\n').length > 40 ? '\n...' : '');
+        // Surface line count + estimated file size up front — the two numbers that
+        // predict whether the controller will choke before the user sends the job.
+        const over = stats.totalLines > LCS.config.MAX_GCODE_LINES;
+        const sizeStr = LCS.util.fmtBytes(stats.estBytes ?? (LCS.state.get().gcode || '').length);
         $('#export-stats').innerHTML = `
-            <div>Lines: ${stats.totalLines}</div>
+            <div${over ? ' style="color:var(--danger,#ef4444)"' : ''}>Lines: ${stats.totalLines.toLocaleString()}${over ? ' ⚠' : ''}</div>
+            <div${over ? ' style="color:var(--danger,#ef4444)"' : ''}>Size: ${sizeStr}</div>
             <div>Burn: ${stats.burnMm.toFixed(1)} mm</div>
             <div>Travel: ${stats.travelMm.toFixed(1)} mm</div>
             <div>Estimated time: ${formatTime(stats.durationSec)}</div>
@@ -3477,12 +3845,32 @@ const LCS = (window.LCS = {});
         return (h ? `${h}h ` : '') + `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
     }
 
+    // Push restored machine state into the Machine panel inputs (which are otherwise the
+    // source of truth via their input listeners). Called after a project load.
+    function syncMachineInputs() {
+        const m = LCS.state.machine();
+        const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+        set('m-bw', m.bedWidth); set('m-bh', m.bedHeight);
+        set('m-origin', m.origin); set('m-dialect', m.dialect);
+        set('m-travel', m.travelFeed); set('m-interval', m.rasterInterval);
+        set('m-smax', m.smax); set('m-grid', m.gridSpacing); set('m-snap', m.snapTolerance);
+    }
+
+    // Reflect restored grid/snap state on their toolbar toggle buttons.
+    function syncViewToggles() {
+        const s = LCS.state.get();
+        const g = $('#tb-grid-toggle'); if (g) g.classList.toggle('active', s.gridVisible);
+        const sn = $('#tb-snap-toggle'); if (sn) sn.classList.toggle('active', s.snapEnabled);
+    }
+
     function wireShortcuts() {
         document.addEventListener('keydown', e => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
             if (e.ctrlKey || e.metaKey) {
                 const k = e.key.toLowerCase();
-                if (k === 'z' && !e.shiftKey) { e.preventDefault(); LCS.history.undo(); }
+                if (k === 's' && !e.shiftKey) { e.preventDefault(); LCS.project.save(); }
+                else if (k === 'o') { e.preventDefault(); $('#project-input').click(); }
+                else if (k === 'z' && !e.shiftKey) { e.preventDefault(); LCS.history.undo(); }
                 else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); LCS.history.redo(); }
                 else if (k === 'a') { e.preventDefault(); LCS.selection.selectAll(); }
                 else if (k === 'g' && !e.shiftKey) { e.preventDefault(); LCS.selection.group(); }
@@ -3536,7 +3924,7 @@ const LCS = (window.LCS = {});
         });
     }
 
-    LCS.ui = { init, updateProps, openExportModal };
+    LCS.ui = { init, updateProps, openExportModal, syncMachineInputs, syncViewToggles };
 })();
 
 // ============================================================
