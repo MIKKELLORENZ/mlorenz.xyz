@@ -2,78 +2,171 @@
 
 (() => {
 
-const WORLD_W = 9600;
+/*
+ * Moon Lander Neuroevolution v3.5
+ *
+ * Core changes:
+ * - deterministic, shared evaluation scenarios (common random numbers)
+ * - continuous 20 Hz controller over stable 60 Hz physics
+ * - feed-forward controller with Xavier initialization
+ * - pad-first robust multi-episode fitness
+ * - potential-based approach shaping and locked mission targets
+ * - realistic landing envelope including horizontal/angular impact limits
+ * - corrected grounded/takeoff state
+ * - adaptive mutation, BLX crossover, elitism, immigrants, hall of fame
+ * - physics-informed bootstrap policy for substantially faster early learning
+ * - responsive predictive camera with smooth population and leader tracking
+ * - strict leader ranking by pads, next-pad distance, then travelled distance
+ * - compact activation-panel camera controls with 97% leader bias
+ * - balanced evolutionary selection restored as the recommended default
+ * - extended 125,000 px courses with 125+ pads on every terrain
+ * - Titan Gauntlet terrain with mountains, valleys, and long plateaus
+ * - vessel-view-aware averaged neural activation display
+ * - compact advanced fitness-shaping controls
+ * - swept hull/leg/full-foot collision detection with strict impact mortality
+ * - throttleable descent engine with floor, slew limits, and ignition dwell
+ * - fixed-thrust pulse RCS with minimum on/off valve dwell
+ * - one protected all-time elite evaluated on deterministic scenario bank
+ */
+
+const WORLD_W = 125000;
 const WORLD_H = 760;
+const TERRAIN_PATTERN_W = 9600;
+const MIN_PADS_PER_MAP = 125;
 const VIEW_W = 1200;
 const VIEW_H = 700;
 const DT = 1 / 60;
 
-const OXYGEN_MAX = 60;
+// Simulation resources and forces. Fuel rates are expressed per simulated second.
+const OXYGEN_MAX = 72;
 const FUEL_MAX = 1700;
 const GRAVITY = 27;
 const MAIN_THRUST = 65;
-const SIDE_THRUST = 27;
-const TURN_ACCEL = 90 * Math.PI / 180;
-const MAIN_FUEL_COST = 0.49;
-const AUX_FUEL_COST = 0.14;
-const SAFE_LANDING_SPEED = 57;
-const SAFE_LANDING_ANGLE = Math.PI / 6;
+const SIDE_THRUST = 25;
+const TURN_ACCEL = 105 * Math.PI / 180;
+const ANGULAR_DAMPING = 0.42;
+const MAX_ANGULAR_SPEED = 210 * Math.PI / 180;
+const MAIN_FUEL_RATE = 29.4;
+const AUX_FUEL_RATE = 8.4;
+const DRY_MASS_FACTOR = 0.72;
+const FUEL_MASS_FACTOR = 0.28;
+
+// Landing envelope. A valid landing must satisfy every condition. These
+// limits are intentionally unforgiving: a leg strike at a large angle or a
+// high-energy pad impact is a crash rather than a free snap-to-pad.
+const SAFE_LANDING_VERTICAL_SPEED = 28;
+const SAFE_LANDING_HORIZONTAL_SPEED = 15;
+const SAFE_LANDING_ANGLE = 10 * Math.PI / 180;
+const SAFE_LANDING_ANGULAR_SPEED = 26 * Math.PI / 180;
+const SAFE_LANDING_UPWARD_SPEED = 4;
+const TAKEOFF_THROTTLE = 0.46;
+
+// Engine mechanics are decoupled from the 60 Hz physics integration. The
+// neural network requests controls, but physical actuators obey their own
+// response and dwell limits.
+const MAIN_MIN_THROTTLE = 0.18;
+const MAIN_IGNITION_COMMAND = 0.11;
+const MAIN_SHUTDOWN_COMMAND = 0.055;
+const MAIN_THROTTLE_SLEW_UP = 0.55;   // fraction of full thrust per second
+const MAIN_THROTTLE_SLEW_DOWN = 0.70; // fraction of full thrust per second
+const MAIN_MIN_ON_TIME = 0.60;        // deliberate landing-engine burn
+const MAIN_MIN_OFF_TIME = 0.45;       // restart / valve-settle gap
+const RCS_COMMAND_THRESHOLD = 0.24;
+const RCS_MIN_ON_TIME = 0.030;        // pulse valve minimum open time
+const RCS_MIN_OFF_TIME = 0.030;       // pulse valve minimum closed time
+
+// Swept collision geometry prevents fast craft from tunnelling through a
+// mountain or pad between physics frames. Terrain contact is checked across
+// the hull, lower body, and landing-leg rods—not only at the two foot centres.
+const COLLISION_SWEEP_STEP = 2.5;
+const COLLISION_MAX_SWEEP_STEPS = 24;
+const TERRAIN_CONTACT_EPSILON = 0.35;
+const LANDER_COLLISION_RADIUS = 39;
+const LANDER_SOLID_LOCAL_POINTS = Object.freeze([
+    [-12, -26], [-5, -28], [5, -28], [12, -26],
+    [-16, -18], [16, -18], [-17, -8], [17, -8],
+    [-16, 2], [16, 2], [-14, 10], [14, 10],
+    [-8, 15], [0, 17], [8, 15],
+    [-11, 11], [-14, 14], [-18, 18],
+    [11, 11], [14, 14], [18, 18],
+]);
+const MAX_EPISODE_TIME = 2700;
+const NO_PROGRESS_TIMEOUT = 36;
+const CONTROL_INTERVAL = 3;
+
 const PAD_FUEL_REWARD = 330;
-const PAD_OXYGEN_REWARD = 17;
+const PAD_OXYGEN_REWARD = 18;
 const LANDING_BONUS = 50;
 
 const LANDER_FEET_Y = 26;
 const LANDER_BODY_Y = 20;
-const LANDER_HALF_W = 18;
+const LANDER_HALF_W = 23;
+const LANDER_FOOT_HALF_WIDTH = 8;
 
 const PAD_SENSE_R = VIEW_W;
-const RAY_MAX = 600;
-const RAY_MEMORY = 10;
-const RAY_LAG = 6;
-const RAY_ANGLES = [-90, -60, -30, 0, 30, 60, 90].map(d => d * Math.PI / 180);
+const RAY_MAX = 650;
+const RAY_ANGLES = [-85, -65, -45, -25, 0, 25, 45, 65, 85].map(d => d * Math.PI / 180);
 const N_RAYS = RAY_ANGLES.length;
 
-const N_IN = 32, N_H1 = 24, N_H2 = 16, N_OUT = 3;
+// The world is fully observable enough that recurrence only added instability.
+// A feed-forward controller is easier to evolve and has fewer failure modes.
+const N_IN = 42, N_H1 = 32, N_H2 = 24, N_OUT = 3;
 const OFF_WXH = 0;
-const OFF_WHH = OFF_WXH + N_IN * N_H1;
-const OFF_BH = OFF_WHH + N_H1 * N_H1;
+const OFF_BH = OFF_WXH + N_IN * N_H1;
 const OFF_W12 = OFF_BH + N_H1;
 const OFF_B2 = OFF_W12 + N_H1 * N_H2;
 const OFF_WHY = OFF_B2 + N_H2;
 const OFF_BY = OFF_WHY + N_H2 * N_OUT;
 const GENOME_SIZE = OFF_BY + N_OUT;
+const BRAIN_VERSION = 3;
 
 const POP_DEFAULT = 64;
-const N_EPISODES = 3;
-const N_ELITE = 4;
-const N_FRESH = 4;
-const CHAMP_FRACTION = 0.28;
+const N_EPISODES = 4;
+const N_FIXED_EPISODES = N_EPISODES;
+const N_ELITE = 1;
+const N_FRESH = 8;
+const CHAMP_FRACTION = 0.24;
 const SPEED_STOPS = [0.5, 1, 2, 4, 8, 16, 32, Infinity];
 
 const SPEED_SCALE = 180;
-const ACCEL_SCALE = 120;
 const ANGVEL_SCALE = 3;
+const ACTION_RESPONSE = 0.35;
 
-const LAND_REWARD = 1800;
-const APPROACH_REWARD = 280;
-const CRASH_PENALTY = 700;
-const JERK_COST = 0.22;
-const SPIN_COST = 0.065;
+const PAD_FITNESS_VALUE = 1_000_000;
+const SCORE_FITNESS_VALUE = 900;
+const LAND_REWARD = 1500;
+const APPROACH_REWARD = 320;
+const CRASH_PENALTY = 850;
+const JERK_COST = 0.065;
+const SPIN_COST = 0.075;
 const FUEL_DRIFT_COST = 0.004;
-const WANDER_COST = 10;
-const LOW_RESOURCE_COST = 15;
-const PAD_IDLE_GRACE = 1.4;
-const PAD_IDLE_COST = 22;
+const WANDER_COST = 9;
+const LOW_RESOURCE_COST = 16;
+const PAD_IDLE_GRACE = 1.1;
+const PAD_IDLE_COST = 25;
 const TOP_GHOSTS = 12;
-const CAMERA_LERP = 0.14;
-const POP_LIMIT = 64;
-const SURVIVAL_CHAMPION_MUTANT_MIN = 5;
-const SURVIVAL_CHAMPION_MUTANT_MAX = 7;
-const SURVIVAL_FRESH_FRACTION = 0.14;
-const BRAIN_STORAGE_KEY = 'neural_moon_landers_brain_v1';
-const POLICY_STORAGE_KEY = 'neural_moon_landers_policy_v1';
+const CAMERA_DEFAULT_MODE = 'average';
+const CAMERA_AVERAGE_SMOOTH_TIME = 0.72;
+const CAMERA_AVERAGE_LEADER_BIAS = 0.97;
+const CAMERA_BIAS_STORAGE_KEY = 'neural_moon_landers_camera_leader_bias_v2';
+const CAMERA_LEADER_SMOOTH_TIME = 0.84;
+const CAMERA_LEADER_SWITCH_TIME = 2.6;
+const CAMERA_LEADER_SWITCH_DAMP_TIME = 0.68;
+const CAMERA_LOOKAHEAD_X_TIME = 0.48;
+const CAMERA_LOOKAHEAD_Y_TIME = 0.28;
+const CAMERA_MAX_LOOKAHEAD_X = 180;
+const CAMERA_MAX_LOOKAHEAD_Y = 100;
+const CAMERA_CATCHUP_DISTANCE = 260;
+const CAMERA_CATCHUP_MIN_FACTOR = 0.48;
+const CAMERA_MAX_SPEED = 7200;
+const POP_LIMIT = 160;
+const SURVIVAL_CHAMPION_MUTANT_MIN = 6;
+const SURVIVAL_CHAMPION_MUTANT_MAX = 10;
+const SURVIVAL_FRESH_FRACTION = 0.12;
+const BRAIN_STORAGE_KEY = 'neural_moon_landers_brain_v3';
+const POLICY_STORAGE_KEY = 'neural_moon_landers_policy_v2';
 const POLICY_LIBRARY_KEY = 'neural_moon_landers_policy_library_v1';
-const CHAMPION_LIBRARY_KEY = 'neural_moon_landers_champion_library_v1';
+const CHAMPION_LIBRARY_KEY = 'neural_moon_landers_champion_library_v3';
 const POLICY_TRIALS = 10;
 const POLICY_GENS = 50;
 const POLICY_PARALLEL = 2;
@@ -129,7 +222,7 @@ const POLICY_FIELDS = [
     { key: 'lowAltitudeScale', label: 'Low altitude scale', step: '0.01' },
 ];
 
-const TERRAIN_COLORS = ['#ffbe6b', '#7ad7ff', '#95e58f', '#ff8f6b'];
+const TERRAIN_COLORS = ['#ffbe6b', '#7ad7ff', '#95e58f', '#ff8f6b', '#c7a4ff'];
 const TERRAIN_DEFS = [
     {
         name: 'Tranquility',
@@ -191,6 +284,23 @@ const TERRAIN_DEFS = [
         padSpacingMin: 430,
         padSpacingMax: 610,
     },
+    {
+        name: 'Titan Gauntlet',
+        baseY: 520,
+        amp1: 82,
+        amp2: 52,
+        amp3: 29,
+        wave1: 4.8,
+        wave2: 10.6,
+        wave3: 22.0,
+        noise: 30,
+        minY: 145,
+        maxY: 690,
+        padSpacingMin: 470,
+        padSpacingMax: 720,
+        profile: 'extreme',
+        featureLength: 3200,
+    },
 ];
 
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -242,15 +352,22 @@ function policySummary(policy) {
 }
 
 function normalizeTrainingMode(mode) {
-    return mode === 'survival' || mode === 'evolutionary' ? 'survival' : 'classic';
+    // Both available algorithms are evolutionary. Older UI values named
+    // "reinforcement" map to the balanced evolutionary strategy, while the
+    // explicitly survival-oriented variant remains opt-in.
+    return mode === 'survival' || mode === 'evolutionary-survival'
+        ? 'survival'
+        : 'classic';
 }
 
 function trainingModeValue(mode) {
-    return normalizeTrainingMode(mode) === 'survival' ? 'evolutionary' : 'reinforcement';
+    return normalizeTrainingMode(mode) === 'survival' ? 'survival' : 'evolutionary';
 }
 
 function algorithmLabel(mode) {
-    return normalizeTrainingMode(mode) === 'survival' ? 'Evolutionary algorithm' : 'Reinforcement learning';
+    return normalizeTrainingMode(mode) === 'survival'
+        ? 'Evolutionary · survival'
+        : 'Evolutionary · balanced';
 }
 
 function parseLibrary(key) {
@@ -366,6 +483,33 @@ function mulberry32(seed) {
     };
 }
 
+function hash32(value) {
+    let x = value >>> 0;
+    x ^= x >>> 16;
+    x = Math.imul(x, 0x7feb352d);
+    x ^= x >>> 15;
+    x = Math.imul(x, 0x846ca68b);
+    x ^= x >>> 16;
+    return x >>> 0;
+}
+
+function mixSeed(a, b, c = 0, d = 0) {
+    return hash32(
+        (a >>> 0)
+        ^ Math.imul((b + 0x9e3779b9) >>> 0, 0x85ebca6b)
+        ^ Math.imul((c + 0xc2b2ae35) >>> 0, 0x27d4eb2f)
+        ^ Math.imul((d + 0x165667b1) >>> 0, 0x9e3779b1)
+    );
+}
+
+function seededGaussian(rng) {
+    let u = 0;
+    let v = 0;
+    while (u <= Number.EPSILON) u = rng();
+    while (v <= Number.EPSILON) v = rng();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(Math.PI * 2 * v);
+}
+
 function cross(ax, ay, bx, by) {
     return ax * by - ay * bx;
 }
@@ -378,14 +522,62 @@ function buildTerrain(def, seed) {
     const phase2 = rng() * Math.PI * 2;
     const phase3 = rng() * Math.PI * 2;
     const points = [];
+
+    // Terrain frequencies are based on the original map width rather than the
+    // now much longer world. This preserves local slopes and difficulty while
+    // allowing each course to contain well over 125 pads.
+    const extremeFeatures = [];
+    if (def.profile === 'extreme') {
+        const featureLength = def.featureLength || 3200;
+        const featureCount = Math.ceil(WORLD_W / featureLength);
+        for (let i = 0; i < featureCount; i++) {
+            const featureRng = mulberry32(mixSeed(seed, i, 0x74a7c15d));
+            const x0 = i * featureLength;
+            const flatStart = x0 + featureLength * (0.05 + featureRng() * 0.08);
+            const flatLength = featureLength * (0.22 + featureRng() * 0.17);
+            extremeFeatures.push({
+                flatStart,
+                flatEnd: flatStart + flatLength,
+                flatY: clamp(def.baseY + (featureRng() * 2 - 1) * 125, def.minY + 75, def.maxY - 35),
+                flatEdge: 170 + featureRng() * 110,
+                mountainX: x0 + featureLength * (0.43 + featureRng() * 0.14),
+                mountainWidth: 185 + featureRng() * 180,
+                mountainHeight: 150 + featureRng() * 165,
+                valleyX: x0 + featureLength * (0.73 + featureRng() * 0.13),
+                valleyWidth: 260 + featureRng() * 250,
+                valleyDepth: 105 + featureRng() * 145,
+            });
+        }
+    }
+
+    const smooth01 = value => {
+        const t = clamp(value, 0, 1);
+        return t * t * (3 - 2 * t);
+    };
+
     for (let i = 0; i <= count; i++) {
         const x = i * step;
-        const nx = x / WORLD_W;
+        const nx = x / TERRAIN_PATTERN_W;
         let y = def.baseY
             + Math.sin(nx * Math.PI * def.wave1 + phase1) * def.amp1
             + Math.sin(nx * Math.PI * def.wave2 + phase2) * def.amp2
             + Math.sin(nx * Math.PI * def.wave3 + phase3) * def.amp3
             + (rng() - 0.5) * def.noise;
+
+        if (extremeFeatures.length) {
+            for (const feature of extremeFeatures) {
+                const mountainZ = (x - feature.mountainX) / feature.mountainWidth;
+                const valleyZ = (x - feature.valleyX) / feature.valleyWidth;
+                y -= feature.mountainHeight * Math.exp(-0.5 * mountainZ * mountainZ);
+                y += feature.valleyDepth * Math.exp(-0.5 * valleyZ * valleyZ);
+
+                const enter = smooth01((x - feature.flatStart) / feature.flatEdge);
+                const exit = smooth01((feature.flatEnd - x) / feature.flatEdge);
+                const flatWeight = enter * exit;
+                if (flatWeight > 0) y = lerp(y, feature.flatY, flatWeight * 0.94);
+            }
+        }
+
         y = clamp(y, def.minY, def.maxY);
         points.push({ x, y });
     }
@@ -393,9 +585,10 @@ function buildTerrain(def, seed) {
     const pads = [];
     let cursor = 440 + rng() * 90;
     let padId = 0;
-    while (cursor < WORLD_W - 260) {
-        const idx = clamp(Math.round(cursor / step), 3, points.length - 6);
-        const span = rng() < 0.5 ? 2 : 3;
+
+    const placePad = (requestedX, forceNarrow = false) => {
+        const idx = clamp(Math.round(requestedX / step), 3, points.length - 6);
+        const span = forceNarrow ? 2 : (rng() < 0.5 ? 2 : 3);
         const end = Math.min(points.length - 3, idx + span);
         let flatY = Infinity;
         for (let k = idx - 1; k <= end + 1; k++) flatY = Math.min(flatY, points[k].y);
@@ -403,24 +596,40 @@ function buildTerrain(def, seed) {
         for (let k = idx; k <= end; k++) points[k].y = flatY;
         const x0 = points[idx].x;
         const width = points[end].x - points[idx].x;
-        pads.push({
+        const pad = {
             id: padId++,
             x: x0,
             y: flatY,
             width,
             cx: x0 + width * 0.5,
             points: Math.floor(200 - width),
-        });
-        cursor = x0 + width + def.padSpacingMin + rng() * (def.padSpacingMax - def.padSpacingMin);
+        };
+        pads.push(pad);
+        return pad;
+    };
+
+    while (cursor < WORLD_W - 260) {
+        const pad = placePad(cursor);
+        const randomGap = def.padSpacingMin + rng() * (def.padSpacingMax - def.padSpacingMin);
+        cursor = pad.x + pad.width + randomGap;
+    }
+
+    // The long world and spacing limits normally produce substantially more
+    // than 125 pads. This deterministic fallback makes the guarantee explicit
+    // even if a future terrain definition uses wider spacing.
+    if (pads.length < MIN_PADS_PER_MAP) {
+        const targetGap = (WORLD_W - 900) / MIN_PADS_PER_MAP;
+        for (let i = 0; i < MIN_PADS_PER_MAP && pads.length < MIN_PADS_PER_MAP; i++) {
+            const requestedX = 450 + i * targetGap;
+            const tooClose = pads.some(pad => Math.abs(pad.cx - requestedX) < 180);
+            if (!tooClose) placePad(requestedX, true);
+        }
+        pads.sort((a, b) => a.x - b.x);
+        for (let i = 0; i < pads.length; i++) pads[i].id = i;
     }
 
     if (!pads.length) {
-        const idx = 12;
-        const end = idx + 2;
-        const y = points[idx].y;
-        for (let k = idx; k <= end; k++) points[k].y = y;
-        const width = points[end].x - points[idx].x;
-        pads.push({ id: 0, x: points[idx].x, y, width, cx: points[idx].x + width * 0.5, points: Math.floor(200 - width) });
+        placePad(600, true);
     }
 
     return {
@@ -490,48 +699,108 @@ function raycastTerrain(template, x, y, dx, dy, maxDist = RAY_MAX) {
     return best;
 }
 
-function randomGenome() {
+function randomGenome(rng = Math.random) {
     const g = new Float32Array(GENOME_SIZE);
-    for (let i = 0; i < GENOME_SIZE; i++) {
-        const scale = (i >= OFF_WHH && i < OFF_BH) ? 0.25 : 0.55;
-        g[i] = gauss() * scale;
+
+    const initLayer = (offset, fanIn, fanOut) => {
+        const limit = Math.sqrt(6 / (fanIn + fanOut));
+        const count = fanIn * fanOut;
+        for (let i = 0; i < count; i++) g[offset + i] = (rng() * 2 - 1) * limit;
+    };
+
+    initLayer(OFF_WXH, N_IN, N_H1);
+    initLayer(OFF_W12, N_H1, N_H2);
+    initLayer(OFF_WHY, N_H2, N_OUT);
+
+    // A slightly negative main-throttle bias keeps random agents from
+    // burning all fuel before evolution discovers useful behaviour.
+    g[OFF_BY + 1] = -0.55;
+    return g;
+}
+
+
+function createBootstrapGenome() {
+    const g = new Float32Array(GENOME_SIZE);
+
+    // Route a compact set of physically meaningful signals through the two
+    // hidden layers. This is not a solved policy; it is a stabilising prior
+    // that prevents every first-generation agent from simply free-falling.
+    const routedInputs = [
+        30, // world-space horizontal target error
+        22, // horizontal velocity
+        26, // sin(angle)
+        28, // angular velocity
+        23, // vertical velocity
+        29, // altitude
+        18, // body-space target x
+        25, // body-space downward velocity
+        39, // landed
+        41, // bias input
+    ];
+
+    for (let neuron = 0; neuron < routedInputs.length; neuron++) {
+        g[OFF_WXH + routedInputs[neuron] * N_H1 + neuron] = 1.35;
+        g[OFF_W12 + neuron * N_H2 + neuron] = 1.25;
     }
+
+    // Turn: remain upright and remove angular velocity.
+    g[OFF_WHY + 2 * N_OUT] = -2.25;
+    g[OFF_WHY + 3 * N_OUT] = -1.35;
+
+    // Main engine: brake hard when descending quickly, use less thrust high
+    // above the terrain, and leave a pad promptly after landing.
+    g[OFF_BY + 1] = 0.22;
+    g[OFF_WHY + 4 * N_OUT + 1] = 2.35;
+    g[OFF_WHY + 5 * N_OUT + 1] = -0.48;
+    g[OFF_WHY + 7 * N_OUT + 1] = 0.45;
+    g[OFF_WHY + 8 * N_OUT + 1] = 1.10;
+
+    // Lateral control: move toward the target while damping horizontal speed.
+    g[OFF_WHY + 0 * N_OUT + 2] = 2.20;
+    g[OFF_WHY + 1 * N_OUT + 2] = -1.80;
+    g[OFF_WHY + 6 * N_OUT + 2] = 0.75;
+
     return g;
 }
 
 class Brain {
     constructor(genome) {
+        if (!(genome instanceof Float32Array) || genome.length !== GENOME_SIZE) {
+            throw new Error(`Invalid brain genome. Expected ${GENOME_SIZE} values for brain v${BRAIN_VERSION}.`);
+        }
         this.g = genome;
         this.h = new Float32Array(N_H1);
-        this.hNext = new Float32Array(N_H1);
         this.h2 = new Float32Array(N_H2);
         this.out = new Float32Array(N_OUT);
     }
+
     reset() {
         this.h.fill(0);
-        this.hNext.fill(0);
         this.h2.fill(0);
         this.out.fill(0);
     }
+
     step(inp) {
-        const { g, h, hNext, h2, out } = this;
+        const { g, h, h2, out } = this;
+
         for (let j = 0; j < N_H1; j++) {
-            let s = g[OFF_BH + j];
-            for (let i = 0; i < N_IN; i++) s += g[OFF_WXH + i * N_H1 + j] * inp[i];
-            for (let i = 0; i < N_H1; i++) s += g[OFF_WHH + i * N_H1 + j] * h[i];
-            hNext[j] = Math.tanh(s);
+            let sum = g[OFF_BH + j];
+            for (let i = 0; i < N_IN; i++) sum += g[OFF_WXH + i * N_H1 + j] * inp[i];
+            h[j] = Math.tanh(sum);
         }
-        h.set(hNext);
+
         for (let j = 0; j < N_H2; j++) {
-            let s = g[OFF_B2 + j];
-            for (let i = 0; i < N_H1; i++) s += g[OFF_W12 + i * N_H2 + j] * h[i];
-            h2[j] = Math.tanh(s);
+            let sum = g[OFF_B2 + j];
+            for (let i = 0; i < N_H1; i++) sum += g[OFF_W12 + i * N_H2 + j] * h[i];
+            h2[j] = Math.tanh(sum);
         }
+
         for (let k = 0; k < N_OUT; k++) {
-            let s = g[OFF_BY + k];
-            for (let j = 0; j < N_H2; j++) s += g[OFF_WHY + j * N_OUT + k] * h2[j];
-            out[k] = Math.tanh(s);
+            let sum = g[OFF_BY + k];
+            for (let j = 0; j < N_H2; j++) sum += g[OFF_WHY + j * N_OUT + k] * h2[j];
+            out[k] = Math.tanh(sum);
         }
+
         return out;
     }
 }
@@ -542,28 +811,43 @@ class Lander {
         this.brain = new Brain(genome);
         this.inp = new Float32Array(N_IN);
         this.rays = new Float32Array(N_RAYS);
-        this.rayHistory = new Float32Array(N_RAYS * RAY_MEMORY);
-        this.bestApproach = [];
+        this.prevRays = new Float32Array(N_RAYS);
         this.trail = [];
+
+        // Generation-level accumulators are intentionally not reset between
+        // episodes. They are reset by constructing the next population.
         this.fitSum = 0;
         this.scoreSum = 0;
         this.landSum = 0;
-        this.spawn(null);
+        this.episodeFitness = [];
+        this.selectionFitness = -Infinity;
+
+        this.spawn(null, null);
     }
 
-    spawn(template) {
+    spawn(template, initialState = null) {
         this.template = template;
         this.padState = template ? new Uint8Array(template.pads.length) : new Uint8Array(0);
-        this.bestApproach = template ? new Float32Array(template.pads.length) : new Float32Array(0);
-        const pad = template ? template.startPad : { cx: 300, y: 300, width: 100 };
-        this.x = pad.cx + (Math.random() * 2 - 1) * 16;
-        this.y = pad.y - 200;
-        this.vx = (Math.random() * 2 - 1) * 5;
-        this.vy = (Math.random() * 2 - 1) * 4;
+
+        const fallbackPad = template ? template.startPad : { cx: 300, y: 300, width: 100 };
+        const spawn = initialState || {
+            x: fallbackPad.cx,
+            y: fallbackPad.y - 195,
+            vx: 0,
+            vy: 0,
+            angle: 0,
+            angularVelocity: 0,
+        };
+
+        this.x = spawn.x;
+        this.y = spawn.y;
+        this.vx = spawn.vx;
+        this.vy = spawn.vy;
         this.ax = 0;
         this.ay = 0;
-        this.angle = (Math.random() * 2 - 1) * 0.08;
-        this.angularVelocity = 0;
+        this.angle = spawn.angle;
+        this.angularVelocity = spawn.angularVelocity;
+
         this.fuel = FUEL_MAX;
         this.oxygen = OXYGEN_MAX;
         this.score = 0;
@@ -571,34 +855,64 @@ class Lander {
         this.progress = 0;
         this.penalty = 0;
         this.lifeTime = 0;
+        this.distanceCovered = 0;
+        this.spawnX = spawn.x;
+        this.spawnY = spawn.y;
+
         this.alive = true;
         this.crashed = false;
-        this.controlsDisabled = false;
+        this.missionComplete = false;
+        this.deathReason = '';
         this.landed = false;
         this.altitude = 0;
-        this.groundY = pad.y;
+        this.groundY = fallbackPad.y;
         this.landedTimer = 0;
         this.currentPad = -1;
+        this.targetPad = -1;
+        this.previousTargetPad = -1;
+        this.previousPotential = null;
+        this.bestTargetPotential = 0;
+        this.lastProgressTime = 0;
+        this.controlCounter = 0;
         this.sensorPad = -1;
         this.sensorPadInRange = false;
+
         this.prevMain = 0;
         this.prevTurn = 0;
         this.prevStrafe = 0;
         this.cmdMain = 0;
         this.cmdTurn = 0;
         this.cmdStrafe = 0;
+
+        // Requested controls are filtered by physical actuator models before
+        // they affect motion. Main thrust is continuously throttleable above
+        // a floor; RCS channels are fixed-thrust pulse valves.
+        this.actualMain = 0;
+        this.actualTurn = 0;
+        this.actualStrafe = 0;
+        this.mainEngineOn = false;
+        this.mainEngineOnTime = 0;
+        this.mainEngineOffTime = MAIN_MIN_OFF_TIME;
+        this.turnPulse = { state: 0, onTime: 0, offTime: RCS_MIN_OFF_TIME };
+        this.strafePulse = { state: 0, onTime: 0, offTime: RCS_MIN_OFF_TIME };
+
         this.rays.fill(RAY_MAX);
-        this.rayHistory.fill(RAY_MAX);
-        this.histPtr = 0;
+        this.prevRays.fill(RAY_MAX);
         this.trail.length = 0;
         this.brain.reset();
+
+        if (template) this.selectTargetPad(true);
     }
 
     get fitness() {
-        return this.score * 10 + this.progress - this.penalty;
+        return this.landings * PAD_FITNESS_VALUE
+            + this.score * SCORE_FITNESS_VALUE
+            + this.progress
+            - this.penalty;
     }
 
     nearestPad(freshOnly = true, withinRangeOnly = false) {
+        if (!this.template) return -1;
         let bestIdx = -1;
         let bestD2 = withinRangeOnly ? PAD_SENSE_R * PAD_SENSE_R : Infinity;
         for (let i = 0; i < this.template.pads.length; i++) {
@@ -615,281 +929,597 @@ class Lander {
         return bestIdx;
     }
 
-    sense() {
-        const policy = S.policy || POLICY_DEFAULTS;
+    selectTargetPad(force = false) {
+        if (!this.template) return -1;
+        if (!force && this.targetPad >= 0 && !this.padState[this.targetPad]) return this.targetPad;
+
+        const oldTarget = this.targetPad;
+        this.targetPad = this.nearestPad(true, false);
+        if (this.targetPad !== oldTarget) {
+            this.previousTargetPad = -1;
+            this.previousPotential = null;
+            this.bestTargetPotential = 0;
+            this.lastProgressTime = this.lifeTime;
+        }
+        return this.targetPad;
+    }
+
+    targetPotential(padIdx, policy) {
+        if (padIdx < 0) return 0;
+        const pad = this.template.pads[padIdx];
+        const dx = pad.cx - this.x;
+        const dy = pad.y - this.y;
+        const dist = Math.hypot(dx, dy);
+        const corridorWidth = Math.max(150, pad.width * policy.corridorScale);
+        const corridor = Math.exp(-Math.abs(dx) / corridorWidth);
+        const proximity = Math.exp(-dist / 780);
+        const altitude = Math.max(0, pad.y - (this.y + LANDER_FEET_Y));
+        const lowAltitude = Math.exp(-altitude / 330);
+        const attitude = Math.exp(-Math.abs(this.angle) / 0.32);
+        const spin = Math.exp(-Math.abs(this.angularVelocity) / 0.8);
+        const horizontalSafety = Math.exp(-Math.abs(this.vx) / 34);
+        const desiredDownSpeed = clamp(altitude * 0.105, 7, SAFE_LANDING_VERTICAL_SPEED * 0.78);
+        const descentSafety = Math.exp(-Math.abs(this.vy - desiredDownSpeed) / 38);
+
+        let potential = proximity * 0.20
+            + corridor * 0.22
+            + lowAltitude * 0.13
+            + attitude * 0.13
+            + spin * 0.06
+            + horizontalSafety * 0.12
+            + descentSafety * 0.14;
+
+        if (dist > PAD_SENSE_R) potential *= policy.remoteApproachCap;
+        return clamp(potential, 0, 1);
+    }
+
+    sense(policy) {
         const rightX = Math.cos(this.angle);
         const rightY = Math.sin(this.angle);
         const upX = Math.sin(this.angle);
         const upY = -Math.cos(this.angle);
         const downAngle = this.angle + Math.PI / 2;
+
         for (let i = 0; i < N_RAYS; i++) {
-            const a = downAngle + RAY_ANGLES[i];
-            const d = raycastTerrain(this.template, this.x, this.y, Math.cos(a), Math.sin(a));
-            this.rays[i] = d;
-            this.inp[i] = d / RAY_MAX;
-        }
-        const lagPtr = (this.histPtr - RAY_LAG + RAY_MEMORY) % RAY_MEMORY;
-        for (let i = 0; i < N_RAYS; i++) {
-            this.inp[N_RAYS + i] = this.rayHistory[lagPtr * N_RAYS + i] / RAY_MAX;
+            const rayAngle = downAngle + RAY_ANGLES[i];
+            const distance = raycastTerrain(
+                this.template,
+                this.x,
+                this.y,
+                Math.cos(rayAngle),
+                Math.sin(rayAngle),
+                RAY_MAX,
+            );
+            this.rays[i] = distance;
+            this.inp[i] = distance / RAY_MAX;
+            this.inp[N_RAYS + i] = clamp((distance - this.prevRays[i]) / 80, -1, 1);
+            this.prevRays[i] = distance;
         }
 
-        const visiblePadIdx = this.nearestPad(true, true);
-        let padIdx = visiblePadIdx;
-        let missionCue = false;
-        if (padIdx < 0 && this.landings > 0) {
-            padIdx = this.nearestPad(true, false);
-            missionCue = padIdx >= 0;
-        }
+        const padIdx = this.selectTargetPad();
         this.sensorPad = padIdx;
-        this.sensorPadInRange = visiblePadIdx >= 0;
+
+        let dx = 0;
+        let dy = 0;
+        let distance = PAD_SENSE_R * 2;
+        let padWidth = 0;
         if (padIdx >= 0) {
             const pad = this.template.pads[padIdx];
-            const dx = pad.cx - this.x;
-            const dy = pad.y - this.y;
-            const dist = Math.hypot(dx, dy);
-            const cueRange = missionCue ? PAD_SENSE_R * policy.cueRangeMultiplier : PAD_SENSE_R;
-            this.inp[14] = clamp((dx * rightX + dy * rightY) / cueRange, -1, 1);
-            this.inp[15] = clamp((dx * upX + dy * upY) / cueRange, -1, 1);
-            this.inp[16] = missionCue
-                ? clamp(1 - dist / (PAD_SENSE_R * (policy.cueRangeMultiplier + 0.6)), 0, policy.remoteCueSignalCap)
-                : clamp(1 - dist / PAD_SENSE_R, 0, 1);
-        } else {
-            this.inp[14] = 0;
-            this.inp[15] = 0;
-            this.inp[16] = 0;
+            dx = pad.cx - this.x;
+            dy = pad.y - this.y;
+            distance = Math.hypot(dx, dy);
+            padWidth = pad.width;
         }
 
+        this.sensorPadInRange = padIdx >= 0 && distance <= PAD_SENSE_R;
+        const cueRange = this.sensorPadInRange
+            ? PAD_SENSE_R
+            : PAD_SENSE_R * policy.cueRangeMultiplier;
+
+        const bodyTargetX = dx * rightX + dy * rightY;
+        const bodyTargetDown = -(dx * upX + dy * upY);
+        const localSideVelocity = this.vx * rightX + this.vy * rightY;
+        const localDownVelocity = -(this.vx * upX + this.vy * upY);
+
         const ground = terrainInfoAt(this.template, this.x);
-        const localVX = this.vx * rightX + this.vy * rightY;
-        const localVY = this.vx * upX + this.vy * upY;
-        const groundTX = this.vx * ground.tx + this.vy * ground.ty;
-        const groundNY = this.vx * ground.nx + this.vy * ground.ny;
-        const localAX = this.ax * rightX + this.ay * rightY;
-        const localAY = this.ax * upX + this.ay * upY;
         const altitude = clamp(ground.y - (this.y + LANDER_FEET_Y), 0, RAY_MAX);
         this.altitude = altitude;
         this.groundY = ground.y;
-        const speed = Math.hypot(this.vx, this.vy);
-        const spinBias = clamp(Math.abs(this.angularVelocity) / (SAFE_LANDING_ANGLE * 2.8), 0, 1);
-        const altitudeBias = clamp((altitude - 170) / (RAY_MAX * 0.46), 0, 1);
-        const speedBias = clamp(speed / SPEED_SCALE, 0.2, 1.2);
 
-        this.inp[17] = clamp(localVX / SPEED_SCALE, -1, 1);
-        this.inp[18] = clamp(localVY / SPEED_SCALE, -1, 1);
-        this.inp[19] = clamp(groundTX / SPEED_SCALE, -1, 1);
-        this.inp[20] = clamp(groundNY / SPEED_SCALE, -1, 1);
-        this.inp[21] = clamp(localAX / ACCEL_SCALE, -1, 1);
-        this.inp[22] = clamp(localAY / ACCEL_SCALE, -1, 1);
-        this.inp[23] = Math.sin(this.angle);
-        this.inp[24] = Math.cos(this.angle);
-        this.inp[25] = clamp(this.angularVelocity / ANGVEL_SCALE, -1, 1);
-        this.inp[26] = altitude / RAY_MAX;
-        this.inp[27] = this.fuel / FUEL_MAX;
-        this.inp[28] = this.oxygen / OXYGEN_MAX;
-        this.inp[29] = this.prevMain;
-        this.inp[30] = this.prevTurn;
-        this.inp[31] = this.prevStrafe;
+        const base = N_RAYS * 2;
+        this.inp[base] = clamp(bodyTargetX / cueRange, -1, 1);
+        this.inp[base + 1] = clamp(bodyTargetDown / cueRange, -1, 1);
+        this.inp[base + 2] = padIdx < 0
+            ? 0
+            : this.sensorPadInRange
+                ? clamp(1 - distance / PAD_SENSE_R, 0, 1)
+                : clamp(1 - distance / (PAD_SENSE_R * (policy.cueRangeMultiplier + 0.8)), 0, policy.remoteCueSignalCap);
+        this.inp[base + 3] = clamp(padWidth / 180, 0, 1);
 
-        this.rayHistory[this.histPtr * N_RAYS] = this.rays[0];
-        this.rayHistory[this.histPtr * N_RAYS + 1] = this.rays[1];
-        this.rayHistory[this.histPtr * N_RAYS + 2] = this.rays[2];
-        this.rayHistory[this.histPtr * N_RAYS + 3] = this.rays[3];
-        this.rayHistory[this.histPtr * N_RAYS + 4] = this.rays[4];
-        this.rayHistory[this.histPtr * N_RAYS + 5] = this.rays[5];
-        this.rayHistory[this.histPtr * N_RAYS + 6] = this.rays[6];
-        this.histPtr = (this.histPtr + 1) % RAY_MEMORY;
+        this.inp[22] = clamp(this.vx / SPEED_SCALE, -1, 1);
+        this.inp[23] = clamp(this.vy / SPEED_SCALE, -1, 1);
+        this.inp[24] = clamp(localSideVelocity / SPEED_SCALE, -1, 1);
+        this.inp[25] = clamp(localDownVelocity / SPEED_SCALE, -1, 1);
+        this.inp[26] = Math.sin(this.angle);
+        this.inp[27] = Math.cos(this.angle);
+        this.inp[28] = clamp(this.angularVelocity / ANGVEL_SCALE, -1, 1);
+        this.inp[29] = altitude / RAY_MAX;
+        this.inp[30] = clamp(dx / PAD_SENSE_R, -1, 1);
+        this.inp[31] = clamp(dy / PAD_SENSE_R, -1, 1);
+        this.inp[32] = clamp(1 - Math.max(0, this.vy) / SAFE_LANDING_VERTICAL_SPEED, -1, 1);
+        this.inp[33] = clamp(1 - Math.abs(this.vx) / SAFE_LANDING_HORIZONTAL_SPEED, -1, 1);
+        this.inp[34] = this.fuel / FUEL_MAX;
+        this.inp[35] = this.oxygen / OXYGEN_MAX;
+        // Feed the physical actuator state back into the controller. This is
+        // essential once commands no longer translate into instantaneous force.
+        this.inp[36] = this.actualMain;
+        this.inp[37] = this.actualTurn;
+        this.inp[38] = this.actualStrafe;
+        this.inp[39] = this.landed ? 1 : 0;
+        this.inp[40] = clamp(this.lifeTime / MAX_EPISODE_TIME, 0, 1);
+        this.inp[41] = 1;
 
         if (padIdx >= 0) {
-            const pad = this.template.pads[padIdx];
-            const dx = pad.cx - this.x;
-            const dy = pad.y - this.y;
-            const dist = Math.hypot(dx, dy);
-            const proximity = clamp(1 - dist / (missionCue ? PAD_SENSE_R * (policy.cueRangeMultiplier + 0.6) : PAD_SENSE_R), 0, 1);
-            const corridor = clamp(1 - Math.abs(dx) / Math.max(185, pad.width * policy.corridorScale), 0, 1);
-            const vertical = clamp(1 - Math.abs(dy) / (PAD_SENSE_R * policy.verticalScale), 0, 1);
-            const lowEnough = clamp(1 - altitude / (RAY_MAX * policy.lowAltitudeScale), 0, 1);
-            const attitude = clamp(1 - Math.abs(this.angle) / SAFE_LANDING_ANGLE, 0, 1);
-            const descent = clamp(1 - Math.max(0, this.vy) / SAFE_LANDING_SPEED, 0, 1);
-            const stable = 1 - spinBias;
-            if (corridor > 0.08 && stable > 0.04) {
-                const approachCap = missionCue ? policy.remoteApproachCap : 1;
-                const approach = clamp(
-                    proximity * 0.22 + corridor * 0.27 + vertical * 0.15 + lowEnough * 0.12 + attitude * 0.15 + descent * 0.06 + stable * 0.03,
-                    0,
-                    1,
-                ) * approachCap;
-                if (approach > this.bestApproach[padIdx]) {
-                    this.progress += (approach - this.bestApproach[padIdx]) * policy.approachReward;
-                    this.bestApproach[padIdx] = approach;
-                }
+            const potential = this.targetPotential(padIdx, policy);
+            if (this.previousPotential !== null && this.previousTargetPad === padIdx) {
+                const delta = clamp(potential - this.previousPotential, -0.06, 0.06);
+                this.progress += delta * policy.approachReward;
             }
-            this.penalty += (spinBias * 0.14 + (1 - corridor) * 0.05 + altitudeBias * 0.02) * policy.wanderCost * 0.34 * DT;
-        } else {
-            this.penalty += (0.2 + spinBias * 0.42 + altitudeBias * 0.18) * policy.wanderCost * speedBias * DT;
+            this.previousPotential = potential;
+            this.previousTargetPad = padIdx;
+            if (potential > this.bestTargetPotential + 0.01) {
+                this.bestTargetPotential = potential;
+                this.lastProgressTime = this.lifeTime;
+            }
+
+            const corridor = clamp(1 - Math.abs(dx) / Math.max(170, padWidth * policy.corridorScale), 0, 1);
+            const nearGround = clamp(1 - altitude / 300, 0, 1);
+            const unsafeHorizontal = Math.max(0, Math.abs(this.vx) - SAFE_LANDING_HORIZONTAL_SPEED) / SPEED_SCALE;
+            const unsafeVertical = Math.max(0, this.vy - SAFE_LANDING_VERTICAL_SPEED) / SPEED_SCALE;
+            this.penalty += (
+                Math.abs(this.angularVelocity) * 0.08
+                + (1 - corridor) * 0.05
+                + nearGround * (unsafeHorizontal * 0.8 + unsafeVertical)
+            ) * policy.wanderCost * DT;
         }
+    }
+
+    updateMainActuator(dt) {
+        if (this.fuel <= 0) {
+            this.mainEngineOn = false;
+            this.mainEngineOnTime = 0;
+            this.mainEngineOffTime = 0;
+            this.actualMain = 0;
+            return;
+        }
+
+        const wantsOn = this.cmdMain >= MAIN_IGNITION_COMMAND;
+        const wantsOff = this.cmdMain <= MAIN_SHUTDOWN_COMMAND;
+
+        if (!this.mainEngineOn) {
+            this.mainEngineOnTime = 0;
+            this.mainEngineOffTime += dt;
+            this.actualMain = 0;
+            if (wantsOn && this.mainEngineOffTime >= MAIN_MIN_OFF_TIME) {
+                this.mainEngineOn = true;
+                this.mainEngineOnTime = 0;
+                this.mainEngineOffTime = 0;
+                this.actualMain = MAIN_MIN_THROTTLE;
+            }
+            return;
+        }
+
+        this.mainEngineOnTime += dt;
+        this.mainEngineOffTime = 0;
+        if (wantsOff && this.mainEngineOnTime >= MAIN_MIN_ON_TIME) {
+            this.mainEngineOn = false;
+            this.mainEngineOnTime = 0;
+            this.mainEngineOffTime = 0;
+            this.actualMain = 0;
+            return;
+        }
+
+        const target = clamp(this.cmdMain, MAIN_MIN_THROTTLE, 1);
+        const maxDelta = (target > this.actualMain
+            ? MAIN_THROTTLE_SLEW_UP
+            : MAIN_THROTTLE_SLEW_DOWN) * dt;
+        this.actualMain += clamp(target - this.actualMain, -maxDelta, maxDelta);
+        this.actualMain = clamp(this.actualMain, MAIN_MIN_THROTTLE, 1);
+    }
+
+    updatePulseActuator(actuator, request, dt) {
+        if (this.fuel <= 0) {
+            actuator.state = 0;
+            actuator.onTime = 0;
+            actuator.offTime = 0;
+            return 0;
+        }
+
+        const desired = Math.abs(request) >= RCS_COMMAND_THRESHOLD
+            ? (request > 0 ? 1 : -1)
+            : 0;
+
+        if (actuator.state === 0) {
+            actuator.onTime = 0;
+            actuator.offTime += dt;
+            if (desired !== 0 && actuator.offTime >= RCS_MIN_OFF_TIME) {
+                actuator.state = desired;
+                actuator.onTime = 0;
+                actuator.offTime = 0;
+            }
+            return actuator.state;
+        }
+
+        actuator.onTime += dt;
+        actuator.offTime = 0;
+        if (desired !== actuator.state && actuator.onTime >= RCS_MIN_ON_TIME) {
+            // Reversing direction always passes through a genuine off gap.
+            actuator.state = 0;
+            actuator.onTime = 0;
+            actuator.offTime = 0;
+        }
+        return actuator.state;
+    }
+
+    updateActuators(dt) {
+        this.updateMainActuator(dt);
+        this.actualTurn = this.updatePulseActuator(this.turnPulse, this.cmdTurn, dt);
+        this.actualStrafe = this.updatePulseActuator(this.strafePulse, this.cmdStrafe, dt);
+        this.prevMain = this.actualMain;
+        this.prevTurn = this.actualTurn;
+        this.prevStrafe = this.actualStrafe;
+    }
+
+    localPointAt(localX, localY, x = this.x, y = this.y, angle = this.angle) {
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        return {
+            x: x + localX * c - localY * s,
+            y: y + localX * s + localY * c,
+        };
+    }
+
+    footPositionsAt(x = this.x, y = this.y, angle = this.angle) {
+        return {
+            left: this.localPointAt(-LANDER_HALF_W, LANDER_FEET_Y, x, y, angle),
+            right: this.localPointAt(LANDER_HALF_W, LANDER_FEET_Y, x, y, angle),
+        };
+    }
+
+    footSamplePositionsAt(x = this.x, y = this.y, angle = this.angle) {
+        // Sample the complete rendered foot bars, not only their centre points.
+        // This makes an outer foot edge striking a mountain an immediate crash.
+        return [
+            this.localPointAt(-LANDER_HALF_W - LANDER_FOOT_HALF_WIDTH, LANDER_FEET_Y, x, y, angle),
+            this.localPointAt(-LANDER_HALF_W, LANDER_FEET_Y, x, y, angle),
+            this.localPointAt(-LANDER_HALF_W + LANDER_FOOT_HALF_WIDTH, LANDER_FEET_Y, x, y, angle),
+            this.localPointAt(LANDER_HALF_W - LANDER_FOOT_HALF_WIDTH, LANDER_FEET_Y, x, y, angle),
+            this.localPointAt(LANDER_HALF_W, LANDER_FEET_Y, x, y, angle),
+            this.localPointAt(LANDER_HALF_W + LANDER_FOOT_HALF_WIDTH, LANDER_FEET_Y, x, y, angle),
+        ];
+    }
+
+    footPositions() {
+        return this.footPositionsAt();
+    }
+
+    solidCollisionAt(x, y, angle) {
+        for (const [localX, localY] of LANDER_SOLID_LOCAL_POINTS) {
+            const point = this.localPointAt(localX, localY, x, y, angle);
+            const ground = terrainInfoAt(this.template, point.x).y;
+            if (point.y >= ground - TERRAIN_CONTACT_EPSILON) return point;
+        }
+        return null;
+    }
+
+    sweptTerrainContact(previousX, previousY, previousAngle, nextX, nextY, nextAngle) {
+        const translation = Math.hypot(nextX - previousX, nextY - previousY);
+        const angleDelta = nextAngle - previousAngle;
+        const rotationTravel = Math.abs(angleDelta) * LANDER_COLLISION_RADIUS;
+        const steps = clamp(
+            Math.ceil(Math.max(translation, rotationTravel) / COLLISION_SWEEP_STEP),
+            1,
+            COLLISION_MAX_SWEEP_STEPS,
+        );
+
+        for (let i = 1; i <= steps; i++) {
+            const t = i / steps;
+            const x = lerp(previousX, nextX, t);
+            const y = lerp(previousY, nextY, t);
+            const angle = previousAngle + angleDelta * t;
+            const solidPoint = this.solidCollisionAt(x, y, angle);
+            const feet = this.footPositionsAt(x, y, angle);
+            const footSamples = this.footSamplePositionsAt(x, y, angle);
+            const footHits = footSamples.map(point => {
+                const terrain = terrainInfoAt(this.template, point.x);
+                return {
+                    point,
+                    groundY: terrain.y,
+                    hit: point.y >= terrain.y - TERRAIN_CONTACT_EPSILON,
+                };
+            });
+            const anyFootHit = footHits.some(sample => sample.hit);
+
+            if (solidPoint || anyFootHit) {
+                return {
+                    x, y, angle, feet, footSamples, footHits,
+                    solidPoint,
+                    anyFootHit,
+                    padIdx: solidPoint ? -1 : this.contactPad(footSamples, footHits),
+                };
+            }
+        }
+        return null;
+    }
+
+    contactPad(footSamples, footHits) {
+        if (!footSamples?.length || !footHits?.some(sample => sample.hit)) return -1;
+        const minFootX = Math.min(...footSamples.map(point => point.x));
+        const maxFootX = Math.max(...footSamples.map(point => point.x));
+
+        for (let i = 0; i < this.template.pads.length; i++) {
+            const pad = this.template.pads[i];
+            const margin = 3;
+            if (minFootX < pad.x + margin || maxFootX > pad.x + pad.width - margin) continue;
+
+            let touchesPad = false;
+            let validPadSurface = true;
+            for (let j = 0; j < footSamples.length; j++) {
+                const point = footSamples[j];
+                const sample = footHits[j];
+                const groundY = terrainInfoAt(this.template, point.x).y;
+
+                // Every part of both feet must be above the same flat pad. If an
+                // outer edge is over a mountain slope, contactPad rejects it and
+                // the swept contact is processed as a crash.
+                if (Math.abs(groundY - pad.y) > 1.5 || point.y > pad.y + 1.5) {
+                    validPadSurface = false;
+                    break;
+                }
+                if (sample.hit && Math.abs(sample.groundY - pad.y) <= 1.5) touchesPad = true;
+            }
+            if (validPadSurface && touchesPad) return i;
+        }
+        return -1;
+    }
+
+    isSafeLanding(vx, vy, angularVelocity, angle) {
+        return vy >= -SAFE_LANDING_UPWARD_SPEED
+            && vy <= SAFE_LANDING_VERTICAL_SPEED
+            && Math.abs(vx) <= SAFE_LANDING_HORIZONTAL_SPEED
+            && Math.abs(angle) <= SAFE_LANDING_ANGLE
+            && Math.abs(angularVelocity) <= SAFE_LANDING_ANGULAR_SPEED;
     }
 
     successfulLanding(padIdx) {
         const pad = this.template.pads[padIdx];
-        if (!this.padState[padIdx]) {
+        const firstVisit = !this.padState[padIdx];
+
+        if (firstVisit) {
             this.padState[padIdx] = 1;
-            this.score += pad.points;
-            this.score += LANDING_BONUS;
+            this.score += pad.points + LANDING_BONUS;
             this.fuel = Math.min(FUEL_MAX, this.fuel + PAD_FUEL_REWARD);
             this.oxygen = Math.min(OXYGEN_MAX, this.oxygen + PAD_OXYGEN_REWARD);
             this.landings++;
             this.progress += LAND_REWARD + pad.points * 4;
         }
+
+        this.y = pad.y - LANDER_FEET_Y;
         this.vx = 0;
         this.vy = 0;
         this.angularVelocity = 0;
         this.angle = 0;
+        this.ax = 0;
+        this.ay = 0;
         this.landed = true;
         this.landedTimer = 0;
         this.currentPad = padIdx;
-        if (this.landings >= this.template.pads.length) this.alive = false;
+
+        if (firstVisit) {
+            this.targetPad = -1;
+            this.previousTargetPad = -1;
+            this.previousPotential = null;
+            this.bestTargetPotential = 0;
+            this.lastProgressTime = this.lifeTime;
+        }
+
+        if (this.landings >= this.template.pads.length) {
+            this.missionComplete = true;
+            this.alive = false;
+            this.deathReason = 'mission-complete';
+            this.progress += PAD_FITNESS_VALUE * 0.5;
+        }
     }
 
-    crash(vx, vy) {
-        const policy = S.policy || POLICY_DEFAULTS;
-        this.crashed = true;
+    terminate(reason, extraPenalty = 0) {
         this.alive = false;
         this.landed = false;
         this.currentPad = -1;
-        const impact = Math.hypot(vx, vy);
-        this.penalty += policy.crashPenalty + Math.min(500, impact * 6);
+        this.deathReason = reason;
+        this.penalty += extraPenalty;
     }
 
-    step() {
-        const policy = S.policy || POLICY_DEFAULTS;
+    crash(vx, vy, angularVelocity, angle, policy) {
+        this.crashed = true;
+        const impact = Math.hypot(vx, vy);
+        const attitudeError = Math.abs(angle) + Math.abs(angularVelocity) * 0.35;
+        this.terminate(
+            'crash',
+            policy.crashPenalty + Math.min(650, impact * 7 + attitudeError * 120),
+        );
+    }
+
+    updateTrail() {
+        if (this.trail.length > 80) this.trail.shift();
+        this.trail.push({ x: this.x, y: this.y });
+    }
+
+    step(policy) {
         if (!this.alive) return;
 
         this.lifeTime += DT;
+        this.oxygen = Math.max(0, this.oxygen - DT);
 
-        this.oxygen -= DT;
         if (this.oxygen <= 0) {
-            this.oxygen = 0;
-            this.controlsDisabled = true;
+            this.terminate('oxygen', policy.crashPenalty * 0.65);
+            return;
+        }
+        if (
+            this.lifeTime >= MAX_EPISODE_TIME
+            || this.lifeTime - this.lastProgressTime >= NO_PROGRESS_TIMEOUT
+        ) {
+            this.terminate('timeout', policy.crashPenalty * 0.35);
+            return;
         }
 
-        const fuelFrac = this.fuel / FUEL_MAX;
-        const oxygenFrac = this.oxygen / OXYGEN_MAX;
-    if (fuelFrac < 0.28) this.penalty += (0.28 - fuelFrac) * policy.lowResourceCost * 0.75 * DT;
-    if (oxygenFrac < 0.24) this.penalty += (0.24 - oxygenFrac) * policy.lowResourceCost * 1.1 * DT;
+        const fuelFraction = this.fuel / FUEL_MAX;
+        const oxygenFraction = this.oxygen / OXYGEN_MAX;
+        if (fuelFraction < 0.24) this.penalty += (0.24 - fuelFraction) * policy.lowResourceCost * DT;
+        if (oxygenFraction < 0.20) this.penalty += (0.20 - oxygenFraction) * policy.lowResourceCost * 1.25 * DT;
 
-        this.sense();
-        const out = this.brain.step(this.inp);
+        if (this.controlCounter <= 0) {
+            this.sense(policy);
+            const output = this.brain.step(this.inp);
 
-        const turn = out[0] < -0.25 ? -1 : out[0] > 0.25 ? 1 : 0;
-        const main = out[1] > 0.2 ? 1 : 0;
-        const strafe = out[2] < -0.25 ? -1 : out[2] > 0.25 ? 1 : 0;
+            const targetTurn = Math.abs(output[0]) < 0.035 ? 0 : output[0];
+            const rawThrottle = clamp((output[1] + 1) * 0.5, 0, 1);
+            const targetMain = rawThrottle * rawThrottle;
+            const targetStrafe = Math.abs(output[2]) < 0.035 ? 0 : output[2];
 
-        this.penalty += (Math.abs(turn - this.prevTurn) + Math.abs(strafe - this.prevStrafe) + Math.abs(main - this.prevMain)) * JERK_COST;
+            const oldTurn = this.cmdTurn;
+            const oldMain = this.cmdMain;
+            const oldStrafe = this.cmdStrafe;
+
+            this.cmdTurn += (targetTurn - this.cmdTurn) * ACTION_RESPONSE;
+            this.cmdMain += (targetMain - this.cmdMain) * ACTION_RESPONSE;
+            this.cmdStrafe += (targetStrafe - this.cmdStrafe) * ACTION_RESPONSE;
+
+            this.penalty += (
+                Math.abs(this.cmdTurn - oldTurn)
+                + Math.abs(this.cmdMain - oldMain)
+                + Math.abs(this.cmdStrafe - oldStrafe)
+            ) * JERK_COST;
+
+            this.controlCounter = CONTROL_INTERVAL - 1;
+        } else {
+            this.controlCounter--;
+        }
+
+        this.updateActuators(DT);
         this.penalty += Math.abs(this.angularVelocity) * policy.spinCost * DT;
 
-        this.cmdTurn = turn;
-        this.cmdMain = main;
-        this.cmdStrafe = strafe;
-        this.prevTurn = turn;
-        this.prevMain = main;
-        this.prevStrafe = strafe;
+        if (this.landed) {
+            this.landedTimer += DT;
+            const pad = this.template.pads[this.currentPad];
 
-        const prevVX = this.vx;
-        const prevVY = this.vy;
-        if (!this.controlsDisabled && this.fuel > 0) {
-            if (main) {
-                const adjustedThrust = MAIN_THRUST * (1 + (FUEL_MAX - this.fuel) / FUEL_MAX);
-                this.vx += adjustedThrust * Math.sin(this.angle) * DT;
-                this.vy -= adjustedThrust * Math.cos(this.angle) * DT;
-                this.fuel = Math.max(0, this.fuel - MAIN_FUEL_COST);
+            // Correct ground-state handling: remain supported by the pad until
+            // enough main thrust is requested to overcome lunar gravity.
+            this.y = pad.y - LANDER_FEET_Y;
+            this.vx = 0;
+            this.vy = 0;
+            this.angularVelocity = 0;
+            this.angle = 0;
+            this.ax = 0;
+            this.ay = 0;
+
+            if (this.actualMain <= TAKEOFF_THROTTLE || this.fuel <= 0) {
+                if (this.landedTimer > policy.padIdleGrace) this.penalty += policy.padIdleCost * DT;
+                if (this.fuel <= 0) this.terminate('fuel', policy.crashPenalty * 0.45);
+                this.updateTrail();
+                return;
             }
-            if (turn < 0) {
-                this.angularVelocity -= TURN_ACCEL * DT;
-                this.fuel = Math.max(0, this.fuel - AUX_FUEL_COST);
-            } else if (turn > 0) {
-                this.angularVelocity += TURN_ACCEL * DT;
-                this.fuel = Math.max(0, this.fuel - AUX_FUEL_COST);
-            }
-            if (strafe > 0) {
-                this.vx += SIDE_THRUST * Math.sin(this.angle - Math.PI / 2) * DT;
-                this.vy -= SIDE_THRUST * Math.cos(this.angle - Math.PI / 2) * DT;
-                this.fuel = Math.max(0, this.fuel - AUX_FUEL_COST);
-            } else if (strafe < 0) {
-                this.vx += SIDE_THRUST * Math.sin(this.angle + Math.PI / 2) * DT;
-                this.vy -= SIDE_THRUST * Math.cos(this.angle + Math.PI / 2) * DT;
-                this.fuel = Math.max(0, this.fuel - AUX_FUEL_COST);
-            }
+
+            this.landed = false;
+            this.currentPad = -1;
+            this.landedTimer = 0;
+            this.y -= 1.25;
+            this.vy = -1.5;
+        } else {
+            this.landedTimer = 0;
+        }
+
+        const previousX = this.x;
+        const previousY = this.y;
+        const previousAngle = this.angle;
+        const previousVX = this.vx;
+        const previousVY = this.vy;
+        const rightX = Math.cos(this.angle);
+        const rightY = Math.sin(this.angle);
+        const massFactor = DRY_MASS_FACTOR + FUEL_MASS_FACTOR * fuelFraction;
+        const accelerationScale = 1 / Math.max(0.55, massFactor);
+
+        if (this.fuel > 0) {
+            const mainAcceleration = MAIN_THRUST * this.actualMain * accelerationScale;
+            this.vx += Math.sin(this.angle) * mainAcceleration * DT;
+            this.vy -= Math.cos(this.angle) * mainAcceleration * DT;
+
+            const sideAcceleration = SIDE_THRUST * this.actualStrafe * accelerationScale;
+            this.vx += rightX * sideAcceleration * DT;
+            this.vy += rightY * sideAcceleration * DT;
+
+            this.angularVelocity += this.actualTurn * TURN_ACCEL * accelerationScale * DT;
+            this.angularVelocity *= Math.exp(-ANGULAR_DAMPING * DT);
+            this.angularVelocity = clamp(this.angularVelocity, -MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED);
+
+            const fuelUsed = (
+                this.actualMain * MAIN_FUEL_RATE
+                + (Math.abs(this.actualTurn) + Math.abs(this.actualStrafe)) * AUX_FUEL_RATE
+            ) * DT;
+            this.fuel = Math.max(0, this.fuel - fuelUsed);
+            this.penalty += fuelUsed * policy.fuelDriftCost;
         }
 
         this.vy += GRAVITY * DT;
         this.x += this.vx * DT;
         this.y += this.vy * DT;
+        this.distanceCovered += Math.hypot(this.x - previousX, this.y - previousY);
         this.angle += this.angularVelocity * DT;
 
         if (this.angle > Math.PI) this.angle -= Math.PI * 2;
         if (this.angle < -Math.PI) this.angle += Math.PI * 2;
 
-        this.ax = (this.vx - prevVX) / DT;
-        this.ay = (this.vy - prevVY) / DT;
-        this.penalty += (MAIN_FUEL_COST * this.cmdMain + AUX_FUEL_COST * (Math.abs(this.cmdTurn) + Math.abs(this.cmdStrafe))) * policy.fuelDriftCost;
+        this.ax = (this.vx - previousVX) / DT;
+        this.ay = (this.vy - previousVY) / DT;
 
-        if (this.x < 0 || this.x > WORLD_W) {
-            this.crash(this.vx, this.vy);
+        if (this.x < -LANDER_HALF_W || this.x > WORLD_W + LANDER_HALF_W || this.y < -500 || this.y > WORLD_H + 200) {
+            this.crash(this.vx, this.vy, this.angularVelocity, this.angle, policy);
             return;
         }
 
-        const ground = terrainInfoAt(this.template, this.x);
-        if (this.y + LANDER_FEET_Y >= ground.y) {
-            this.y = ground.y - LANDER_FEET_Y;
-            const verticalSpeed = this.vy;
-            const crashVX = this.vx;
-            const crashVY = this.vy;
-            this.vx = 0;
-            this.vy = 0;
-            this.angularVelocity = 0;
-            if (verticalSpeed > SAFE_LANDING_SPEED || Math.abs(this.angle) > SAFE_LANDING_ANGLE) {
-                this.crash(crashVX, crashVY);
+        const contact = this.sweptTerrainContact(
+            previousX,
+            previousY,
+            previousAngle,
+            this.x,
+            this.y,
+            this.angle,
+        );
+
+        if (contact) {
+            // Freeze at the first swept impact so a high-speed craft cannot
+            // tunnel through terrain or appear intact on the far side.
+            this.x = contact.x;
+            this.y = contact.y;
+            this.angle = contact.angle;
+
+            const impactVX = this.vx;
+            const impactVY = this.vy;
+            const impactAngularVelocity = this.angularVelocity;
+            const impactAngle = this.angle;
+
+            if (
+                !contact.solidPoint
+                && contact.padIdx >= 0
+                && this.isSafeLanding(impactVX, impactVY, impactAngularVelocity, impactAngle)
+            ) {
+                this.successfulLanding(contact.padIdx);
+            } else {
+                this.crash(impactVX, impactVY, impactAngularVelocity, impactAngle, policy);
                 return;
             }
-            let padIdx = -1;
-            for (let i = 0; i < this.template.pads.length; i++) {
-                const pad = this.template.pads[i];
-                if (this.x >= pad.x && this.x <= pad.x + pad.width) {
-                    padIdx = i;
-                    break;
-                }
-            }
-            if (padIdx < 0) {
-                this.crash(crashVX, crashVY);
-                return;
-            }
-            if (!this.padState[padIdx]) this.successfulLanding(padIdx);
-            else {
-                this.landed = true;
-                this.currentPad = padIdx;
-                this.angle = 0;
-            }
-            if (this.controlsDisabled) this.alive = false;
         }
 
-        if (this.landed && this.currentPad >= 0) {
-            this.landedTimer += DT;
-            const pad = this.template.pads[this.currentPad];
-            if (this.y + LANDER_BODY_Y < pad.y - 1) {
-                this.landed = false;
-                this.currentPad = -1;
-                this.landedTimer = 0;
-            } else if (this.padState[this.currentPad] && this.landedTimer > policy.padIdleGrace) {
-                this.penalty += policy.padIdleCost * DT;
-            }
-        } else {
-            this.landedTimer = 0;
-        }
-
-        if (this.fuel <= 0 && this.landed) this.alive = false;
-
-        if (this.trail.length > 72) this.trail.shift();
-        this.trail.push({ x: this.x, y: this.y });
+        this.updateTrail();
     }
 }
 
@@ -904,16 +1534,32 @@ const S = {
     evalMode: false,
     popSize: POP_DEFAULT,
     nextPopSize: POP_DEFAULT,
-    mutRate: 8 / GENOME_SIZE,
+    mutRate: 28 / GENOME_SIZE,
+    mutationSigma: 0.18,
+    stagnation: 0,
+    bestSelectionFitness: -Infinity,
+    globalChampionGenome: null,
+    globalChampionFitness: -Infinity,
+    scenarioBaseSeed: hash32(Date.now()),
+    currentScenario: null,
     speedStop: 3,
-    sensorMode: 'leader',
+    sensorMode: 'all',
     history: [],
     stepsThisSecond: 0,
     simRate: 0,
     stepCarry: 0,
+    cameraMode: CAMERA_DEFAULT_MODE,
     cameraX: 0,
     cameraY: 0,
+    cameraVX: 0,
+    cameraVY: 0,
     cameraReady: false,
+    cameraLastTime: 0,
+    cameraLeaderIdx: -1,
+    cameraSwitchStart: 0,
+    cameraSwitchFromX: 0,
+    cameraSwitchFromY: 0,
+    cameraLeaderBias: CAMERA_AVERAGE_LEADER_BIAS,
     trainingEvolutionMode: 'classic',
     policy: normalizePolicyConfig(POLICY_DEFAULTS),
     policyLabel: 'Baseline',
@@ -927,6 +1573,7 @@ const S = {
         best: null,
         round: 0,
         roundSeed: normalizePolicyConfig(POLICY_DEFAULTS),
+        roundScenarioSeed: hash32(Date.now() ^ 0xa5a5a5a5),
         roundEvaluated: [],
         assignedThisRound: 0,
         targetTrials: POLICY_TRIALS,
@@ -948,59 +1595,119 @@ const S = {
 
 function nextSeed() {
     S.seedTicker = (S.seedTicker + 1) >>> 0;
-    return (S.seedTicker * 2654435761) >>> 0;
+    return hash32(S.seedTicker ^ Date.now());
 }
 
-function makeTemplate() {
-    return buildTerrain(TERRAIN_DEFS[S.terrainIdx], nextSeed());
+function makeEpisodeScenario(state) {
+    const fixedEpisode = state.episode < N_FIXED_EPISODES;
+    const generationKey = fixedEpisode ? 0 : state.gen;
+    const terrainSeed = mixSeed(
+        state.scenarioBaseSeed,
+        S.terrainIdx,
+        generationKey,
+        state.episode,
+    );
+    const template = buildTerrain(TERRAIN_DEFS[S.terrainIdx], terrainSeed);
+    const rng = mulberry32(mixSeed(terrainSeed, 0x51ed270b));
+    const pad = template.startPad;
+
+    return {
+        template,
+        spawn: {
+            x: pad.cx + (rng() * 2 - 1) * Math.min(18, pad.width * 0.12),
+            y: pad.y - (175 + rng() * 55),
+            vx: (rng() * 2 - 1) * 7,
+            vy: (rng() * 2 - 1) * 4,
+            angle: (rng() * 2 - 1) * 0.11,
+            angularVelocity: (rng() * 2 - 1) * 0.08,
+        },
+    };
+}
+
+function prepareEpisodeFor(state) {
+    const scenario = makeEpisodeScenario(state);
+    state.currentScenario = scenario;
+    state.template = scenario.template;
+    for (const agent of state.agents) agent.spawn(state.template, scenario.spawn);
+    state.simTime = 0;
 }
 
 function prepareEpisode() {
-    S.template = makeTemplate();
-    for (const agent of S.agents) agent.spawn(S.template);
-    S.simTime = 0;
+    prepareEpisodeFor(S);
     S.stepCarry = 0;
     S.cameraReady = false;
+    S.cameraVX = 0;
+    S.cameraVY = 0;
+    S.cameraLastTime = 0;
+    S.cameraLeaderIdx = -1;
+}
+
+function spawnPopulationFor(state, genomes) {
+    state.agents = genomes.map((genome, index) => {
+        const agent = new Lander(genome, index);
+        agent.isProtectedElite = index === 0 && validGenome(state.globalChampionGenome);
+        return agent;
+    });
+    state.episode = 0;
+    state.genBestScore = 0;
+    state.genMeanScore = 0;
+    state.genBestPads = 0;
+    state.genMeanPads = 0;
+    prepareEpisodeFor(state);
 }
 
 function spawnPopulation(genomes) {
-    S.agents = genomes.map((g, i) => new Lander(g, i));
-    S.episode = 0;
-    S.genBestScore = 0;
-    S.genMeanScore = 0;
-    S.genBestPads = 0;
-    S.genMeanPads = 0;
-    prepareEpisode();
+    spawnPopulationFor(S, genomes);
+    S.stepCarry = 0;
+    S.cameraReady = false;
+    S.cameraVX = 0;
+    S.cameraVY = 0;
+    S.cameraLastTime = 0;
+    S.cameraLeaderIdx = -1;
 }
 
-function buildPopulationFromSeed(seedGenome, popSize, mode) {
+function validGenome(genome) {
+    return genome && genome.length === GENOME_SIZE;
+}
+
+function buildPopulationFromSeed(seedGenome, popSize, mode, state = S) {
+    if (!validGenome(seedGenome)) {
+        return Array.from({ length: popSize }, () => randomGenome());
+    }
+
     const normalizedMode = normalizeTrainingMode(mode);
     const seed = new Float32Array(seedGenome);
     const genomes = [seed];
-    if (normalizedMode === 'survival') {
-        const freshN = Math.max(4, Math.round(popSize * SURVIVAL_FRESH_FRACTION));
-        const champMutants = clamp(SURVIVAL_CHAMPION_MUTANT_MIN + ((Math.random() * 3) | 0), SURVIVAL_CHAMPION_MUTANT_MIN, SURVIVAL_CHAMPION_MUTANT_MAX);
-        for (let i = 0; i < champMutants && genomes.length < popSize - freshN; i++) genomes.push(mutateSurvival(seed, i < 2 ? 0.65 : 1 + i * 0.08));
-        while (genomes.length < popSize - freshN) genomes.push(crossover(seed, randomGenome()));
-        while (genomes.length < popSize) genomes.push(randomGenome());
-    } else {
-        const freshN = Math.max(N_FRESH, Math.round(popSize * 0.12));
-        const champMutants = 6;
-        for (let i = 0; i < champMutants && genomes.length < popSize - freshN; i++) genomes.push(mutate(seed, i < 2 ? 0.45 : 0.9));
-        while (genomes.length < popSize - freshN) {
-            const mate = Math.random() < 0.7 ? seed : randomGenome();
-            const child = Math.random() < 0.65 ? mutate(crossover(seed, mate), 0.55 + Math.random() * 0.4) : crossover(seed, mate);
-            genomes.push(child);
+    const freshCount = normalizedMode === 'survival'
+        ? Math.max(6, Math.round(popSize * SURVIVAL_FRESH_FRACTION))
+        : Math.max(N_FRESH, Math.round(popSize * 0.10));
+
+    const mutationScale = normalizedMode === 'survival' ? 1.02 : 0.85;
+    while (genomes.length < popSize - freshCount) {
+        if (genomes.length < 12) {
+            genomes.push(mutateGenome(seed, state, mutationScale * (0.65 + genomes.length * 0.05)));
+        } else {
+            const mate = randomGenome();
+            genomes.push(mutateGenome(blendCrossover(seed, mate), state, mutationScale));
         }
-        while (genomes.length < popSize) genomes.push(randomGenome());
     }
+    while (genomes.length < popSize) genomes.push(randomGenome());
     return genomes;
 }
 
 function freshPopulation() {
-    const genomes = S.seedChampionGenome
-        ? buildPopulationFromSeed(S.seedChampionGenome, S.popSize, S.trainingEvolutionMode)
-        : Array.from({ length: S.popSize }, () => randomGenome());
+    let genomes;
+    if (S.seedChampionGenome && validGenome(S.seedChampionGenome)) {
+        genomes = buildPopulationFromSeed(S.seedChampionGenome, S.popSize, S.trainingEvolutionMode, S);
+    } else {
+        const bootstrap = createBootstrapGenome();
+        genomes = [bootstrap];
+        const bootstrapCount = Math.min(18, Math.max(8, Math.floor(S.popSize * 0.22)));
+        while (genomes.length < bootstrapCount) {
+            genomes.push(mutateGenome(bootstrap, S, 0.55 + genomes.length * 0.035));
+        }
+        while (genomes.length < S.popSize) genomes.push(randomGenome());
+    }
     spawnPopulation(genomes);
 }
 
@@ -1014,8 +1721,18 @@ function resetTrainingSession(clearHistory = true) {
     S.popSize = Math.min(POP_LIMIT, S.nextPopSize);
     S.recordScore = 0;
     S.recordPads = 0;
-    if (clearHistory) S.history.length = 0;
+    S.stagnation = 0;
+    S.bestSelectionFitness = -Infinity;
+    S.globalChampionFitness = -Infinity;
+    S.globalChampionGenome = null;
+
+    if (clearHistory) {
+        S.history.length = 0;
+        if (!S.explorer.active) S.scenarioBaseSeed = nextSeed();
+    }
+
     freshPopulation();
+
     if (clearHistory) {
         drawChart();
         drawLandings();
@@ -1025,37 +1742,103 @@ function resetTrainingSession(clearHistory = true) {
 }
 
 function currentBestAgent() {
-    const mode = S.trainingEvolutionMode;
-    return [...S.agents].sort((a, b) => rankFitness(b, mode) - rankFitness(a, mode))[0] || S.agents[0] || null;
+    return [...S.agents].sort((a, b) => {
+        const aFitness = Number.isFinite(a.selectionFitness) ? a.selectionFitness : a.fitness;
+        const bFitness = Number.isFinite(b.selectionFitness) ? b.selectionFitness : b.fitness;
+        return bFitness - aFitness;
+    })[0] || S.agents[0] || null;
+}
+
+function rankFitness(agent, evolutionMode) {
+    const padDominantScore = agent.landings * PAD_FITNESS_VALUE;
+    const missionBonus = agent.missionComplete ? PAD_FITNESS_VALUE * 0.5 : 0;
+    const base = padDominantScore
+        + missionBonus
+        + agent.score * SCORE_FITNESS_VALUE
+        + agent.progress
+        - agent.penalty;
+
+    if (normalizeTrainingMode(evolutionMode) === 'survival') {
+        const resources = (agent.fuel / FUEL_MAX + agent.oxygen / OXYGEN_MAX) * 0.5;
+        return base + agent.lifeTime * 6 + resources * 650;
+    }
+    return base;
+}
+
+function aggregateEpisodeFitness(agent) {
+    const values = [...agent.episodeFitness].sort((a, b) => a - b);
+    if (!values.length) return -Infinity;
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const middle = values.length >> 1;
+    const median = values.length % 2
+        ? values[middle]
+        : (values[middle - 1] + values[middle]) * 0.5;
+    const worst = values[0];
+
+    // The worst-case term prevents a controller that succeeds once and fails
+    // everywhere else from dominating a consistently good controller.
+    return mean * 0.58 + median * 0.27 + worst * 0.15;
+}
+
+function mutationValueForIndex(index) {
+    if (index >= OFF_WXH && index < OFF_BH) {
+        return (Math.random() * 2 - 1) * Math.sqrt(6 / (N_IN + N_H1));
+    }
+    if (index >= OFF_W12 && index < OFF_B2) {
+        return (Math.random() * 2 - 1) * Math.sqrt(6 / (N_H1 + N_H2));
+    }
+    if (index >= OFF_WHY && index < OFF_BY) {
+        return (Math.random() * 2 - 1) * Math.sqrt(6 / (N_H2 + N_OUT));
+    }
+    return gauss() * 0.08;
+}
+
+function mutateGenome(genome, state = S, scale = 1) {
+    const child = new Float32Array(genome);
+    const stagnationBoost = 1 + Math.min(2.2, (state.stagnation || 0) * 0.09);
+    const sigma = (state.mutationSigma || 0.18) * scale * stagnationBoost;
+    const mutationRate = clamp((state.mutRate || S.mutRate) * (1 + Math.min(1.4, (state.stagnation || 0) * 0.05)), 1 / GENOME_SIZE, 0.18);
+    const resetRate = 0.0008 * scale * stagnationBoost;
+    let mutations = 0;
+
+    for (let i = 0; i < GENOME_SIZE; i++) {
+        if (Math.random() < resetRate) {
+            child[i] = mutationValueForIndex(i);
+            mutations++;
+        } else if (Math.random() < mutationRate) {
+            child[i] = clamp(child[i] + gauss() * sigma, -5, 5);
+            mutations++;
+        }
+    }
+
+    if (mutations === 0) {
+        const index = (Math.random() * GENOME_SIZE) | 0;
+        child[index] = clamp(child[index] + gauss() * sigma, -5, 5);
+    }
+    return child;
+}
+
+function blendCrossover(a, b) {
+    const child = new Float32Array(GENOME_SIZE);
+    for (let i = 0; i < GENOME_SIZE; i++) {
+        // BLX-style interpolation preserves useful weight combinations much
+        // better than independent uniform gene swapping.
+        const alpha = -0.10 + Math.random() * 1.20;
+        child[i] = clamp(a[i] * alpha + b[i] * (1 - alpha), -5, 5);
+    }
+    return child;
 }
 
 function mutate(g, scale = 1) {
-    const copy = new Float32Array(g);
-    for (let i = 0; i < GENOME_SIZE; i++) {
-        if (Math.random() < S.mutRate) copy[i] += gauss() * 0.28 * scale;
-    }
-    return copy;
+    return mutateGenome(g, S, scale);
 }
 
 function mutateSurvival(g, scale = 1) {
-    const copy = new Float32Array(g);
-    const smallCount = 2 + ((Math.random() * 10) | 0);
-    const largeCount = (Math.random() * 3) | 0;
-    for (let i = 0; i < smallCount; i++) {
-        const idx = (Math.random() * GENOME_SIZE) | 0;
-        copy[idx] += gauss() * 0.14 * scale;
-    }
-    for (let i = 0; i < largeCount; i++) {
-        const idx = (Math.random() * GENOME_SIZE) | 0;
-        copy[idx] += gauss() * 0.55 * scale;
-    }
-    return copy;
+    return mutateGenome(g, S, scale * 1.18);
 }
 
 function crossover(a, b) {
-    const c = new Float32Array(GENOME_SIZE);
-    for (let i = 0; i < GENOME_SIZE; i++) c[i] = Math.random() < 0.5 ? a[i] : b[i];
-    return c;
+    return blendCrossover(a, b);
 }
 
 function resolveEvolutionMode(baseMode) {
@@ -1066,77 +1849,62 @@ function laneEvolutionMode() {
     return S.trainingEvolutionMode;
 }
 
-function rankFitness(agent, evolutionMode) {
-    if (evolutionMode === 'survival') {
-        return agent.landings * 200000
-            + agent.score * 120
-            + agent.progress * 0.25
-            + agent.lifeTime * 220
-            - agent.penalty * 0.3;
-    }
-    return agent.fitness;
+function rankBiasedParent(sorted, poolFraction = 0.55) {
+    const poolSize = Math.max(2, Math.ceil(sorted.length * poolFraction));
+    const u = Math.random();
+    const index = Math.min(poolSize - 1, Math.floor(u * u * poolSize));
+    return sorted[index];
 }
 
-function buildClassicGeneration(sorted, popSize) {
+function buildNextGeneration(sorted, popSize, evolutionMode, state = S) {
     const genomes = [];
-    const champ = sorted[0].brain.g;
-    genomes.push(new Float32Array(champ));
-    for (let i = 1; i < Math.min(N_ELITE, sorted.length); i++) genomes.push(mutate(sorted[i].brain.g, 0.35));
-    const nChamp = Math.floor(popSize * CHAMP_FRACTION);
-    for (let i = 0; i < nChamp && genomes.length < popSize - N_FRESH; i++) {
-        genomes.push(mutate(champ, i % 2 ? 1 : 0.55));
+    const freshCount = normalizeTrainingMode(evolutionMode) === 'survival'
+        ? Math.max(6, Math.round(popSize * SURVIVAL_FRESH_FRACTION))
+        : Math.max(N_FRESH, Math.round(popSize * 0.10));
+    const mutationScale = normalizeTrainingMode(evolutionMode) === 'survival' ? 1.02 : 0.92;
+
+    // Exactly one protected elite occupies index 0. It is the best genome seen
+    // across the entire session and is copied byte-for-byte, never crossed or
+    // mutated. Because all four evaluation scenarios are fixed for the session,
+    // its measured performance is deterministic from generation to generation.
+    const protectedElite = validGenome(state.globalChampionGenome)
+        ? state.globalChampionGenome
+        : sorted[0]?.brain.g;
+    if (validGenome(protectedElite) && genomes.length < popSize) {
+        genomes.push(new Float32Array(protectedElite));
     }
-    while (genomes.length < popSize - N_FRESH) {
-        const a = tournament(sorted);
-        const b = tournament(sorted);
-        genomes.push(mutate(Math.random() < 0.75 ? crossover(a.brain.g, b.brain.g) : new Float32Array(a.brain.g)));
+
+    const champion = validGenome(protectedElite) ? protectedElite : sorted[0].brain.g;
+    const championMutants = Math.max(8, Math.floor(popSize * CHAMP_FRACTION));
+    for (let i = 0; i < championMutants && genomes.length < popSize - freshCount; i++) {
+        const pairScale = mutationScale * (0.55 + (i >> 1) * 0.06);
+        genomes.push(mutateGenome(champion, state, pairScale));
     }
+
+    while (genomes.length < popSize - freshCount) {
+        const parentA = rankBiasedParent(sorted);
+        if (Math.random() < 0.72) {
+            const parentB = rankBiasedParent(sorted);
+            const child = blendCrossover(parentA.brain.g, parentB.brain.g);
+            genomes.push(mutateGenome(child, state, mutationScale * (0.75 + Math.random() * 0.45)));
+        } else {
+            genomes.push(mutateGenome(parentA.brain.g, state, mutationScale * (0.65 + Math.random() * 0.55)));
+        }
+    }
+
     while (genomes.length < popSize) genomes.push(randomGenome());
     return genomes;
 }
 
-function buildSurvivalGeneration(sorted, popSize) {
-    const genomes = [];
-    const champ = sorted[0].brain.g;
-    const freshN = Math.max(4, Math.round(popSize * SURVIVAL_FRESH_FRACTION));
-    const champMutants = clamp(SURVIVAL_CHAMPION_MUTANT_MIN + ((Math.random() * 3) | 0), SURVIVAL_CHAMPION_MUTANT_MIN, SURVIVAL_CHAMPION_MUTANT_MAX);
-    genomes.push(new Float32Array(champ));
-    for (let i = 0; i < champMutants && genomes.length < popSize - freshN; i++) {
-        genomes.push(mutateSurvival(champ, i < 2 ? 0.65 : 1.1 + i * 0.04));
-    }
-    const lesser = sorted.slice(1, Math.max(2, Math.min(sorted.length, Math.ceil(sorted.length * 0.6))));
-    const breedCount = Math.max(8, Math.floor(popSize * 0.45));
-    for (let i = 0; i < breedCount && genomes.length < popSize - freshN; i++) {
-        if (!lesser.length) break;
-        const mateIdx = Math.min(lesser.length - 1, Math.floor((i / Math.max(1, breedCount - 1)) * lesser.length));
-        genomes.push(crossover(champ, lesser[mateIdx].brain.g));
-    }
-    while (genomes.length < popSize - freshN) {
-        const a = lesser.length ? lesser[(Math.random() * lesser.length) | 0] : sorted[(Math.random() * sorted.length) | 0];
-        const b = lesser.length ? lesser[(Math.random() * lesser.length) | 0] : sorted[(Math.random() * sorted.length) | 0];
-        genomes.push(Math.random() < 0.5
-            ? mutateSurvival(a.brain.g, 0.8 + Math.random() * 0.7)
-            : crossover(a.brain.g, b.brain.g));
-    }
-    while (genomes.length < popSize) genomes.push(randomGenome());
-    return genomes;
-}
-
-function buildNextGeneration(sorted, popSize, evolutionMode) {
-    return evolutionMode === 'survival'
-        ? buildSurvivalGeneration(sorted, popSize)
-        : buildClassicGeneration(sorted, popSize);
-}
-
-function mutateForMode(g, evolutionMode, scale = 1) {
-    return evolutionMode === 'survival' ? mutateSurvival(g, scale) : mutate(g, scale);
+function mutateForMode(g, evolutionMode, scale = 1, state = S) {
+    return mutateGenome(g, state, normalizeTrainingMode(evolutionMode) === 'survival' ? scale * 1.05 : scale);
 }
 
 function tournament(sorted) {
-    let best = sorted[(Math.random() * sorted.length) | 0];
+    let best = rankBiasedParent(sorted, 0.75);
     for (let i = 0; i < 2; i++) {
-        const challenger = sorted[(Math.random() * sorted.length) | 0];
-        if (challenger.fitSum > best.fitSum) best = challenger;
+        const challenger = rankBiasedParent(sorted, 0.75);
+        if (challenger.selectionFitness > best.selectionFitness) best = challenger;
     }
     return best;
 }
@@ -1190,6 +1958,14 @@ function createParallelSimState(config, label, evolutionMode) {
         episode: 0,
         simTime: 0,
         popSize: Math.min(POP_LIMIT, S.nextPopSize),
+        mutRate: S.mutRate,
+        mutationSigma: S.mutationSigma,
+        stagnation: 0,
+        bestSelectionFitness: -Infinity,
+        globalChampionGenome: null,
+        globalChampionFitness: -Infinity,
+        scenarioBaseSeed: S.explorer.roundScenarioSeed,
+        currentScenario: null,
         genBestScore: 0,
         genMeanScore: 0,
         genBestPads: 0,
@@ -1198,80 +1974,97 @@ function createParallelSimState(config, label, evolutionMode) {
 }
 
 function prepareEpisodeForState(state) {
-    state.template = makeTemplate();
-    for (const agent of state.agents) agent.spawn(state.template);
-    state.simTime = 0;
+    prepareEpisodeFor(state);
 }
 
 function spawnPopulationForState(state, genomes) {
-    state.agents = genomes.map((g, i) => new Lander(g, i));
-    state.episode = 0;
-    state.genBestScore = 0;
-    state.genMeanScore = 0;
-    state.genBestPads = 0;
-    state.genMeanPads = 0;
-    prepareEpisodeForState(state);
+    spawnPopulationFor(state, genomes);
 }
 
 function freshPopulationForState(state) {
-    const genomes = [];
     state.popSize = Math.min(POP_LIMIT, S.nextPopSize);
-    for (let i = 0; i < state.popSize; i++) genomes.push(randomGenome());
-    spawnPopulationForState(state, genomes);
+    const bootstrap = createBootstrapGenome();
+    const genomes = [bootstrap];
+    const bootstrapCount = Math.min(18, Math.max(8, Math.floor(state.popSize * 0.22)));
+    while (genomes.length < bootstrapCount) {
+        genomes.push(mutateGenome(bootstrap, state, 0.55 + genomes.length * 0.035));
+    }
+    while (genomes.length < state.popSize) genomes.push(randomGenome());
+    spawnPopulationFor(state, genomes);
 }
 
 function finishGenerationForState(state) {
     const evolutionMode = state.evolutionMode || 'classic';
-    let epBestScore = 0;
-    let epMeanScore = 0;
-    let epBestPads = 0;
-    let epMeanPads = 0;
+
     for (const agent of state.agents) {
-        agent.fitSum += rankFitness(agent, evolutionMode);
+        const episodeFitness = rankFitness(agent, evolutionMode);
+        agent.episodeFitness.push(episodeFitness);
+        agent.fitSum += episodeFitness;
         agent.scoreSum += agent.score;
         agent.landSum += agent.landings;
-        epBestScore = Math.max(epBestScore, agent.score);
-        epBestPads = Math.max(epBestPads, agent.landings);
-        epMeanScore += agent.score;
-        epMeanPads += agent.landings;
     }
-    state.genBestScore = Math.max(state.genBestScore, epBestScore);
-    state.genBestPads = Math.max(state.genBestPads, epBestPads);
-    state.genMeanScore += epMeanScore / state.agents.length;
-    state.genMeanPads += epMeanPads / state.agents.length;
     state.episode++;
 
     if (state.episode < N_EPISODES) {
-        prepareEpisodeForState(state);
+        prepareEpisodeFor(state);
         return null;
     }
 
+    let bestScore = 0;
+    let bestPads = 0;
+    let meanScore = 0;
+    let meanPads = 0;
+    for (const agent of state.agents) {
+        agent.selectionFitness = aggregateEpisodeFitness(agent);
+        const avgScore = agent.scoreSum / N_EPISODES;
+        const avgPads = agent.landSum / N_EPISODES;
+        bestScore = Math.max(bestScore, avgScore);
+        bestPads = Math.max(bestPads, avgPads);
+        meanScore += avgScore;
+        meanPads += avgPads;
+    }
+    meanScore /= state.agents.length;
+    meanPads /= state.agents.length;
+
+    const sorted = [...state.agents].sort((a, b) => b.selectionFitness - a.selectionFitness);
+    const generationBest = sorted[0]?.selectionFitness ?? -Infinity;
+
+    if (generationBest > state.bestSelectionFitness + 1) {
+        state.bestSelectionFitness = generationBest;
+        state.globalChampionFitness = generationBest;
+        state.globalChampionGenome = sorted[0] ? new Float32Array(sorted[0].brain.g) : state.globalChampionGenome;
+        state.stagnation = 0;
+    } else {
+        state.stagnation++;
+    }
+
     const summary = {
-        bestScore: state.genBestScore,
-        bestPads: state.genBestPads,
-        meanScore: state.genMeanScore / state.episode,
-        meanPads: state.genMeanPads / state.episode,
+        bestScore,
+        bestPads,
+        meanScore,
+        meanPads,
         gen: state.gen,
     };
 
-    const sorted = [...state.agents].sort((a, b) => b.fitSum - a.fitSum);
     state.popSize = Math.min(POP_LIMIT, S.nextPopSize);
-    const genomes = buildNextGeneration(sorted, state.popSize, evolutionMode);
+    const genomes = buildNextGeneration(sorted, state.popSize, evolutionMode, state);
     state.gen++;
-    spawnPopulationForState(state, genomes);
+    spawnPopulationFor(state, genomes);
     return summary;
 }
 
 function stepSimForState(state) {
-    return withPolicyContext(state.policy, state.label, () => {
-        for (const agent of state.agents) if (agent.alive) agent.step();
-        let alive = 0;
-        for (const agent of state.agents) if (agent.alive) alive++;
-        state.simTime += DT;
-        S.stepsThisSecond++;
-        if (alive === 0) return finishGenerationForState(state);
-        return null;
-    });
+    for (const agent of state.agents) {
+        if (agent.alive) agent.step(state.policy);
+    }
+
+    let alive = 0;
+    for (const agent of state.agents) if (agent.alive) alive++;
+    state.simTime += DT;
+    S.stepsThisSecond++;
+
+    if (alive === 0) return finishGenerationForState(state);
+    return null;
 }
 
 function activeExplorerLanes() {
@@ -1367,6 +2160,8 @@ function assignNextPolicyToLane(lane) {
 function startExplorerRound(seedConfig) {
     S.explorer.round++;
     S.explorer.roundSeed = normalizePolicyConfig(seedConfig);
+    S.explorer.roundScenarioSeed = nextSeed();
+    S.scenarioBaseSeed = S.explorer.roundScenarioSeed;
     S.explorer.roundEvaluated = [];
     S.explorer.assignedThisRound = 0;
     for (const lane of S.explorer.lanes) {
@@ -1510,35 +2305,56 @@ function stepExplorerParallelLanes() {
 
 function finishGeneration() {
     const evolutionMode = laneEvolutionMode('A');
-    let epBestScore = 0;
-    let epMeanScore = 0;
-    let epBestPads = 0;
-    let epMeanPads = 0;
+
     for (const agent of S.agents) {
-        agent.fitSum += rankFitness(agent, evolutionMode);
+        const episodeFitness = rankFitness(agent, evolutionMode);
+        agent.episodeFitness.push(episodeFitness);
+        agent.fitSum += episodeFitness;
         agent.scoreSum += agent.score;
         agent.landSum += agent.landings;
-        epBestScore = Math.max(epBestScore, agent.score);
-        epBestPads = Math.max(epBestPads, agent.landings);
-        epMeanScore += agent.score;
-        epMeanPads += agent.landings;
     }
-    S.genBestScore = Math.max(S.genBestScore, epBestScore);
-    S.genBestPads = Math.max(S.genBestPads, epBestPads);
-    S.genMeanScore += epMeanScore / S.agents.length;
-    S.genMeanPads += epMeanPads / S.agents.length;
     S.episode++;
 
-    if (!S.evalMode && S.episode < N_EPISODES) {
+    if (S.episode < N_EPISODES) {
         prepareEpisode();
         flashBanner(`Generation <b>${S.gen}</b> — episode ${S.episode + 1}/${N_EPISODES}`);
         return;
     }
 
-    const bestScore = S.genBestScore;
-    const bestPads = S.genBestPads;
-    const meanScore = S.genMeanScore / S.episode;
-    const meanPads = S.genMeanPads / S.episode;
+    let bestScore = 0;
+    let bestPads = 0;
+    let meanScore = 0;
+    let meanPads = 0;
+
+    for (const agent of S.agents) {
+        agent.selectionFitness = aggregateEpisodeFitness(agent);
+        const averageScore = agent.scoreSum / N_EPISODES;
+        const averagePads = agent.landSum / N_EPISODES;
+        bestScore = Math.max(bestScore, averageScore);
+        bestPads = Math.max(bestPads, averagePads);
+        meanScore += averageScore;
+        meanPads += averagePads;
+    }
+    meanScore /= S.agents.length;
+    meanPads /= S.agents.length;
+
+    const sorted = [...S.agents].sort((a, b) => b.selectionFitness - a.selectionFitness);
+    const generationBest = sorted[0]?.selectionFitness ?? -Infinity;
+
+    if (generationBest > S.bestSelectionFitness + 1) {
+        S.bestSelectionFitness = generationBest;
+        S.globalChampionFitness = generationBest;
+        S.globalChampionGenome = sorted[0] ? new Float32Array(sorted[0].brain.g) : S.globalChampionGenome;
+        S.stagnation = 0;
+    } else {
+        S.stagnation++;
+    }
+
+    S.genBestScore = bestScore;
+    S.genBestPads = bestPads;
+    S.genMeanScore = meanScore;
+    S.genMeanPads = meanPads;
+
     S.history.push({
         bestScore,
         meanScore,
@@ -1547,51 +2363,87 @@ function finishGeneration() {
         terrainIdx: S.terrainIdx,
     });
     if (S.history.length > 400) S.history.shift();
-    if (bestScore > S.recordScore) S.recordScore = bestScore;
-    if (bestPads > S.recordPads) S.recordPads = bestPads;
+
+    S.recordScore = Math.max(S.recordScore, bestScore);
+    S.recordPads = Math.max(S.recordPads, bestPads);
     drawChart();
     drawLandings();
+
     if (recordExplorerGeneration(bestPads, meanPads, bestScore, meanScore)) return;
 
-    const sorted = [...S.agents].sort((a, b) => b.fitSum - a.fitSum);
     let genomes;
+    S.popSize = Math.min(POP_LIMIT, S.nextPopSize);
     if (S.evalMode) {
-        genomes = sorted.map(agent => new Float32Array(agent.brain.g));
+        genomes = sorted.slice(0, S.popSize).map(agent => new Float32Array(agent.brain.g));
+        while (genomes.length < S.popSize) genomes.push(new Float32Array(sorted[0].brain.g));
     } else {
-        S.popSize = Math.min(POP_LIMIT, S.nextPopSize);
-        genomes = buildNextGeneration(sorted, S.popSize, evolutionMode);
-        S.gen++;
+        genomes = buildNextGeneration(sorted, S.popSize, evolutionMode, S);
     }
+
+    S.gen++;
     spawnPopulation(genomes);
-    flashBanner(`Generation <b>${S.gen}</b> — best ${bestScore} · pads ${bestPads.toFixed(0)}`);
+    flashBanner(
+        `Generation <b>${S.gen}</b> — avg-best ${bestScore.toFixed(1)} · pads ${bestPads.toFixed(2)}`
+        + (S.stagnation ? ` · stagnation ${S.stagnation}` : ''),
+    );
 }
 
 function stepSim() {
-    for (const agent of S.agents) if (agent.alive) agent.step();
+    for (const agent of S.agents) {
+        if (agent.alive) agent.step(S.policy);
+    }
+
     let alive = 0;
     for (const agent of S.agents) if (agent.alive) alive++;
     S.simTime += DT;
     S.stepsThisSecond++;
+
     if (alive === 0) finishGeneration();
+
+    // The original code defined a second policy-explorer lane but never
+    // advanced it, causing policy-search rounds to stall permanently.
+    stepExplorerParallelLanes();
 }
 
 function explorerLane(name) {
     return S.explorer.lanes.find(lane => lane.name === name) || S.explorer.lanes[0];
 }
 
+function distanceToNextPad(agent) {
+    if (!agent?.template?.pads?.length) return Infinity;
+
+    let padIdx = agent.targetPad;
+    if (!(padIdx >= 0 && padIdx < agent.template.pads.length && !agent.padState[padIdx])) {
+        padIdx = agent.nearestPad(true, false);
+    }
+    if (padIdx < 0) return 0;
+
+    const pad = agent.template.pads[padIdx];
+    return Math.hypot(pad.cx - agent.x, pad.y - (agent.y + LANDER_FEET_Y));
+}
+
+function compareLeaderCandidates(a, b) {
+    if (a.landings !== b.landings) return a.landings - b.landings;
+
+    const aNext = distanceToNextPad(a);
+    const bNext = distanceToNextPad(b);
+    if (Math.abs(aNext - bNext) > 0.01) return bNext - aNext; // shorter is better
+
+    if (Math.abs(a.distanceCovered - b.distanceCovered) > 0.01) return a.distanceCovered - b.distanceCovered;
+    if (a.score !== b.score) return a.score - b.score;
+    if (a.fitness !== b.fitness) return a.fitness - b.fitness;
+    return b.idx - a.idx;
+}
+
 function leaderForState(state) {
     if (!state || !state.agents || !state.agents.length) return null;
-    let best = null;
-    for (const agent of state.agents) {
-        if (!best) {
-            best = agent;
-            continue;
-        }
-        if (agent.alive && !best.alive) {
-            best = agent;
-            continue;
-        }
-        if ((agent.alive === best.alive && agent.fitness > best.fitness) || (agent.score > best.score && agent.landings >= best.landings)) best = agent;
+
+    // Strict lexicographic order: most pads, shortest remaining distance to the
+    // next unvisited pad, then greatest total flight distance. Score and fitness
+    // are only exact-tie fallbacks and never override the requested hierarchy.
+    let best = state.agents[0];
+    for (let i = 1; i < state.agents.length; i++) {
+        if (compareLeaderCandidates(state.agents[i], best) > 0) best = state.agents[i];
     }
     return best;
 }
@@ -1767,10 +2619,17 @@ function drawLandings() {
 const netCv = document.getElementById('net');
 const netCtx = netCv.getContext('2d');
 const IN_LABELS = [
-    'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7',
-    'R1-', 'R2-', 'R3-', 'R4-', 'R5-', 'R6-', 'R7-',
-    'padX', 'padY', 'padD', 'vX', 'vY', 'gX', 'gY', 'aX', 'aY',
-    'sin', 'cos', 'spin', 'alt', 'fuel', 'oxy', 'main', 'turn', 'strafe'
+    'Terrain far left', 'Terrain left 65°', 'Terrain left 45°', 'Terrain left 25°',
+    'Terrain directly below', 'Terrain right 25°', 'Terrain right 45°', 'Terrain right 65°',
+    'Terrain far right', 'Far-left range change', 'Left 65° range change', 'Left 45° range change',
+    'Left 25° range change', 'Below range change', 'Right 25° range change', 'Right 45° range change',
+    'Right 65° range change', 'Far-right range change', 'Target sideways', 'Target downward',
+    'Target proximity', 'Landing-pad width', 'World speed X', 'World speed Y',
+    'Body sideways speed', 'Body downward speed', 'Craft tilt sine', 'Craft upright cosine',
+    'Rotation speed', 'Ground clearance', 'Pad offset X', 'Pad offset Y',
+    'Vertical speed safety', 'Horizontal speed safety', 'Fuel remaining', 'Oxygen remaining',
+    'Main-engine throttle', 'Turn RCS state', 'Side RCS state', 'Standing on pad',
+    'Mission time', 'Constant bias',
 ];
 const OUT_LABELS = ['turn', 'main', 'strafe'];
 
@@ -1778,12 +2637,85 @@ function actColor(v, alpha) {
     return v >= 0 ? `rgba(154,214,255,${alpha})` : `rgba(255,190,107,${alpha})`;
 }
 
-function drawNet(agent) {
+function activationGroupForMode(lead = leader()) {
+    if (!lead) return [];
+
+    const alive = S.agents
+        .filter(agent => agent.alive)
+        .sort((a, b) => compareLeaderCandidates(b, a));
+    const ordered = [lead, ...alive.filter(agent => agent !== lead)];
+
+    if (S.sensorMode === 'all') return ordered;
+    if (S.sensorMode === 'ghosts') return ordered.slice(0, TOP_GHOSTS);
+    return [lead];
+}
+
+function activationGroupDescription(group) {
+    if (!group.length) return 'No active vessel';
+    if (S.sensorMode === 'all') return `All visible vessels · mean activation (${group.length})`;
+    if (S.sensorMode === 'ghosts') return `Top ${group.length} vessels · mean activation`;
+    return S.sensorMode === 'off' ? 'Leader activation · sensor rays hidden' : 'Leader activation';
+}
+
+function activationSnapshot(agents) {
+    if (!agents || !agents.length) return null;
+    const count = agents.length;
+    const inp = new Float32Array(N_IN);
+    const h = new Float32Array(N_H1);
+    const h2 = new Float32Array(N_H2);
+    const out = new Float32Array(N_OUT);
+    const sigIH = new Float32Array(N_IN * N_H1);
+    const sigH12 = new Float32Array(N_H1 * N_H2);
+    const sigH2O = new Float32Array(N_H2 * N_OUT);
+
+    for (const agent of agents) {
+        const g = agent.brain.g;
+        for (let i = 0; i < N_IN; i++) {
+            const source = agent.inp[i];
+            inp[i] += source;
+            const base = i * N_H1;
+            for (let j = 0; j < N_H1; j++) sigIH[base + j] += g[OFF_WXH + base + j] * source;
+        }
+        for (let i = 0; i < N_H1; i++) {
+            const source = agent.brain.h[i];
+            h[i] += source;
+            const base = i * N_H2;
+            for (let j = 0; j < N_H2; j++) sigH12[base + j] += g[OFF_W12 + base + j] * source;
+        }
+        for (let i = 0; i < N_H2; i++) {
+            const source = agent.brain.h2[i];
+            h2[i] += source;
+            const base = i * N_OUT;
+            for (let j = 0; j < N_OUT; j++) sigH2O[base + j] += g[OFF_WHY + base + j] * source;
+        }
+        for (let i = 0; i < N_OUT; i++) out[i] += agent.brain.out[i];
+    }
+
+    const inv = 1 / count;
+    for (const values of [inp, h, h2, out, sigIH, sigH12, sigH2O]) {
+        for (let i = 0; i < values.length; i++) values[i] *= inv;
+    }
+    return { inp, h, h2, out, sigIH, sigH12, sigH2O, count };
+}
+
+function drawNet(agents) {
     const c = netCtx, W = netCv.width, H = netCv.height;
     c.clearRect(0, 0, W, H);
-    if (!agent) return;
-    const g = agent.brain.g, h = agent.brain.h, h2 = agent.brain.h2, inp = agent.inp, out = agent.brain.out;
-    const xIn = 26, xH1 = W * 0.42, xH2 = W * 0.67, xOut = W - 42;
+    const group = Array.isArray(agents) ? agents : agents ? [agents] : [];
+    const snapshot = activationSnapshot(group);
+    const title = document.getElementById('neural-activation-title');
+    if (title) title.textContent = activationGroupDescription(group);
+    if (!snapshot) return;
+
+    const { inp, h, h2, out, sigIH, sigH12, sigH2O } = snapshot;
+    // Reserve the left side for readable sensor names and compress the actual
+    // network toward the right. This keeps all 42 inputs understandable without
+    // making the activation panel wider.
+    const xIn = clamp(W * 0.43, 132, 158);
+    const xOut = W - 58;
+    const networkSpan = Math.max(95, xOut - xIn);
+    const xH1 = xIn + networkSpan * 0.42;
+    const xH2 = xIn + networkSpan * 0.72;
     const yIn = i => 10 + i * ((H - 20) / (N_IN - 1));
     const yH1 = i => 12 + i * ((H - 24) / (N_H1 - 1));
     const yH2 = i => 20 + i * ((H - 40) / (N_H2 - 1));
@@ -1791,7 +2723,7 @@ function drawNet(agent) {
     c.lineWidth = 1;
     for (let i = 0; i < N_IN; i++) {
         for (let j = 0; j < N_H1; j++) {
-            const sig = g[OFF_WXH + i * N_H1 + j] * inp[i];
+            const sig = sigIH[i * N_H1 + j];
             if (Math.abs(sig) < 0.18) continue;
             c.strokeStyle = actColor(sig, clamp(Math.abs(sig) * 0.55, 0.05, 0.46));
             c.beginPath();
@@ -1802,7 +2734,7 @@ function drawNet(agent) {
     }
     for (let i = 0; i < N_H1; i++) {
         for (let j = 0; j < N_H2; j++) {
-            const sig = g[OFF_W12 + i * N_H2 + j] * h[i];
+            const sig = sigH12[i * N_H2 + j];
             if (Math.abs(sig) < 0.18) continue;
             c.strokeStyle = actColor(sig, clamp(Math.abs(sig) * 0.55, 0.05, 0.46));
             c.beginPath();
@@ -1813,7 +2745,7 @@ function drawNet(agent) {
     }
     for (let i = 0; i < N_H2; i++) {
         for (let j = 0; j < N_OUT; j++) {
-            const sig = g[OFF_WHY + i * N_OUT + j] * h2[i];
+            const sig = sigH2O[i * N_OUT + j];
             if (Math.abs(sig) < 0.14) continue;
             c.strokeStyle = actColor(sig, clamp(Math.abs(sig) * 0.6, 0.05, 0.58));
             c.beginPath();
@@ -1822,15 +2754,15 @@ function drawNet(agent) {
             c.stroke();
         }
     }
-    c.font = '8px sans-serif';
-    c.textAlign = 'right';
+    c.font = '8.4px Bahnschrift, Segoe UI, sans-serif';
+    c.textAlign = 'left';
     for (let i = 0; i < N_IN; i++) {
         c.fillStyle = actColor(inp[i], 0.2 + Math.abs(inp[i]) * 0.8);
         c.beginPath();
         c.arc(xIn, yIn(i), 3.4, 0, Math.PI * 2);
         c.fill();
-        c.fillStyle = 'rgba(147,161,184,0.88)';
-        c.fillText(IN_LABELS[i], xIn - 7, yIn(i) + 2.5);
+        c.fillStyle = 'rgba(166,178,198,0.92)';
+        c.fillText(IN_LABELS[i], 5, yIn(i) + 2.7, Math.max(40, xIn - 14));
     }
     for (let i = 0; i < N_H1; i++) {
         c.fillStyle = actColor(h[i], 0.18 + Math.abs(h[i]) * 0.82);
@@ -1877,8 +2809,24 @@ function setStatusMeta() {
         : 'No champion seed loaded. Training starts from random individuals.';
 }
 
+function ensureTerrainTabs() {
+    const existing = [...document.querySelectorAll('.terrain-tab')];
+    if (!existing.length) return;
+    const container = existing[0].parentElement;
+    if (!container) return;
+
+    for (let i = 0; i < TERRAIN_DEFS.length; i++) {
+        if (document.querySelector(`.terrain-tab[data-terrain="${i}"]`)) continue;
+        const button = existing[existing.length - 1].cloneNode(true);
+        button.dataset.terrain = String(i);
+        button.classList.remove('active');
+        button.textContent = TERRAIN_DEFS[i].name;
+        container.appendChild(button);
+    }
+}
+
 function switchTerrain(i) {
-    if (i === S.terrainIdx) return;
+    if (!Number.isInteger(i) || i < 0 || i >= TERRAIN_DEFS.length || i === S.terrainIdx) return;
     S.terrainIdx = i;
     document.querySelectorAll('.terrain-tab').forEach(btn => btn.classList.toggle('active', +btn.dataset.terrain === i));
     const genomes = S.agents.length ? S.agents.map(agent => new Float32Array(agent.brain.g)) : [];
@@ -2017,6 +2965,8 @@ function saveCurrentChampion(name) {
         return;
     }
     S.championLibrary[trimmed] = {
+        brainVersion: BRAIN_VERSION,
+        genomeSize: GENOME_SIZE,
         genome: Array.from(champion.brain.g),
         mode: S.trainingEvolutionMode,
         policy: S.policy,
@@ -2035,6 +2985,10 @@ function loadChampionByName(name) {
         flashBanner('Select a champion to load');
         return;
     }
+    if (record.brainVersion !== BRAIN_VERSION || !record.genome || record.genome.length !== GENOME_SIZE) {
+        flashBanner(`Champion <b>${name}</b> uses an incompatible older brain format`);
+        return;
+    }
     S.seedChampionGenome = Float32Array.from(record.genome);
     S.seedChampionName = name;
     resetTrainingSession(true);
@@ -2049,13 +3003,415 @@ function clearChampionSeed() {
     flashBanner('Champion seed cleared');
 }
 
+
+function loadCameraLeaderBias() {
+    try {
+        const raw = localStorage.getItem(CAMERA_BIAS_STORAGE_KEY);
+        if (raw === null || raw === '') return CAMERA_AVERAGE_LEADER_BIAS;
+        const stored = Number(raw);
+        return Number.isFinite(stored) ? clamp(stored, 0, 1) : CAMERA_AVERAGE_LEADER_BIAS;
+    } catch (err) {
+        return CAMERA_AVERAGE_LEADER_BIAS;
+    }
+}
+
+function saveCameraLeaderBias(value) {
+    try {
+        localStorage.setItem(CAMERA_BIAS_STORAGE_KEY, String(value));
+    } catch (err) {
+        // Camera control remains functional when storage is unavailable.
+    }
+}
+
+function setCameraLeaderBias(value, persist = true) {
+    const numeric = Number(value);
+    S.cameraLeaderBias = clamp(Number.isFinite(numeric) ? numeric : CAMERA_AVERAGE_LEADER_BIAS, 0, 1);
+    if (persist) saveCameraLeaderBias(S.cameraLeaderBias);
+    syncCameraBiasControl();
+}
+
+function syncCameraBiasControl() {
+    const slider = document.getElementById('camera-leader-bias');
+    const value = document.getElementById('camera-leader-bias-value');
+    const note = document.getElementById('camera-leader-bias-note');
+    const percent = Math.round(S.cameraLeaderBias * 100);
+    if (slider && Number(slider.value) !== percent) slider.value = String(percent);
+    if (value) value.textContent = `${percent}%`;
+    if (note) {
+        note.textContent = S.cameraMode === 'leader'
+            ? 'Leader mode already follows the best vessel at 100%.'
+            : percent === 0
+                ? 'Following the population average.'
+                : percent === 100
+                    ? 'Following the best vessel.'
+                    : `Blending ${100 - percent}% population average with ${percent}% best vessel.`;
+    }
+}
+
+function rightSidePanelFor(element) {
+    if (!element) return null;
+    let node = element;
+    let fallback = null;
+    while (node && node !== document.body) {
+        if (node.matches?.('aside, .sidebar, .right-sidebar, .sidebar-right, .camera-panel, .panel, .card, section')) {
+            fallback = node;
+            const rect = node.getBoundingClientRect?.();
+            if (rect && rect.width >= 150 && rect.height >= 180 && rect.left > window.innerWidth * 0.58) return node;
+        }
+        node = node.parentElement;
+    }
+    return fallback;
+}
+
+function collapseVacatedCameraSidebar(panel) {
+    if (!panel || panel.id === 'neural-activation-panel') return;
+
+    const remainingInteractive = panel.querySelector('input, select, button, canvas, textarea');
+    const remainingText = (panel.textContent || '')
+        .replace(/Following the best vessel\.?/gi, '')
+        .replace(/Following the population average\.?/gi, '')
+        .replace(/Best-vessel bias/gi, '')
+        .replace(/Leader mode already follows[^.]*\.?/gi, '')
+        .replace(/Camera/gi, '')
+        .trim();
+    if (remainingInteractive || remainingText.length > 8) return;
+
+    const parent = panel.parentElement;
+    panel.style.display = 'none';
+    panel.setAttribute('aria-hidden', 'true');
+
+    // Flex layouts collapse naturally. For a fixed three-column grid, remove
+    // the now-empty final column so the simulation regains the wasted width.
+    if (!parent) return;
+    const parentStyle = getComputedStyle(parent);
+    if (parentStyle.display !== 'grid' && parentStyle.display !== 'inline-grid') return;
+
+    const visibleChildren = [...parent.children].filter(child => child !== panel && getComputedStyle(child).display !== 'none');
+    if (visibleChildren.length === 2 && visibleChildren[0].getBoundingClientRect().width > visibleChildren[1].getBoundingClientRect().width) {
+        const sideWidth = Math.max(220, Math.round(visibleChildren[1].getBoundingClientRect().width));
+        parent.style.gridTemplateColumns = `minmax(0, 1fr) ${sideWidth}px`;
+    }
+}
+
+function setupCameraBiasControl(cameraModeControl) {
+    S.cameraLeaderBias = loadCameraLeaderBias();
+
+    const originalModeRow = cameraModeControl?.closest('.field-row, .control-row, .setting-row, label');
+    const oldPanel = rightSidePanelFor(originalModeRow || cameraModeControl);
+    const activationPanel = document.getElementById('neural-activation-panel');
+    let controlsHost = document.getElementById('activation-camera-controls');
+    if (!controlsHost && activationPanel) {
+        controlsHost = document.createElement('div');
+        controlsHost.id = 'activation-camera-controls';
+        activationPanel.appendChild(controlsHost);
+    }
+
+    if (cameraModeControl && controlsHost) {
+        let modeRow = document.getElementById('activation-camera-mode-row');
+        if (!modeRow) {
+            modeRow = document.createElement('div');
+            modeRow.id = 'activation-camera-mode-row';
+            modeRow.className = 'activation-camera-row';
+            const label = document.createElement('label');
+            label.htmlFor = cameraModeControl.id;
+            label.textContent = 'Camera tracking';
+            modeRow.append(label, cameraModeControl);
+            controlsHost.appendChild(modeRow);
+        }
+        if (originalModeRow && originalModeRow !== modeRow && !originalModeRow.querySelector('input, select, button, canvas, textarea')) {
+            originalModeRow.remove();
+        }
+    }
+
+    let wrapper = document.getElementById('camera-leader-bias-control');
+    if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.id = 'camera-leader-bias-control';
+        wrapper.className = 'camera-leader-bias-control';
+
+        const label = document.createElement('label');
+        label.htmlFor = 'camera-leader-bias';
+        label.textContent = 'Best-vessel bias';
+        label.title = '0% follows the population average. 100% follows the vessel with the most pad landings, then the shortest distance to its next pad, then the greatest distance covered.';
+
+        const slider = document.createElement('input');
+        slider.id = 'camera-leader-bias';
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '100';
+        slider.step = '1';
+        slider.setAttribute('aria-label', 'Camera best-vessel bias');
+        slider.title = label.title;
+        slider.addEventListener('input', event => setCameraLeaderBias(Number(event.target.value) / 100));
+
+        const value = document.createElement('output');
+        value.id = 'camera-leader-bias-value';
+        value.htmlFor = 'camera-leader-bias';
+
+        const note = document.createElement('small');
+        note.id = 'camera-leader-bias-note';
+
+        wrapper.append(label, slider, value, note);
+    }
+
+    if (controlsHost && wrapper.parentElement !== controlsHost) controlsHost.appendChild(wrapper);
+    else if (!controlsHost && !wrapper.parentElement) document.body.appendChild(wrapper);
+
+    requestAnimationFrame(() => {
+        if (oldPanel) collapseVacatedCameraSidebar(oldPanel);
+        for (const candidate of document.querySelectorAll('aside, section, .panel, .card, .sidebar, .right-sidebar')) {
+            if (candidate.id === 'neural-activation-panel') continue;
+            const text = (candidate.textContent || '').toLowerCase();
+            const rect = candidate.getBoundingClientRect?.();
+            const farRightAndEmpty = rect
+                && rect.width >= 150
+                && rect.left > window.innerWidth * 0.78
+                && !candidate.querySelector('input, select, button, canvas, textarea')
+                && text.trim().length < 40;
+            if (text.includes('following the best vessel') || text.includes('best-vessel bias') || farRightAndEmpty) {
+                collapseVacatedCameraSidebar(candidate);
+            }
+        }
+    });
+    syncCameraBiasControl();
+}
+
+
+function setupTrainingModeControl() {
+    const select = $('training-mode');
+    if (!select) return;
+    select.innerHTML = '';
+    const modes = [
+        ['evolutionary', 'Evolutionary · Balanced (recommended)'],
+        ['survival', 'Evolutionary · Survival'],
+    ];
+    for (const [value, text] of modes) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = text;
+        select.appendChild(option);
+    }
+    select.value = trainingModeValue(S.trainingEvolutionMode);
+}
+
+function setupVesselViewControl() {
+    const select = $('sensors');
+    if (!select) return;
+    const labels = new Map([
+        ['leader', 'Leader only'],
+        ['ghosts', 'Top 12 vessels'],
+        ['all', 'All vessels'],
+        ['off', 'Leader only · hide sensor rays'],
+    ]);
+    for (const option of select.options || []) {
+        if (labels.has(option.value)) option.textContent = labels.get(option.value);
+    }
+    const label = document.querySelector('label[for="sensors"]');
+    if (label) label.textContent = 'Vessel view';
+    select.value = S.sensorMode;
+}
+
+function setupFitnessShapingDisclosure() {
+    const grid = $('policy-field-grid');
+    if (!grid || document.getElementById('fitness-shaping-disclosure')) return;
+
+    const ids = [
+        'policy-field-grid', 'policy-config-name', 'policy-config-list',
+        'btn-save-policy', 'btn-load-policy', 'btn-delete-policy',
+    ];
+    const rows = [];
+    for (const id of ids) {
+        const el = $(id);
+        if (!el) continue;
+        const row = el.closest('.field-row, .control-row, .setting-row, .button-row') || el;
+        if (!rows.includes(row)) rows.push(row);
+    }
+    const topLevelRows = rows.filter(row => !rows.some(other => other !== row && other.contains(row)));
+    topLevelRows.sort((a, b) => {
+        if (a === b) return 0;
+        return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+    });
+    if (!topLevelRows.length) return;
+
+    const details = document.createElement('details');
+    details.id = 'fitness-shaping-disclosure';
+    details.style.marginTop = '10px';
+    details.style.border = '1px solid rgba(147,161,184,0.16)';
+    details.style.borderRadius = '10px';
+    details.style.padding = '8px 10px';
+
+    const summary = document.createElement('summary');
+    summary.textContent = 'Fitness shaping · advanced';
+    summary.style.cursor = 'pointer';
+    summary.style.fontWeight = '600';
+
+    const note = document.createElement('p');
+    note.textContent = 'These values change evolutionary rewards and penalties. They do not directly control the neural-network outputs.';
+    note.style.margin = '8px 0';
+    note.style.opacity = '0.72';
+    note.style.fontSize = '12px';
+    note.style.lineHeight = '1.35';
+
+    const content = document.createElement('div');
+    content.className = 'fitness-shaping-content';
+    const first = topLevelRows[0];
+    first.parentElement.insertBefore(details, first);
+    details.append(summary, note, content);
+    for (const row of topLevelRows) content.appendChild(row);
+}
+
+function setupActivationPanel() {
+    if (!netCv || document.getElementById('neural-activation-panel')) return;
+    const originalParent = netCv.parentElement;
+    const originalSection = netCv.closest('.panel, .card, section');
+
+    const style = document.createElement('style');
+    style.id = 'neural-activation-panel-style';
+    style.textContent = `
+        #neural-activation-panel {
+            position: fixed;
+            left: 16px;
+            top: 132px;
+            z-index: 18;
+            width: min(410px, 31vw);
+            padding: 10px 12px 12px;
+            border: 1px solid rgba(147, 161, 184, 0.18);
+            border-radius: 12px;
+            background: rgba(8, 12, 20, 0.72);
+            backdrop-filter: blur(8px);
+            box-shadow: 0 10px 35px rgba(0, 0, 0, 0.18);
+            pointer-events: none;
+        }
+        #neural-activation-title {
+            margin: 0 0 7px;
+            color: rgba(235, 242, 255, 0.92);
+            font: 600 12px Bahnschrift, Segoe UI, sans-serif;
+            letter-spacing: 0.01em;
+        }
+        #neural-activation-panel #net {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-height: calc(100vh - 285px);
+        }
+
+        #activation-camera-controls {
+            pointer-events: auto;
+            margin-top: 9px;
+            padding-top: 9px;
+            border-top: 1px solid rgba(147, 161, 184, 0.16);
+        }
+        .activation-camera-row,
+        #camera-leader-bias-control {
+            display: grid;
+            grid-template-columns: 112px minmax(0, 1fr) 42px;
+            align-items: center;
+            gap: 8px;
+            color: rgba(195, 207, 225, 0.88);
+            font: 500 11px Bahnschrift, Segoe UI, sans-serif;
+        }
+        .activation-camera-row {
+            grid-template-columns: 112px minmax(0, 1fr);
+            margin-bottom: 7px;
+        }
+        .activation-camera-row select {
+            min-width: 0;
+            width: 100%;
+        }
+        #camera-leader-bias-control input[type="range"] {
+            width: 100%;
+            min-width: 0;
+        }
+        #camera-leader-bias-value {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            color: rgba(235, 242, 255, 0.95);
+        }
+        #camera-leader-bias-note {
+            grid-column: 1 / -1;
+            opacity: 0.68;
+            line-height: 1.25;
+            margin-top: -1px;
+        }
+        @media (max-width: 1050px) {
+            #neural-activation-panel {
+                width: min(330px, 42vw);
+                top: 124px;
+            }
+        }
+        @media (max-width: 720px) {
+            #neural-activation-panel {
+                left: 8px;
+                top: auto;
+                bottom: 8px;
+                width: min(300px, calc(100vw - 16px));
+                opacity: 0.88;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+
+    const panel = document.createElement('aside');
+    panel.id = 'neural-activation-panel';
+    panel.setAttribute('aria-label', 'Neural-network activation');
+    const title = document.createElement('div');
+    title.id = 'neural-activation-title';
+    title.textContent = 'All visible vessels · mean activation';
+    const controlsHost = document.createElement('div');
+    controlsHost.id = 'activation-camera-controls';
+    panel.append(title, netCv, controlsHost);
+    document.body.appendChild(panel);
+
+    // Remove a now-empty legacy card without making assumptions about the
+    // rest of the page layout.
+    if (originalSection && originalSection !== panel) {
+        const meaningful = originalSection.querySelector('canvas, input, select, button, textarea');
+        if (!meaningful) originalSection.style.display = 'none';
+    } else if (originalParent && !originalParent.children.length) {
+        originalParent.style.display = 'none';
+    }
+}
+
 function setupUI() {
     buildPolicyEditor();
     syncPolicyEditorFromState();
     refreshPolicyConfigList();
     refreshChampionList();
-    $('training-mode').value = trainingModeValue(S.trainingEvolutionMode);
+
+    const populationInput = $('pop');
+    if (populationInput) {
+        const htmlPopulation = Number(populationInput.value);
+        S.nextPopSize = Number.isFinite(htmlPopulation)
+            ? Math.min(POP_LIMIT, Math.max(8, htmlPopulation))
+            : POP_DEFAULT;
+        S.popSize = S.nextPopSize;
+        $('pop-label').textContent = S.nextPopSize;
+    }
+
+    const mutationInput = $('mut');
+    if (mutationInput) {
+        const desiredMutations = Math.round(S.mutRate * GENOME_SIZE);
+        const maxMutations = Number(mutationInput.max) || desiredMutations;
+        mutationInput.value = String(Math.min(desiredMutations, maxMutations));
+        S.mutRate = Number(mutationInput.value) / GENOME_SIZE;
+        $('mut-label').textContent = `~${mutationInput.value} weights`;
+    }
+
+    setupTrainingModeControl();
+    setupVesselViewControl();
+    setupFitnessShapingDisclosure();
+    setupActivationPanel();
+    ensureTerrainTabs();
     document.querySelectorAll('.terrain-tab').forEach(btn => btn.addEventListener('click', () => switchTerrain(+btn.dataset.terrain)));
+
+    const cameraModeControl = $('camera-mode') || $('camera-follow');
+    if (cameraModeControl) {
+        cameraModeControl.value = S.cameraMode;
+        cameraModeControl.addEventListener('change', e => setCameraMode(e.target.value));
+    }
+    setupCameraBiasControl(cameraModeControl);
+    window.setMoonLanderCameraMode = setCameraMode;
+    window.setMoonLanderCameraLeaderBias = setCameraLeaderBias;
 
     $('btn-pause').addEventListener('click', () => {
         S.paused = !S.paused;
@@ -2064,7 +3420,7 @@ function setupUI() {
 
     $('btn-reset').addEventListener('click', () => {
         resetTrainingSession(true);
-        flashBanner('Training reset — fresh random brains');
+        flashBanner('Training reset — physics-informed seed plus diverse random brains');
     });
 
     $('speed').addEventListener('input', e => {
@@ -2091,7 +3447,10 @@ function setupUI() {
         flashBanner(`Training mode switched to <b>${e.target.selectedOptions[0].textContent}</b>`);
     });
 
-    $('sensors').addEventListener('change', e => { S.sensorMode = e.target.value; });
+    $('sensors').addEventListener('change', e => {
+        S.sensorMode = e.target.value;
+        drawNet(activationGroupForMode());
+    });
 
     $('eval-mode').addEventListener('change', e => {
         S.evalMode = e.target.checked;
@@ -2140,17 +3499,167 @@ function resize() {
     view.oy = (canvas.height - VIEW_H * view.s) / 2;
 }
 
+function smoothDampScalar(current, target, velocity, smoothTime, maxSpeed, deltaTime) {
+    smoothTime = Math.max(0.0001, smoothTime);
+    deltaTime = clamp(deltaTime, 1 / 240, 1 / 20);
+    const omega = 2 / smoothTime;
+    const x = omega * deltaTime;
+    const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+
+    let change = current - target;
+    const originalTarget = target;
+    const maxChange = maxSpeed * smoothTime;
+    change = clamp(change, -maxChange, maxChange);
+    target = current - change;
+
+    const temp = (velocity + omega * change) * deltaTime;
+    let nextVelocity = (velocity - omega * temp) * decay;
+    let output = target + (change + temp) * decay;
+
+    if ((originalTarget - current > 0) === (output > originalTarget)) {
+        output = originalTarget;
+        nextVelocity = 0;
+    }
+    return { value: output, velocity: nextVelocity };
+}
+
+function averageLanderKinematics() {
+    const agents = S.agents;
+    if (!agents.length) return null;
+
+    let x = 0;
+    let y = 0;
+    let vx = 0;
+    let vy = 0;
+    for (const agent of agents) {
+        x += agent.x;
+        y += agent.y;
+        vx += agent.vx;
+        vy += agent.vy;
+    }
+
+    const invCount = 1 / agents.length;
+    const average = {
+        x: x * invCount,
+        y: y * invCount,
+        vx: vx * invCount,
+        vy: vy * invCount,
+    };
+
+    // The default camera still includes the population average, but strongly
+    // follows the strict leader: pads first, next-pad proximity second, travel third.
+    // A fixed blend avoids abrupt changes while making the strongest run more
+    // prominent than a pure arithmetic average would.
+    const lead = leaderForState(S);
+    if (!lead) return average;
+
+    return {
+        x: lerp(average.x, lead.x, S.cameraLeaderBias),
+        y: lerp(average.y, lead.y, S.cameraLeaderBias),
+        vx: lerp(average.vx, lead.vx, S.cameraLeaderBias),
+        vy: lerp(average.vy, lead.vy, S.cameraLeaderBias),
+    };
+}
+
+function cameraPredictedFocus(focus) {
+    if (!focus) return null;
+    return {
+        x: focus.x + clamp(focus.vx * CAMERA_LOOKAHEAD_X_TIME, -CAMERA_MAX_LOOKAHEAD_X, CAMERA_MAX_LOOKAHEAD_X),
+        y: focus.y + clamp(focus.vy * CAMERA_LOOKAHEAD_Y_TIME, -CAMERA_MAX_LOOKAHEAD_Y, CAMERA_MAX_LOOKAHEAD_Y),
+        vx: focus.vx,
+        vy: focus.vy,
+    };
+}
+
+function setCameraMode(mode) {
+    const normalized = mode === 'leader' ? 'leader' : 'average';
+    const control = document.getElementById('camera-mode') || document.getElementById('camera-follow');
+    if (control && control.value !== normalized) control.value = normalized;
+    if (normalized === S.cameraMode) {
+        syncCameraBiasControl();
+        return;
+    }
+    S.cameraMode = normalized;
+    S.cameraLeaderIdx = -1;
+    S.cameraSwitchStart = 0;
+    syncCameraBiasControl();
+}
+
 function cameraFor(agent) {
-    const x = clamp(agent.x - VIEW_W * 0.46, 0, Math.max(0, WORLD_W - VIEW_W));
-    const y = clamp(agent.y - VIEW_H * 0.52, 0, Math.max(0, WORLD_H - VIEW_H));
+    const now = performance.now() / 1000;
+    const dt = S.cameraLastTime ? clamp(now - S.cameraLastTime, 1 / 240, 1 / 20) : 1 / 60;
+    S.cameraLastTime = now;
+
+    let focus = null;
+    let smoothTime = CAMERA_AVERAGE_SMOOTH_TIME;
+    let horizontalAnchor = 0.5;
+
+    if (S.cameraMode === 'leader' && agent) {
+        focus = cameraPredictedFocus({ x: agent.x, y: agent.y, vx: agent.vx, vy: agent.vy });
+        smoothTime = CAMERA_LEADER_SMOOTH_TIME;
+        horizontalAnchor = 0.46;
+
+        if (S.cameraLeaderIdx !== agent.idx) {
+            S.cameraLeaderIdx = agent.idx;
+            S.cameraSwitchStart = now;
+            S.cameraSwitchFromX = S.cameraReady
+                ? S.cameraX + VIEW_W * horizontalAnchor
+                : focus.x;
+            S.cameraSwitchFromY = S.cameraReady
+                ? S.cameraY + VIEW_H * 0.52
+                : focus.y;
+        }
+
+        const transition = clamp((now - S.cameraSwitchStart) / CAMERA_LEADER_SWITCH_TIME, 0, 1);
+        if (transition < 1) {
+            const eased = transition * transition * transition * (transition * (transition * 6 - 15) + 10);
+            focus = {
+                x: lerp(S.cameraSwitchFromX, focus.x, eased),
+                y: lerp(S.cameraSwitchFromY, focus.y, eased),
+                vx: focus.vx,
+                vy: focus.vy,
+            };
+            // The target path is already eased. Keeping a short secondary
+            // damping time avoids the previous double-smoothing lag while
+            // retaining a very gentle leader hand-off.
+            smoothTime = CAMERA_LEADER_SWITCH_DAMP_TIME;
+        }
+    } else {
+        focus = cameraPredictedFocus(
+            averageLanderKinematics()
+            || (agent ? { x: agent.x, y: agent.y, vx: agent.vx, vy: agent.vy } : null),
+        );
+        S.cameraLeaderIdx = -1;
+    }
+
+    if (!focus) return { x: S.cameraX, y: S.cameraY };
+
+    const targetX = clamp(focus.x - VIEW_W * horizontalAnchor, 0, Math.max(0, WORLD_W - VIEW_W));
+    const targetY = clamp(focus.y - VIEW_H * 0.52, 0, Math.max(0, WORLD_H - VIEW_H));
+
     if (!S.cameraReady) {
-        S.cameraX = x;
-        S.cameraY = y;
+        S.cameraX = targetX;
+        S.cameraY = targetY;
+        S.cameraVX = 0;
+        S.cameraVY = 0;
         S.cameraReady = true;
     } else {
-        S.cameraX += (x - S.cameraX) * CAMERA_LERP;
-        S.cameraY += (y - S.cameraY) * CAMERA_LERP;
+        // Responsiveness increases only when the camera has fallen visibly
+        // behind. Small movements retain the configured soft damping, while
+        // large target gaps are closed quickly without snapping.
+        const cameraError = Math.hypot(targetX - S.cameraX, targetY - S.cameraY);
+        const catchupRatio = clamp(cameraError / CAMERA_CATCHUP_DISTANCE, 0, 1);
+        const catchupFactor = lerp(1, CAMERA_CATCHUP_MIN_FACTOR, catchupRatio);
+        const responsiveSmoothTime = smoothTime * catchupFactor;
+
+        const sx = smoothDampScalar(S.cameraX, targetX, S.cameraVX, responsiveSmoothTime, CAMERA_MAX_SPEED, dt);
+        const sy = smoothDampScalar(S.cameraY, targetY, S.cameraVY, responsiveSmoothTime, CAMERA_MAX_SPEED, dt);
+        S.cameraX = sx.value;
+        S.cameraY = sy.value;
+        S.cameraVX = sx.velocity;
+        S.cameraVY = sy.velocity;
     }
+
     return { x: S.cameraX, y: S.cameraY };
 }
 
@@ -2308,7 +3817,7 @@ function drawLander(agent, alpha, highlight) {
     ctx.ellipse(0, 23, 23, 6, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    if (agent.cmdMain) {
+    if (agent.actualMain > 0) {
         ctx.fillStyle = 'rgba(255, 184, 90, 0.18)';
         ctx.beginPath();
         ctx.moveTo(-11, 10);
@@ -2325,9 +3834,9 @@ function drawLander(agent, alpha, highlight) {
         ctx.fill();
     }
 
-    if (agent.cmdStrafe) {
+    if (agent.actualStrafe) {
         ctx.fillStyle = 'rgba(255, 184, 90, 0.15)';
-        const dir = agent.cmdStrafe > 0 ? -1 : 1;
+        const dir = agent.actualStrafe > 0 ? -1 : 1;
         ctx.beginPath();
         ctx.moveTo(dir * 16, -4);
         ctx.quadraticCurveTo(dir * (23 + flamePulse * 6), 0, dir * 16, 4);
@@ -2335,9 +3844,9 @@ function drawLander(agent, alpha, highlight) {
         ctx.fill();
     }
 
-    if (agent.cmdTurn) {
+    if (agent.actualTurn) {
         ctx.fillStyle = 'rgba(255, 184, 90, 0.13)';
-        const dir = agent.cmdTurn > 0 ? -1 : 1;
+        const dir = agent.actualTurn > 0 ? -1 : 1;
         ctx.beginPath();
         ctx.moveTo(dir * 13, -15);
         ctx.quadraticCurveTo(dir * (19 + flamePulse * 4), -9, dir * 13, -3);
@@ -2374,16 +3883,19 @@ function drawLander(agent, alpha, highlight) {
     ctx.strokeStyle = highlight ? 'rgba(235, 242, 255, 0.95)' : 'rgba(173, 184, 202, 0.88)';
     ctx.lineWidth = 1.2;
     ctx.beginPath();
+    // The physical contact points and the rendered foot centres now match.
+    // Wider feet improve visual stability and make the support rod terminate
+    // exactly at the middle of each landing foot.
     ctx.moveTo(-9, 9);
-    ctx.lineTo(-17, 18);
-    ctx.lineTo(-22, 22);
+    ctx.lineTo(-18, 18);
+    ctx.lineTo(-LANDER_HALF_W, LANDER_FEET_Y);
     ctx.moveTo(9, 9);
-    ctx.lineTo(17, 18);
-    ctx.lineTo(22, 22);
-    ctx.moveTo(-24, 22);
-    ctx.lineTo(-11, 22);
-    ctx.moveTo(24, 22);
-    ctx.lineTo(11, 22);
+    ctx.lineTo(18, 18);
+    ctx.lineTo(LANDER_HALF_W, LANDER_FEET_Y);
+    ctx.moveTo(-LANDER_HALF_W - 8, LANDER_FEET_Y);
+    ctx.lineTo(-LANDER_HALF_W + 8, LANDER_FEET_Y);
+    ctx.moveTo(LANDER_HALF_W - 8, LANDER_FEET_Y);
+    ctx.lineTo(LANDER_HALF_W + 8, LANDER_FEET_Y);
     ctx.stroke();
 
     ctx.strokeStyle = 'rgba(98, 109, 136, 0.95)';
@@ -2420,12 +3932,32 @@ function drawLander(agent, alpha, highlight) {
     ctx.arc(11, 6, 1.1, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+
+    // Keep the landing count upright and readable regardless of craft angle.
+    ctx.save();
+    const badgeAlpha = highlight ? 0.96 : Math.max(0.48, Math.min(0.72, alpha * 3.2));
+    ctx.globalAlpha *= badgeAlpha;
+    ctx.font = '600 10px Bahnschrift, Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const badgeText = String(agent.landings);
+    const badgeWidth = Math.max(16, ctx.measureText(badgeText).width + 9);
+    const badgeY = agent.y - 49;
+    ctx.fillStyle = highlight ? 'rgba(12, 20, 32, 0.90)' : 'rgba(10, 16, 26, 0.72)';
+    ctx.beginPath();
+    ctx.roundRect(agent.x - badgeWidth / 2, badgeY - 7, badgeWidth, 14, 5);
+    ctx.fill();
+    ctx.strokeStyle = highlight ? 'rgba(154, 214, 255, 0.92)' : 'rgba(170, 184, 207, 0.48)';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ctx.fillStyle = highlight ? '#eef7ff' : 'rgba(228, 236, 248, 0.92)';
+    ctx.fillText(badgeText, agent.x, badgeY + 0.4);
+    ctx.restore();
 }
 
 function drawOverlay(lead) {
     const template = S.template;
     const terrain = TERRAIN_DEFS[S.terrainIdx];
-    const padsLeft = lead ? lead.template.pads.length - lead.landings : 0;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = 'rgba(8, 11, 18, 0.72)';
     ctx.fillRect(18, 18, 360, 96);
@@ -2436,7 +3968,7 @@ function drawOverlay(lead) {
     ctx.fillText(`${terrain.name} · seed ${template.seed >>> 0} · ${algorithmLabel(S.trainingEvolutionMode)}`, 30, 42);
     ctx.font = '12px Bahnschrift, Segoe UI, sans-serif';
     ctx.fillStyle = '#93a1b8';
-    ctx.fillText(`leader score ${lead ? lead.score : 0} · pads ${lead ? lead.landings : 0}/${lead ? lead.template.pads.length : 0} · pads left ${padsLeft}`, 30, 64);
+    ctx.fillText(`leader pads ${lead ? lead.landings : 0}/${lead ? lead.template.pads.length : 0} · next ${lead ? Math.round(distanceToNextPad(lead)) : 0}px · travel ${lead ? Math.round(lead.distanceCovered) : 0}px`, 30, 64);
     ctx.fillText(`fuel ${lead ? Math.round(lead.fuel / FUEL_MAX * 100) : 0}% · oxygen ${lead ? Math.round(lead.oxygen / OXYGEN_MAX * 100) : 0}%`, 30, 84);
     ctx.fillText(`clearance ${lead ? Math.round(lead.altitude) : 0}px · rays ${RAY_MAX}px · ${S.policyLabel}`, 30, 104);
 }
@@ -2451,14 +3983,11 @@ function render() {
     drawTerrain(S.template, cam, lead);
     drawTrail(lead);
 
-    const ghosts = S.sensorMode === 'all'
-        ? S.agents.filter(agent => agent.alive && agent !== lead)
-        : S.sensorMode === 'ghosts'
-            ? [...S.agents].filter(agent => agent.alive && agent !== lead).sort((a, b) => b.fitness - a.fitness).slice(0, TOP_GHOSTS)
-            : [];
+    const visibleGroup = activationGroupForMode(lead);
+    const ghosts = visibleGroup.filter(agent => agent !== lead);
 
     for (let i = ghosts.length - 1; i >= 0; i--) {
-        drawLander(ghosts[i], 0.17, false);
+        drawLander(ghosts[i], S.sensorMode === 'all' ? 0.13 : 0.19, false);
     }
 
     if (S.sensorMode !== 'off') drawSensors(lead, 0.28);
@@ -2505,7 +4034,7 @@ function frame() {
     }
     render();
     frameCount++;
-    if (frameCount % 6 === 0) drawNet(leader());
+    if (frameCount % 6 === 0) drawNet(activationGroupForMode());
     if (frameCount % 10 === 0) updateStats();
     const now = performance.now();
     if (now - rateTimer >= 1000) {
@@ -2518,8 +4047,9 @@ function frame() {
 
 S.policyLibrary = loadPolicyLibrary();
 S.championLibrary = loadChampionLibrary();
-const rememberedMode = S.policyLibrary.Baseline?.mode;
-if (rememberedMode) S.trainingEvolutionMode = normalizeTrainingMode(rememberedMode);
+// Start with the balanced evolutionary strategy that reliably learns
+// controlled flight. The survival variant remains available as an opt-in.
+S.trainingEvolutionMode = 'classic';
 applyPolicyConfig(S.policyLibrary.Baseline?.config || POLICY_DEFAULTS, 'Baseline');
 setupUI();
 resize();
