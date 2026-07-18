@@ -182,6 +182,18 @@ document.addEventListener('DOMContentLoaded', function() {
             type: "iframe"
         },
 
+        {
+            id: "chess_neuro_evolution",
+            title: "Chess Neuroevolution",
+            description: "A population of neural-network chess players evolves through elitism, crossover and mutation — no backpropagation. Watch the champion play live while fitness, game outcomes and brain activations update each generation.",
+            thumbnail: "../vibe-code/simulations/chess_neuro_evolution/thumbnail.png",
+            category: "simulations",
+            tags: ["chess", "neuroevolution", "neural network", "evolution", "genetic algorithm", "machine learning", "javascript"],
+            date: "2026-07-18",
+            path: "simulations/chess_neuro_evolution/index.html",
+            type: "iframe"
+        },
+
 
 
     ];
