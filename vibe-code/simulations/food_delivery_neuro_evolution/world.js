@@ -26,11 +26,13 @@ const OFFROUTE_TICKS = 10;             // NN ticks (0.5 s) before a replan
 const REPLAN_COOLDOWN = 2;
 const MISS_DIST = 130;                 // replanning this close to the target door
                                        // counts as a MISSED delivery attempt
-// Carrying-leg progress ramp: every px of NEW leg-best (lowest-ever) remaining
-// route distance pays FIT.CARRY, capped per leg. A potential function over
-// "closest the food has ever been to the door" - replans, loops and
-// re-driving can never pay the same px twice.
-const CARRY_PAY_CAP = 700;             // px of paid progress per carrying leg
+// Leg progress ramp: every px of NEW leg-best (lowest-ever) remaining route
+// distance pays FIT.PROGRESS, capped per leg. A potential function over
+// "closest the car has ever been to its current door" - replans, loops and
+// re-driving can never pay the same px twice. Pays on EVERY leg: when it was
+// carrying-only, the empty leg after a delivery was economically dead and
+// cars parked there forever - the "one delivery wall".
+const RAMP_PAY_CAP = 700;              // px of paid progress per leg
 const N_PEDS = 16, PED_SPEED = 20, PED_R = 4;
 
 function createWorld(town, jobs) {
@@ -75,8 +77,9 @@ function _newCar(idx, genome) {
         progressTimer: 0, lastProgress: 0, sinceProgress: 0,
         coverageBase: 0, legCoverage: 0, legMisses: 0, lastFollow: null,
         approachBase: 0, legApproachMax: 0, _minTD: Infinity, _minTDv: 0, legStartDist: 0,
-        bestRemain: Infinity, legCarryPaid: 0,
-        m: { deliveries: 0, pickups: 0, pickupEarned: 0, carryProgress: 0, coverage: 0, approach: 0, distance: 0, carColl: 0, carCollFault: 0, pedColl: 0, crash: 0, wrongSideSec: 0, redLightRuns: 0, replans: 0, misses: 0, repeatMisses: 0 }
+        bestRemain: Infinity, legRampPaid: 0,
+        _frontCarPx: SENSOR_RANGE, _frontPedPx: SENSOR_RANGE,
+        m: { deliveries: 0, pickups: 0, pickupEarned: 0, legProgress: 0, coverage: 0, approach: 0, distance: 0, carColl: 0, carCollFault: 0, pedColl: 0, crash: 0, wrongSideSec: 0, redLightRuns: 0, replans: 0, misses: 0, repeatMisses: 0 }
     };
 }
 
@@ -215,10 +218,9 @@ function startEpisode(world, genomes, phase, episodeIdx, epSeed) {
             _retire(car, 'stuck');
         }
         car.legStartDist = car.route ? car.route.total : 0;
-        if (carrySpawn && car.route) {
-            car.bestRemain = car.route.total;   // arm the carry progress ramp
-            car.legCarryPaid = 0;
-        }
+        // Arm the progress ramp for the first leg - every leg pays it.
+        car.bestRemain = car.route ? car.route.total : Infinity;
+        car.legRampPaid = 0;
         world.cars.push(car);
     }
     _spawnPeds(world);
@@ -462,53 +464,65 @@ const _rayRes = { wall: 0, car: 0, person: 0 };
 
 function computeInputs(world, car) {
     const inp = car.inp;
+    let fCar = SENSOR_RANGE, fPed = SENSOR_RANGE;
     for (let r = 0; r < N_RAYS; r++) {
         _rayRes.wall = SENSOR_RANGE; _rayRes.car = SENSOR_RANGE;
         _rayRes.person = SENSOR_RANGE;
         _castRay(world, car, car.x, car.y, car.theta + r * (2 * Math.PI / N_RAYS), _rayRes);
-        inp[r] = _rayRes.wall / SENSOR_RANGE;
-        // Ghost episodes: the car radar reads all-clear - other cars neither
-        // block rays nor collide, so the net drives as if the roads were empty.
-        inp[14 + r] = world.carContact ? _rayRes.car / SENSOR_RANGE : 1;
-        inp[28 + r] = _rayRes.person / SENSOR_RANGE;
+        // ONE type-blind channel per ray (v5): every obstacle kind is equally
+        // fatal, so the net just sees the distance to the nearest object of
+        // any kind. Ghost episodes leave other cars out entirely (invisible
+        // AND intangible - the net drives as if the roads were empty).
+        const carD = world.carContact ? _rayRes.car : SENSOR_RANGE;
+        inp[r] = Math.min(_rayRes.wall, carD, _rayRes.person) / SENSOR_RANGE;
+        // The progress watchdog still needs to know whether the car is held
+        // up by TRAFFIC (queues/yielding pause the timer) rather than by a
+        // wall (genuinely stuck - times out), so the per-category distances
+        // of the three forward rays are kept internally, off the NN inputs.
+        if (r === 0 || r === 1 || r === N_RAYS - 1) {
+            if (carD < fCar) fCar = carD;
+            if (_rayRes.person < fPed) fPed = _rayRes.person;
+        }
     }
-    inp[42] = car.v / CAR_MAXV;
+    car._frontCarPx = fCar;
+    car._frontPedPx = fPed;
+    inp[14] = car.v / CAR_MAXV;
     const f = followRoute(car.route, car);
     car.lastFollow = f;
-    inp[43] = Math.sin(f.headingErr);
-    inp[44] = Math.cos(f.headingErr);
-    inp[45] = clamp(f.crossTrack / 68, -1, 1);
-    inp[46] = clamp(f.wpDist / 300, 0, 1);
-    inp[47] = -f.turn1 / Math.PI;         // + = left turn ahead
-    inp[48] = -f.turn2 / Math.PI;
-    inp[49] = f.remainFrac;
-    inp[50] = car.carrying ? 1 : 0;
+    inp[15] = Math.sin(f.headingErr);
+    inp[16] = Math.cos(f.headingErr);
+    inp[17] = clamp(f.crossTrack / 68, -1, 1);
+    inp[18] = clamp(f.wpDist / 300, 0, 1);
+    inp[19] = -f.turn1 / Math.PI;         // + = left turn ahead
+    inp[20] = -f.turn2 / Math.PI;
+    inp[21] = f.remainFrac;
+    inp[22] = car.carrying ? 1 : 0;
     const light = routeLightAhead(world.town, car.route, f.routeDist, world.simTime, 200);
     if (light && light.state !== 'green') {
-        inp[51] = light.dist / 200;
-        inp[52] = light.state === 'red' ? 1 : 0.5;
+        inp[23] = light.dist / 200;
+        inp[24] = light.state === 'red' ? 1 : 0.5;
     } else {
-        inp[51] = 1;
-        inp[52] = 0;
+        inp[23] = 1;
+        inp[24] = 0;
     }
     // Lawfully holding at a red must not look like stagnation: reds last up
     // to 10s and running them is fatal, so the progress watchdog pauses while
     // the car waits near a non-green light (it resumes every green phase, so
     // true stagnators still time out).
     car._lightWait = !!(light && light.state !== 'green' && light.dist < 90);
-    inp[53] = car.x / world.town.W;
-    inp[54] = car.y / world.town.H;
-    inp[55] = Math.sin(car.theta);
-    inp[56] = Math.cos(car.theta);
-    inp[57] = car.steer;
-    inp[58] = car.throttle;
+    inp[25] = car.x / world.town.W;
+    inp[26] = car.y / world.town.H;
+    inp[27] = Math.sin(car.theta);
+    inp[28] = Math.cos(car.theta);
+    inp[29] = car.steer;
+    inp[30] = car.throttle;
     const lane = lanePosition(world.town, car.x, car.y, Math.cos(car.theta), Math.sin(car.theta));
-    inp[59] = lane.lane;
+    inp[31] = lane.lane;
     car._lane = lane;
     // Dwell progress: rises 0->1 while a pickup/delivery registers, snaps
     // back to 0 the moment the job advances - a direct "stop is done, GO"
     // signal the net can learn to release the brake on.
-    inp[60] = clamp(car.dwell / ARRIVE_DWELL, 0, 1);
+    inp[32] = clamp(car.dwell / ARRIVE_DWELL, 0, 1);
     return f;
 }
 
@@ -598,24 +612,32 @@ function _advanceJob(world, car) {
         // The precomputed job route starts exactly at the pickup door lane.
         _setRoute(car, car.job.route);
         car.legStartDist = car.route.total;
-        car.bestRemain = car.route.total;   // arm the carry-leg progress ramp
-        car.legCarryPaid = 0;
+        car.bestRemain = car.route.total;   // re-arm the progress ramp
+        car.legRampPaid = 0;
     } else {
         car.m.deliveries++;
         car.carrying = false;
         car.curPickupEarned = 0;
-        car.bestRemain = Infinity;
-        car.legCarryPaid = 0;
         car.jobsDone++;
         // The home's stored lane point (with edge id) is where the car is now.
         const homeLane = world.town.buildings[car.job.homeIdx].lane;
-        const nextJob = _jobFor(world, car.idx, car.jobsDone);
+        // Curriculum phases keep CHAIN legs short too: the next restaurant is
+        // the nearest one ahead, like the spawn assignment. Rotation-assigned
+        // next jobs sat 700-950px across town - a difficulty cliff right
+        // after a delivery; probes showed cars driving 1+ leg-lengths toward
+        // them and dying or expiring, so pickups never happened ("1 delivery
+        // wall"). Phase 2 keeps the full rotation.
+        const nextJob = (world.phase <= 1
+            ? _jobForNearest(world, { x: homeLane.x, y: homeLane.y, dirX: Math.cos(car.theta), dirY: Math.sin(car.theta) }, 'restIdx')
+            : null) || _jobFor(world, car.idx, car.jobsDone);
         car.job = nextJob;
         car.leg = 'toPickup';
         const route = buildRoute(world.town, homeLane, world.town.buildings[nextJob.restIdx].lane);
         if (route) {
             _setRoute(car, route);
             car.legStartDist = route.total;
+            car.bestRemain = route.total;   // re-arm the progress ramp
+            car.legRampPaid = 0;
         } else _retire(car, 'stuck');
     }
     car.dwell = 0;
@@ -761,9 +783,7 @@ function stepWorld(world) {
             car.sinceProgress = 0;
         } else {
             car.sinceProgress += dt;
-            const frontCarPx = Math.min(car.inp[27], car.inp[14], car.inp[15]) * SENSOR_RANGE;
-            const frontPedPx = Math.min(car.inp[41], car.inp[28], car.inp[29]) * SENSOR_RANGE;
-            const held = (frontCarPx < 34 || frontPedPx < 40 || car._lightWait) &&
+            const held = (car._frontCarPx < 34 || car._frontPedPx < 40 || car._lightWait) &&
                 Math.abs(car.v) < 30;
             if (!held) car.progressTimer += dt;
             if (car.progressTimer > NOPROGRESS_TIMEOUT || car.sinceProgress > NOPROGRESS_ABS) {
@@ -771,19 +791,19 @@ function stepWorld(world) {
             }
         }
 
-        // Carrying-leg progress ramp: pay for every px the food gets CLOSER
-        // to the door than it has ever been this leg (leg-best remaining
-        // route distance). This is the dense ramp between the pickup and the
-        // delivery bonus - without it the delivery leg paid ~250 at the very
-        // door and nothing on the way, an order of magnitude below run-to-run
-        // traffic noise, and the frontier sat at kamikaze couriers. A replan
+        // Leg progress ramp: pay for every px the car gets CLOSER to its
+        // current door than it has ever been this leg (leg-best remaining
+        // route distance). The dense gradient toward pickups AND deliveries -
+        // door-side shaping alone (~250 approach) sat an order of magnitude
+        // below run-to-run traffic noise and the frontier stalled. A replan
         // onto a longer loop pays nothing until the old best is beaten, so
-        // orbiting can't farm it.
-        if (car.carrying && car.route) {
+        // orbiting can't farm it, and a new leg only starts via a registered
+        // standstill, so leg-cycling can't either.
+        if (car.route) {
             const remain = Math.max(0, car.route.total - car.maxRouteDist);
             if (remain < car.bestRemain) {
-                const gain = Math.min(car.bestRemain - remain, CARRY_PAY_CAP - car.legCarryPaid);
-                if (gain > 0) { car.legCarryPaid += gain; car.m.carryProgress += gain; }
+                const gain = Math.min(car.bestRemain - remain, RAMP_PAY_CAP - car.legRampPaid);
+                if (gain > 0) { car.legRampPaid += gain; car.m.legProgress += gain; }
                 car.bestRemain = remain;
             }
         }

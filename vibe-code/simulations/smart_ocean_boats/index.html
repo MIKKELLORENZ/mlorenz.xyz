@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Ocean Boats — Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Smart Ocean Boats</h1>
+            <span class="brand-sub">hydrofoil couriers &amp; hunters · no gradients</span>
+        </div>
+        <div id="top-stats">
+            <span class="tstat">gen <b id="stat-gen">1</b></span>
+            <span class="tstat badge" id="stat-stage">stage 1 · navigate</span>
+            <span class="tstat">best <b id="stat-best">–</b></span>
+            <span class="tstat" title="best / mean arrivals last generation">arrivals <b id="stat-arr">–</b></span>
+            <span class="tstat">wind <b id="stat-wind">–</b></span>
+        </div>
+        <div id="top-actions">
+            <div id="speed-group" aria-label="Simulation speed"></div>
+            <button id="btn-pause" class="btn primary">Pause</button>
+        </div>
+    </header>
+
+    <main id="layout">
+        <aside id="panel-left">
+            <section class="card">
+                <h2>Map</h2>
+                <div id="map-buttons"></div>
+                <p class="hint" id="map-desc"></p>
+            </section>
+
+            <section class="card">
+                <h2>Training stages</h2>
+                <label class="check-row" title="Boats can collide with each other from generation 1">
+                    <input type="checkbox" id="chk-collide-start">
+                    <span>Ship collisions from the start</span>
+                </label>
+                <label class="slider-row">
+                    <span>…otherwise enable at gen <b id="lb-collide-gen">30</b></span>
+                    <input type="range" id="sl-collide-gen" min="0" max="200" value="30" step="5">
+                </label>
+                <label class="slider-row" title="Or transition when the population's mean arrivals per episode crosses this threshold — whichever comes first">
+                    <span>…or when mean arrivals ≥ <b id="lb-collide-thr">2.0</b></span>
+                    <input type="range" id="sl-collide-thr" min="0" max="60" value="20" step="1">
+                </label>
+                <label class="check-row" title="Stage 3: boats grow an auto-firing bow gun and some missions become hunt-and-destroy">
+                    <input type="checkbox" id="chk-combat">
+                    <span>Enable combat (stage 3)</span>
+                </label>
+                <label class="slider-row">
+                    <span>Combat from gen <b id="lb-combat-gen">80</b></span>
+                    <input type="range" id="sl-combat-gen" min="0" max="400" value="80" step="10">
+                </label>
+            </section>
+
+            <section class="card">
+                <h2>Evolution</h2>
+                <label class="slider-row">
+                    <span>Population <b id="lb-pop">48</b> <i class="hint">on restart</i></span>
+                    <input type="range" id="sl-pop" min="16" max="112" value="48" step="8">
+                </label>
+                <label class="slider-row" title="Each boat starts with this much time on its own clock; every reached location adds +60 s. The episode ends when every clock has run out.">
+                    <span>Start time budget <b id="lb-episode">110 s</b> <i class="hint">+60 s / arrival</i></span>
+                    <input type="range" id="sl-episode" min="40" max="180" value="110" step="5">
+                </label>
+                <label class="slider-row" title="The reigning champion keeps an untouched seat for this many generations even when beaten — the boat that beat it becomes an elite alongside it. Only one boat holds grace at a time. 0 = off.">
+                    <span>Champion grace <b id="lb-grace">3 gens</b></span>
+                    <input type="range" id="sl-grace" min="0" max="10" value="3" step="1">
+                </label>
+                <label class="slider-row">
+                    <span>Mutation rate <b id="lb-mutrate">10%</b></span>
+                    <input type="range" id="sl-mutrate" min="1" max="30" value="10" step="1">
+                </label>
+                <label class="slider-row">
+                    <span>Mutation strength <b id="lb-mutsig">0.15</b></span>
+                    <input type="range" id="sl-mutsig" min="2" max="60" value="15" step="1">
+                </label>
+                <button id="btn-restart" class="btn danger wide">Restart evolution</button>
+            </section>
+
+            <section class="card">
+                <h2>View</h2>
+                <label class="check-row"><input type="checkbox" id="chk-sensors"><span>Sensor rays (best boat)</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-currents" checked><span>Current field</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-routes" checked><span>GPS route (best boat)</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-trails" checked><span>Wakes</span></label>
+                <label class="check-row" title="Gaussian noise on sensors and actuators — keep on if the brain should transfer to a real hull"><input type="checkbox" id="chk-noise" checked><span>Sim-to-real noise</span></label>
+            </section>
+
+            <section class="card">
+                <h2>Champion brain</h2>
+                <div class="btn-row">
+                    <button id="btn-save" class="btn">Save</button>
+                    <button id="btn-load" class="btn">Load</button>
+                    <button id="btn-export" class="btn">Export .json</button>
+                </div>
+                <input type="file" id="file-import" accept=".json" style="display:none">
+                <button id="btn-import" class="btn wide">Import .json</button>
+                <p class="hint">Export gives you the raw weight matrices — same 47-in / 5-out contract a real boat controller would use.</p>
+            </section>
+        </aside>
+
+        <div id="canvas-wrap">
+            <canvas id="sea"></canvas>
+            <div id="hud"></div>
+        </div>
+
+        <aside id="panel-right">
+            <section class="card">
+                <h2>Fitness</h2>
+                <canvas id="chart" width="280" height="130"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-best"></i>best</span>
+                    <span><i class="sw sw-avg"></i>mean</span>
+                </div>
+            </section>
+            <section class="card">
+                <h2>Episode</h2>
+                <div class="kv"><span>time</span><b id="ep-time">0.0 s</b></div>
+                <div class="kv"><span>leader clock</span><b id="ep-clock">–</b></div>
+                <div class="kv"><span>leader arrivals</span><b id="ep-arr">0</b></div>
+                <div class="kv"><span>leader speed</span><b id="ep-speed">0.0 m/s</b></div>
+                <div class="kv"><span>leader state</span><b id="ep-state">–</b></div>
+                <div class="kv"><span>current</span><b id="ep-current">–</b></div>
+            </section>
+            <section class="card">
+                <h2>Log</h2>
+                <div id="log"></div>
+            </section>
+        </aside>
+    </main>
+</div>
+
+<script src="nn.js"></script>
+<script src="maps.js"></script>
+<script src="route.js"></script>
+<script src="boat.js"></script>
+<script src="world.js"></script>
+<script src="evolution.js"></script>
+<script src="ui.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

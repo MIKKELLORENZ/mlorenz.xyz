@@ -7,7 +7,7 @@
 
     const SPEED_STOPS = [0.5, 1, 2, 4, 8, 16, Infinity];
     const SPEED_LABELS = ['0.5×', '1×', '2×', '4×', '8×', '16×', 'Max'];
-    const SAVE_KEY = 'food_delivery_ne_v4';   // arch v4: third hidden layer
+    const SAVE_KEY = 'food_delivery_ne_v5';   // arch v5: single type-blind ray channel
 
     const S = {
         town: null, jobs: null, world: null, ev: null, staticCanvas: null,
@@ -262,15 +262,27 @@
         reader.readAsText(file);
     }
 
+    // Run seed from the UI field: a number gives a deterministic run, an
+    // empty/invalid field draws a random one (and shows what was drawn).
+    function readSeedFromUI() {
+        const el = $('inp-seed');
+        const v = el ? parseInt(el.value, 10) : NaN;
+        if (Number.isFinite(v)) return v >>> 0;
+        const drawn = (Math.random() * 0xffffffff) >>> 0;
+        if (el) el.value = String(drawn);
+        return drawn;
+    }
+
     function resetTraining() {
         if (!confirm('Reset all training? Champion, population and history are wiped.')) return;
         localStorage.removeItem(SAVE_KEY);
         const settings = readSettingsFromUI();
-        S.ev = new Evolution(settings, (Math.random() * 0xffffffff) >>> 0);
+        const seed = readSeedFromUI();
+        S.ev = new Evolution(settings, seed);
         S.ev.attach(S.world);
         S.ev.startGeneration();
         drawCharts();
-        toast('Training reset — fresh random population', 'info');
+        toast(`Training reset — fresh population, seed ${seed}`, 'info');
     }
 
     // -----------------------------------------------------------------------
@@ -363,20 +375,20 @@
             // non-braking one must drive through without delivering and get an
             // overshoot replan. nnForward is swapped and ALWAYS restored.
             {
-                const steerFrom = inp => clamp(2.6 * inp[43] - 0.035 * inp[45] * 68, -1, 1);
+                const steerFrom = inp => clamp(2.6 * inp[15] - 0.035 * inp[17] * 68, -1, 1);
                 const origForward = nnForward;
                 try {
-                    const redStop = inp => inp[52] >= 0.5 && inp[51] < 0.45;
+                    const redStop = inp => inp[24] >= 0.5 && inp[23] < 0.45;
                     let maxDwellInp = 0;
                     nnForward = (g, inp) => {
-                        maxDwellInp = Math.max(maxDwellInp, inp[60]);
-                        const vPx = inp[42] * 360;
+                        maxDwellInp = Math.max(maxDwellInp, inp[32]);
+                        const vPx = inp[14] * 360;
                         if (redStop(inp)) return [steerFrom(inp), vPx > 4 ? -0.6 : 0];
                         let throttle;
-                        if (inp[49] >= 0.12) {
-                            throttle = clamp(0.42 - Math.abs(inp[47]) * 0.9 - Math.abs(inp[43]) * 0.2, 0.15, 0.45);
+                        if (inp[21] >= 0.12) {
+                            throttle = clamp(0.42 - Math.abs(inp[19]) * 0.9 - Math.abs(inp[15]) * 0.2, 0.15, 0.45);
                         } else {
-                            const distPx = inp[46] * 300;
+                            const distPx = inp[18] * 300;
                             if (distPx > 60) throttle = 0.3;
                             else if (vPx > 30) throttle = -0.7;
                             else if (distPx > 14) throttle = 0.1;
@@ -404,8 +416,8 @@
                     tk = 0;
                     while (tk++ < 60 * 150 && carC.alive && carC.m.deliveries === 0) stepWorld(wC);
                     ok(spawnOk && carC.m.deliveries >= 1 && carC.m.pickups === 0 &&
-                        carC.m.carryProgress > 50,
-                        'phase 0 spawns carrying: delivery-only leg, carry ramp pays');
+                        carC.m.legProgress > 50,
+                        'phase 0 spawns carrying: delivery-only leg, progress ramp pays');
 
                     // Symmetric forfeiture: ANY death while carrying forfeits
                     // that pickup's credit (not just the parking timeout).
@@ -428,9 +440,15 @@
                     gB.x = gA.x + Math.cos(gA.theta) * 8;
                     gB.y = gA.y + Math.sin(gA.theta) * 8;
                     gB.theta = gA.theta;
-                    computeInputs(wGh, gA);
-                    const radarBlind = Array.from(gA.inp.slice(14, 28)).every(v => v === 1);
                     wGh.peds.length = 0;
+                    _rebuildDynGrid(wGh);   // rays read the dyn grid - refresh after staging
+                    computeInputs(wGh, gA);
+                    const ghostRay0 = gA.inp[0];
+                    wGh.carContact = true;         // same staging, contact on
+                    computeInputs(wGh, gA);
+                    const contactRay0 = gA.inp[0];
+                    wGh.carContact = false;
+                    const radarBlind = contactRay0 < 0.1 && ghostRay0 > contactRay0 + 0.05;
                     stepWorld(wGh);
                     startEpisode(wGh, [randomGenome(mulberry32(46))], 1, 0, 977);
                     ok(ghostOff && radarBlind && gA.alive && gB.alive && wGh.carContact === true,
@@ -477,8 +495,8 @@
                     // Fast drive-through: no arrival, replans back, counts a
                     // miss - and orbiting cannot farm coverage (capped at 1).
                     nnForward = (g, inp) => {
-                        if (redStop(inp)) return [steerFrom(inp), inp[42] * 360 > 4 ? -0.6 : 0];
-                        return [steerFrom(inp), clamp(0.3 - Math.abs(inp[47]) * 0.6 - Math.abs(inp[43]) * 0.2, 0.15, 0.22)];
+                        if (redStop(inp)) return [steerFrom(inp), inp[14] * 360 > 4 ? -0.6 : 0];
+                        return [steerFrom(inp), clamp(0.3 - Math.abs(inp[19]) * 0.6 - Math.abs(inp[15]) * 0.2, 0.15, 0.22)];
                     };
                     const wB = createWorld(tA, jobs);
                     startEpisode(wB, [randomGenome(mulberry32(42))], 1, 0, 977);
@@ -511,15 +529,15 @@
                     // Reverse recovery end-to-end: slow overshoot, backs up,
                     // still gets the pickup - zero misses, zero replans.
                     nnForward = (g, inp) => {
-                        if (inp[44] < -0.4) {
-                            const d = inp[46] * 300, v = inp[42] * 360;
+                        if (inp[16] < -0.4) {
+                            const d = inp[18] * 300, v = inp[14] * 360;
                             if (d > 30) return [0, -0.5];
                             return [0, v < -8 ? 0.3 : 0];
                         }
                         const steer = steerFrom(inp);
-                        if (redStop(inp)) return [steer, inp[42] * 360 > 4 ? -0.6 : 0];
-                        if (inp[49] < 0.3) return [steer, 0.12];
-                        return [steer, clamp(0.3 - Math.abs(inp[47]) * 0.8, 0.15, 0.2)];
+                        if (redStop(inp)) return [steer, inp[14] * 360 > 4 ? -0.6 : 0];
+                        if (inp[21] < 0.3) return [steer, 0.12];
+                        return [steer, clamp(0.3 - Math.abs(inp[19]) * 0.8, 0.15, 0.2)];
                     };
                     const wR = createWorld(tA, jobs);
                     startEpisode(wR, [randomGenome(mulberry32(43))], 1, 0, 977);
@@ -779,13 +797,17 @@
             S.ev = Evolution.fromJSON(saved.ev, (Math.random() * 0xffffffff) >>> 0);
             if (S.ev) {
                 S.speedStop = typeof saved.speedStop === 'number' ? saved.speedStop : 1;
+                if ($('inp-seed')) $('inp-seed').value = String(S.ev.runSeed);
                 toast(`Resumed training at generation ${S.ev.gen}`, 'info');
             }
         }
         if (!S.ev) {
-            S.townSeedBase = (Math.random() * 0xffffffff) >>> 0;
+            // Fresh install: the benchmark combo from the 2026-07 parameter
+            // sweep - town base 20260719 (its town #0) + run seed 7 reached
+            // 3 deliveries by ~gen 60 at the default 120s episodes.
+            S.townSeedBase = 20260719;
             buildTown(0);
-            S.ev = new Evolution({}, (Math.random() * 0xffffffff) >>> 0);
+            S.ev = new Evolution({}, readSeedFromUI());
         }
         // Debug helper: ?town=N previews layout variant N on a FRESH session
         // (fixed seed base; never clobbers a resumed save).

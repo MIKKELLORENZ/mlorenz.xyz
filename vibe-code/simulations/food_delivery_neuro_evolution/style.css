@@ -160,6 +160,17 @@ select {
 }
 
 .row { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+.row .btn { white-space: nowrap; }
+.row input[type="number"] {
+    width: 70px; min-width: 0;
+    background: var(--panel-solid);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 3px 6px;
+    font: inherit;
+    font-size: 12px;
+}
 
 .btn {
     background: rgba(154, 214, 255, 0.10);

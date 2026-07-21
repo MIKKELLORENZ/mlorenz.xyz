@@ -27,10 +27,13 @@ const GA_DEFAULTS = {
                              // 60-gen delivery-gens at grace 4: 24-38, at 10: 2-9
     stagnationAdapt: true,
     episodesPerGen: 2,
-    episodeLen: 90,          // seconds of sim time per episode. 60s cannot fit
-                             // pickup + a 500-650px delivery leg through 11s
-                             // reds: the oracle driver completes 1.2 deliveries
-                             // /episode at 60s vs 10.2 at 240s
+    episodeLen: 120,         // seconds of sim time per episode. The 2026-07
+                             // parameter sweep's single biggest lever: 90s
+                             // physically caps chains at ~2 deliveries, and
+                             // defaults+120s was the ONLY config to reach 3
+                             // (gen 60/78 on two of four seeds). 60s cannot
+                             // even fit pickup + one 500-650px delivery leg
+                             // through 11s reds.
     autoChangeEvery: 0,      // generations between town changes (0 = off)
     carContactEvery: 2,      // car-to-car contact in 1 of every N episode
                              // slots (slot 0 always has contact); the other
@@ -51,14 +54,14 @@ const FIT = {
     // reward cliff: probes showed populations pinned at drive-by coverage
     // for 40+ generations with zero deliveries.
     APPROACH: 250,
-    // CARRY: per px of leg-best remaining-distance reduction while HOLDING
-    // food (world.js caps paid progress at 700px/leg -> <=2800/leg). The
-    // dense ramp between pickup (2000) and delivery (10000): without it the
-    // whole delivery leg paid ~250 at the very door and nothing on the way -
-    // an order of magnitude below generation-to-generation traffic noise, so
-    // the reward cliff was invisible to selection and the frontier converged
-    // on fast pickup-grabbers that died mid-delivery.
-    CARRY: 4,
+    // PROGRESS: per px of leg-best remaining-distance reduction on EVERY leg
+    // (world.js caps paid progress at 700px/leg -> <=2800/leg). The dense
+    // ramp toward each door: door-side shaping alone (~250) sat an order of
+    // magnitude below generation-to-generation traffic noise, so the reward
+    // cliffs were invisible to selection. Originally carrying-only - that
+    // left the empty leg after a delivery economically dead, and probes
+    // showed every leader parking there forever (the "one delivery wall").
+    PROGRESS: 4,
     CRASH: 300, CARCOLL: 150, PED: 800, WRONGSIDE: 2, REDLIGHT: 400,
     // Missing a stop (replanned right at the door): the first attempt per leg
     // costs little - the learning frontier lives there, and lost time already
@@ -73,7 +76,7 @@ function episodeFitness(m) {
     // rung without letting statue lineages out-score honest driving.
     const f = m.deliveries * FIT.DELIVERY
         + (m.pickupEarned !== undefined ? m.pickupEarned : m.pickups) * FIT.PICKUP
-        + (m.carryProgress || 0) * FIT.CARRY
+        + (m.legProgress || 0) * FIT.PROGRESS
         + m.coverage * FIT.COVERAGE
         + (m.approach || 0) * FIT.APPROACH
         + m.distance * FIT.DIST
@@ -94,13 +97,13 @@ function createBootstrapGenome(rng) {
     const g = new Float64Array(NN_GENOME_LEN);
     const A = NN_ARCH;
     const passthrough = [
-        { h: 0, from: 43, w: 2.2 },   // sin(heading error)
-        { h: 1, from: 45, w: 2.2 },   // cross-track offset
-        { h: 2, from: 0, w: 2.2 },    // forward wall clearance
-        { h: 3, from: 44, w: 2.2 },   // cos(heading error)
-        { h: 4, from: 52, w: 2.2 },   // light state ahead
-        { h: 5, from: 51, w: 2.2 },   // distance to stop line
-        { h: 6, from: 60, w: 2.2 }    // dwell progress (registering a stop)
+        { h: 0, from: 15, w: 2.2 },   // sin(heading error)
+        { h: 1, from: 17, w: 2.2 },   // cross-track offset
+        { h: 2, from: 0, w: 2.2 },    // forward clearance (ray 0)
+        { h: 3, from: 16, w: 2.2 },   // cos(heading error)
+        { h: 4, from: 24, w: 2.2 },   // light state ahead
+        { h: 5, from: 23, w: 2.2 },   // distance to stop line
+        { h: 6, from: 32, w: 2.2 }    // dwell progress (registering a stop)
     ];
     for (const p of passthrough) {
         g[weightIndex(A, 1, p.from, p.h)] = p.w;
@@ -556,6 +559,7 @@ class Evolution {
         return {
             version: NN_VERSION, arch: NN_ARCH,
             gen: this.gen, phase: this.phase, stagnation: this.stagnation,
+            runSeed: this.runSeed,
             townCounter: this.townCounter,
             champion: this.champion ? serializeGenome(this.champion.genome, { fitness: this.champion.fitness, gen: this.champion.gen, idx: this.champion.idx }) : null,
             roster: this.eliteRoster.map(e => ({ g: Array.from(e.genome), fitness: e.fitness, age: e.age, gen: e.gen, idx: e.idx })),
@@ -568,7 +572,9 @@ class Evolution {
     static fromJSON(obj, runSeed) {
         if (!obj || obj.version !== NN_VERSION) return null;
         if (!Array.isArray(obj.arch) || obj.arch.join(',') !== NN_ARCH.join(',')) return null;
-        const ev = new Evolution(obj.settings || {}, runSeed);
+        // Saved runs keep their own seed so the scenario stream continues
+        // exactly across reloads; the caller's seed is only the fallback.
+        const ev = new Evolution(obj.settings || {}, obj.runSeed !== undefined ? obj.runSeed : runSeed);
         ev.gen = obj.gen || 1;
         ev.phase = obj.phase || 0;
         ev.stagnation = obj.stagnation || 0;

@@ -7,14 +7,17 @@
 // never arithmetic blends.
 'use strict';
 
-// 61 inputs: 14 rays x 3 categories (wall / car / person) + 19 scalars.
+// 33 inputs: 14 type-blind rays + 19 scalars.
 // Tree rays were removed in v2 (trees only stand on already-fatal grass, so
 // that channel was pure noise); v3 added the dwell-progress input so the net
 // can see a pickup/delivery registering and learn to pull away when done;
-// v4 added a third hidden layer (16 neurons) as a depth experiment.
-const NN_IN = 61;
+// v4 added a third hidden layer (16 neurons) as a depth experiment; v5
+// collapsed the three ray categories (wall / car / person) into ONE channel -
+// every obstacle is equally fatal, so each ray now just reports the distance
+// to the nearest object of any kind (28 fewer inputs, ~900 fewer genes).
+const NN_IN = 33;
 const NN_ARCH = [NN_IN, 32, 24, 16, 2];
-const NN_VERSION = 'food-delivery-ne-v4';
+const NN_VERSION = 'food-delivery-ne-v5';
 const GENE_CLAMP = 6;
 
 function genomeLength(arch) {

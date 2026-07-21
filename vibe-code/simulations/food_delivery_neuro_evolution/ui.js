@@ -170,23 +170,18 @@ function renderWorld(canvas, ctx, world, staticCanvas, opts) {
         ctx.globalAlpha = 1;
     }
 
-    // Sensor rays for the selected car.
+    // Sensor rays for the selected car - one type-blind channel per ray
+    // (v5): the net only knows "something is that close", not what it is.
     if (sel && sel.alive && opts.showSensors) {
         for (let r = 0; r < N_RAYS; r++) {
             const ang = sel.theta + r * (2 * Math.PI / N_RAYS);
-            const dists = {
-                wall: sel.inp[r] * SENSOR_RANGE, car: sel.inp[14 + r] * SENSOR_RANGE,
-                person: sel.inp[28 + r] * SENSOR_RANGE
-            };
-            let best = 'none', bd = SENSOR_RANGE - 0.5;
-            for (const k of ['wall', 'car', 'person']) {
-                if (dists[k] < bd) { bd = dists[k]; best = k; }
-            }
-            ctx.strokeStyle = best === 'none' ? 'rgba(255,255,255,0.10)' : RAY_COLORS[best];
-            ctx.lineWidth = best === 'none' ? 0.7 : 1.3;
+            const bd = sel.inp[r] * SENSOR_RANGE;
+            const hit = bd < SENSOR_RANGE - 0.5;
+            ctx.strokeStyle = hit ? RAY_COLORS.wall : 'rgba(255,255,255,0.10)';
+            ctx.lineWidth = hit ? 1.3 : 0.7;
             ctx.beginPath();
             ctx.moveTo(sel.x, sel.y);
-            ctx.lineTo(sel.x + Math.cos(ang) * bd, sel.y + Math.sin(ang) * bd);
+            ctx.lineTo(sel.x + Math.cos(ang) * Math.min(bd, SENSOR_RANGE), sel.y + Math.sin(ang) * Math.min(bd, SENSOR_RANGE));
             ctx.stroke();
         }
     }
@@ -324,15 +319,14 @@ function drawNNViz(canvas, record, genome) {
     }
     const inp = record[0], h1 = record[1], h2 = record[2], h3 = record[3], out = record[4];
 
-    // Input geometry: 3x14 sensor grid top-left, 18 scalar rows below.
+    // Input geometry: 1x14 type-blind sensor row top-left, 19 scalar rows below.
     const gridX = 30, gridY = 16, cellW = 6.6, cellH = 9;
-    const rowX = 12, rowY0 = gridY + 3 * cellH + 14, rowH = 11;
+    const rowX = 12, rowY0 = gridY + cellH + 14, rowH = 11;
     const inputPos = i => {
-        if (i < 42) {
-            const ch = Math.floor(i / 14), ray = i % 14;
-            return { x: gridX + ray * cellW + cellW / 2, y: gridY + ch * cellH + cellH / 2 };
+        if (i < 14) {
+            return { x: gridX + i * cellW + cellW / 2, y: gridY + cellH / 2 };
         }
-        const r = i - 42;
+        const r = i - 14;
         return { x: rowX + 52, y: rowY0 + r * rowH + rowH / 2 };
     };
     const h1X = W - 148, h2X = W - 110, h3X = W - 70, outX = W - 28;
@@ -381,28 +375,26 @@ function drawNNViz(canvas, record, genome) {
         }
     }
 
-    // Sensor grid cells (activation = proximity: 1 - distance).
-    const chLabels = ['W', 'C', 'P'];
+    // Sensor row cells (activation = proximity: 1 - distance). One type-blind
+    // channel per ray - the net can't tell walls, cars and people apart.
     ctx.font = '9px "Segoe UI", sans-serif';
-    for (let ch = 0; ch < 3; ch++) {
-        ctx.fillStyle = 'rgba(235,242,255,0.55)';
-        ctx.fillText(chLabels[ch], gridX - 12, gridY + ch * cellH + cellH - 2);
-        for (let r = 0; r < 14; r++) {
-            const v = 1 - inp[ch * 14 + r];      // closer = hotter
-            ctx.fillStyle = v > 0.02 ? actColor(v) : 'rgba(235,242,255,0.07)';
-            ctx.fillRect(gridX + r * cellW, gridY + ch * cellH, cellW - 1, cellH - 1);
-        }
+    ctx.fillStyle = 'rgba(235,242,255,0.55)';
+    ctx.fillText('◉', gridX - 12, gridY + cellH - 2);
+    for (let r = 0; r < 14; r++) {
+        const v = 1 - inp[r];                // closer = hotter
+        ctx.fillStyle = v > 0.02 ? actColor(v) : 'rgba(235,242,255,0.07)';
+        ctx.fillRect(gridX + r * cellW, gridY, cellW - 1, cellH - 1);
     }
     ctx.fillStyle = 'rgba(235,242,255,0.45)';
     ctx.fillText('sensors: rays 0-13 ↔', gridX, gridY - 4);
 
     // Scalar inputs.
     for (let r = 0; r < 19; r++) {
-        const v = inp[42 + r];
+        const v = inp[14 + r];
         ctx.fillStyle = 'rgba(235,242,255,0.5)';
         ctx.fillText(SCALAR_LABELS[r], rowX, rowY0 + r * rowH + 8);
         ctx.fillStyle = actColor(v);
-        const p = inputPos(42 + r);
+        const p = inputPos(14 + r);
         ctx.beginPath(); ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2); ctx.fill();
     }
 

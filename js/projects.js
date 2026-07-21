@@ -218,6 +218,18 @@ document.addEventListener('DOMContentLoaded', function() {
             type: "iframe"
         },
 
+        {
+            id: "smart_ocean_boats",
+            title: "Smart Ocean Boats",
+            description: "Real-scale hydrofoil boats evolve to chase an endless chain of GPS waypoints across three hand-crafted seas — countering wind, gyres and tidal currents, then learning to dodge (and in the combat stage, hunt) each other. Elites, crossover and champion grace, no backpropagation.",
+            thumbnail: "../vibe-code/simulations/smart_ocean_boats/thumbnail.png",
+            category: "simulations",
+            tags: ["boats", "hydrofoil", "neuroevolution", "neural network", "genetic algorithm", "gps navigation", "ocean currents", "machine learning", "javascript"],
+            date: "2026-07-21",
+            path: "simulations/smart_ocean_boats/index.html",
+            type: "iframe"
+        },
+
 
 
     ];
