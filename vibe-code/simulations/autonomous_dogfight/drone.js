@@ -23,6 +23,10 @@ class Drone {
         this.quaternion = new THREE.Quaternion();
         this.velocity = new THREE.Vector3(0, 0, 0);
         this.angularVelocity = new THREE.Vector3(0, 0, 0);
+        // Yaw-independent lean angles (see applyFlightControl) — use these
+        // for attitude, NOT rotation.x/z which flip when |yaw| > 90°
+        this.tiltX = 0;
+        this.tiltZ = 0;
         
         // Rotors
         this.rotorThrusts = [0, 0, 0, 0];
@@ -61,6 +65,13 @@ class Drone {
         this.projectiles = [];
         this.health = 100;
         this.isDestroyed = false;
+
+        // Event hooks (wired by the evolution sim for fitness accounting)
+        this.onDamaged = null;
+        this.onDestroyed = null;
+
+        // Remember spawn point for demo-mode auto reset
+        this.spawnPos = { x: position.x, y: position.y, z: position.z };
         
         // Detection
         this.detectedDrones = [];
@@ -139,32 +150,28 @@ class Drone {
         for (let i = 0; i < 4; i++) {
             const rotorGroup = new THREE.Group();
             
-            // Motor hub
+            // Motor hub (no shadows on small parts — population-scale perf)
             const centerGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.025, 12);
             const centerMaterial = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.6, roughness: 0.4 });
             const center = new THREE.Mesh(centerGeometry, centerMaterial);
-            center.castShadow = true;
             rotorGroup.add(center);
-            
+
             // X-blade (two perpendicular blades in a group)
             const bladeGeometry = new THREE.BoxGeometry(0.22, 0.008, 0.04);
             const bladeMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.2, roughness: 0.6 });
             const bladeGroup = new THREE.Group();
             const blade1 = new THREE.Mesh(bladeGeometry, bladeMaterial);
-            blade1.castShadow = true;
             bladeGroup.add(blade1);
             const blade2 = new THREE.Mesh(bladeGeometry, bladeMaterial);
             blade2.rotation.y = Math.PI / 2;
-            blade2.castShadow = true;
             bladeGroup.add(blade2);
             rotorGroup.add(bladeGroup);
-            
+
             // Motor guard ring
             const guardGeometry = new THREE.TorusGeometry(0.15, 0.008, 6, 20);
             const guardMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.3, roughness: 0.7 });
             const guard = new THREE.Mesh(guardGeometry, guardMaterial);
             guard.rotation.x = Math.PI / 2;
-            guard.castShadow = true;
             rotorGroup.add(guard);
             
             rotorGroup.position.set(rotorPositions[i].x, rotorPositions[i].y, rotorPositions[i].z);
@@ -173,7 +180,7 @@ class Drone {
                 mesh: rotorGroup,
                 blade: bladeGroup,
                 speed: 0,
-                direction: i % 2 === 0 ? 1 : -1
+                direction: (i === 0 || i === 3) ? 1 : -1 // diagonal spin pairs (X-quad)
             });
             
             this.mesh.add(rotorGroup);
@@ -195,9 +202,10 @@ class Drone {
         camDome.position.set(0, -0.06, -0.12);
         this.mesh.add(camDome);
         
-        // Status LEDs (front = team color, rear = white)
+        // Status LEDs (front = lineage color, rear = white)
         const ledGeo = new THREE.SphereGeometry(0.018, 6, 6);
-        const frontLedMat = new THREE.MeshBasicMaterial({ color: this.color });
+        this.frontLedMat = new THREE.MeshBasicMaterial({ color: this.color });
+        const frontLedMat = this.frontLedMat;
         const rearLedMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
         const ledPositions = [
             { x: -this.rotorDistance, z: -this.rotorDistance, mat: frontLedMat },
@@ -234,11 +242,9 @@ class Drone {
             this.mesh.add(leg);
         }
         
-        // Team-color glow light
-        const teamLight = new THREE.PointLight(this.color, 0.3, 3);
-        teamLight.position.set(0, -0.1, 0);
-        this.mesh.add(teamLight);
-        
+        // NOTE: no per-drone PointLight — a whole population of them would
+        // blow past WebGL's forward-renderer light limits.
+
         // Vision cone
         this.createVisionCone();
         
@@ -258,17 +264,18 @@ class Drone {
         const coneMaterial = new THREE.MeshBasicMaterial({
             color: this.color,
             transparent: true,
-            opacity: 0.2,
-            side: THREE.DoubleSide
+            opacity: 0.1,
+            side: THREE.DoubleSide,
+            depthWrite: false
         });
-        
+
         this.visionCone = new THREE.Mesh(coneGeometry, coneMaterial);
         this.mesh.add(this.visionCone);
-        
+
         const wireframeMaterial = new THREE.LineBasicMaterial({
             color: this.color,
             transparent: true,
-            opacity: 0.5
+            opacity: 0.25
         });
         
         this.visionConeWireframe = new THREE.LineSegments(
@@ -413,8 +420,7 @@ class Drone {
         if (!this.hasWeapon || this.weaponCooldown > 0 || this.crashed || this.isDestroyed) return false;
         
         const projectileGeometry = new THREE.SphereGeometry(0.07, 6, 6);
-        const projColor = this.id === 0 ? 0x44ff88 : 0xff44ff;
-        const projectileMaterial = new THREE.MeshBasicMaterial({ color: projColor });
+        const projectileMaterial = new THREE.MeshBasicMaterial({ color: this.color });
         const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
         
         // Direction: local -Z axis (same as vision cone direction)
@@ -439,10 +445,15 @@ class Drone {
         
         this.weaponCooldown = this.weaponCooldownTime;
         this.isShooting = true;
-        
-        // Improved muzzle flash – multi-layer with point light
-        this._createMuzzleFlash(barrelPosition);
-        
+
+        // Muzzle flash is wall-clock eye candy — skip it during fast-forward
+        // so hundreds of rAF animations don't pile up.
+        if (window.fxEnabled !== false) {
+            this._createMuzzleFlash(barrelPosition);
+        } else {
+            this.isShooting = false;
+        }
+
         return true;
     }
     
@@ -499,10 +510,10 @@ class Drone {
             for (const drone of otherDrones) {
                 if (drone.id === this.id || drone.isDestroyed) continue;
                 if (proj.mesh.position.distanceTo(drone.position) < 0.5) {
-                    drone.takeDamage(25, this.id);
+                    drone.takeDamage(34, this.id); // 3 hits = kill
                     this.scene.remove(proj.mesh);
                     this.projectiles.splice(i, 1);
-                    this.createHitEffect(proj.mesh.position.clone());
+                    if (window.fxEnabled !== false) this.createHitEffect(proj.mesh.position.clone());
                     break;
                 }
             }
@@ -551,30 +562,33 @@ class Drone {
         if (this.isDestroyed) return;
         this.health -= amount;
         this.shotBy = fromDroneId;
-        
-        this._drawHealthBar();
-        
-        const originalColor = this.body.material.color.clone();
-        this.body.material.color.set(0xff0000);
-        
-        if (this.health > 0) {
-            setTimeout(() => { this.body.material.color.copy(originalColor); }, 200);
-        } else {
-            this.destroy();
+
+        if (this.onDamaged) this.onDamaged(amount, fromDroneId);
+
+        if (window.fxEnabled !== false) {
+            this._drawHealthBar();
+            this.body.material.color.set(0xff0000);
+            if (this.health > 0) {
+                // restore to current lineage color (safe across generation recolors)
+                setTimeout(() => {
+                    if (!this.isDestroyed && !this.crashed) this.body.material.color.set(this.color);
+                }, 200);
+            }
         }
+        if (this.health <= 0) this.destroy();
     }
-    
+
     destroy() {
         if (this.isDestroyed) return;
         this.isDestroyed = true;
         this.crashed = true;
         this.body.material.color.set(0x000000);
-        this.createExplosionEffect();
-        console.log(`Drone ${this.id} was destroyed by Drone ${this.shotBy}`);
+        if (window.fxEnabled !== false) this.createExplosionEffect();
+        if (this.onDestroyed) this.onDestroyed(this.shotBy);
     }
     
     createExplosionEffect() {
-        const particleCount = 20;
+        const particleCount = window.fxEnabled !== false ? 20 : 8;
         const particles = [];
         
         for (let i = 0; i < particleCount; i++) {
@@ -627,24 +641,26 @@ class Drone {
     }
     
     // ─── Physics Update ──────────────────────────────────────────────
-    update(deltaTime) {
+    // renderTick: false during extra fast-forward ticks — physics advances
+    // but wall-clock visuals (trails, cone fades) only update once per frame.
+    update(deltaTime, renderTick = true) {
         if (this.isDestroyed || this.crashed) return;
-        
+
         this.timeRemainder += deltaTime;
         while (this.timeRemainder >= this.fixedTimestep) {
             this.fixedUpdate(this.fixedTimestep);
             this.timeRemainder -= this.fixedTimestep;
             this.subSteps++;
         }
-        
+
         this.mesh.position.copy(this.position);
         this.mesh.quaternion.copy(this.quaternion);
         this.externalForce.set(0, 0, 0);
-        
-        // Trail particles
-        this._updateTrailParticles(deltaTime);
-        
-        this.updateVisionCone();
+
+        if (renderTick) {
+            this._updateTrailParticles(deltaTime);
+            this.updateVisionCone();
+        }
     }
     
     fixedUpdate(deltaTime) {
@@ -668,11 +684,16 @@ class Drone {
             const pos = this.rotors[i].mesh.position;
             if (i === 0 || i === 2) torques.x -= thrust * this.rotorDistance;
             else torques.x += thrust * this.rotorDistance;
-            
+
             if (i === 0 || i === 1) torques.z -= thrust * this.rotorDistance;
             else torques.z += thrust * this.rotorDistance;
-            
-            if (i % 2 === 0) torques.y += thrust * 0.2;
+
+            // Reaction (yaw) torque: spin directions pair DIAGONALLY (0,3 vs
+            // 1,2 — standard X-quad). The old side-pairing (0,2 vs 1,3) made
+            // the mixer's diagonal yaw differential cancel to exactly zero
+            // yaw torque: the yaw command was connected to nothing, and no
+            // genome can learn to use a rudder that doesn't exist.
+            if (i === 0 || i === 3) torques.y += thrust * 0.2;
             else torques.y -= thrust * 0.2;
         }
         
@@ -700,16 +721,9 @@ class Drone {
         this.rotation.setFromQuaternion(this.quaternion);
         
         this.checkCollisions();
-        
-        if (this.hasWeapon && this.projectiles.length > 0) {
-            const otherDrones = [];
-            if (typeof window.drones !== 'undefined' && window.drones) {
-                for (let i = 0; i < window.drones.length; i++) {
-                    if (window.drones[i].id !== this.id && !window.drones[i].isDestroyed) otherDrones.push(window.drones[i]);
-                }
-            }
-            this.updateProjectiles(deltaTime, otherDrones);
-        }
+        // NOTE: projectiles are advanced exactly once per sim tick by the main
+        // loop (was previously also done here per physics substep — a
+        // double-advancement bug).
     }
     
     updateMotorDynamics(deltaTime) {
@@ -720,12 +734,23 @@ class Drone {
     }
     
     applyFlightControl(deltaTime) {
-        const roll = this.rotation.x;
-        const pitch = this.rotation.z;
-        
+        // Yaw-independent tilt, measured in the BODY frame (world-up expressed
+        // in body coordinates, u_b = q⁻¹ · (0,1,0)). Two dead ends live here:
+        // XYZ Euler angles flip to ±π when |yaw| > 90° (phantom half-turn
+        // tilt), and a WORLD-frame lean measurement inverts the feedback sign
+        // at those same headings because rotor torques act in the body frame —
+        // either one makes south-facing drones fight their own stabilizer.
+        // At yaw 0 these formulas equal the old rotation.x/z exactly.
+        const q = this.quaternion;
+        this.tiltX = Math.asin(Math.max(-1, Math.min(1, 2 * (q.w * q.x - q.y * q.z)))); // body roll
+        this.tiltZ = Math.asin(Math.max(-1, Math.min(1, 2 * (q.x * q.y + q.w * q.z)))); // body pitch
+
+        const roll = this.tiltX;
+        const pitch = this.tiltZ;
+
         const desiredRoll = this.controlInputs.roll * 0.6;
         const desiredPitch = this.controlInputs.pitch * 0.6;
-        
+
         const rollRate = this.rollPID.update(desiredRoll - roll, deltaTime);
         const pitchRate = this.pitchPID.update(desiredPitch - pitch, deltaTime);
         const yawRate = this.controlInputs.yaw - (this.angularVelocity.y * 0.1);
@@ -746,66 +771,72 @@ class Drone {
     }
     
     checkCollisions() {
+        // Touching ANY surface — floor, ceiling or wall — is instant
+        // elimination. No soft landings, no bounces: staying airborne and
+        // inside the arena is a hard requirement.
         let didCrash = false;
-        
+
         if (this.position.y < 0.1) {
             this.position.y = 0.1;
-            if (this.velocity.y < -3.0) { didCrash = true; }
-            else { this.velocity.y = Math.abs(this.velocity.y) * 0.2; }
-        }
-        
-        if (this.position.y > 14.5) {
-            this.position.y = 14.5;
-            this.velocity.y = Math.min(0, this.velocity.y) * -0.3;
-            // Ceiling hit crashes during training too — teaches altitude limits
             didCrash = true;
         }
-        
+
+        if (this.position.y > 14.5) {
+            this.position.y = 14.5;
+            didCrash = true;
+        }
+
         if (Math.abs(this.position.x) > 29) {
             this.position.x = Math.sign(this.position.x) * 29;
-            this.velocity.x = -this.velocity.x * 0.3;
-            didCrash = true; // Crash on wall hit during training — must learn boundaries
+            didCrash = true;
         }
-        
+
         if (Math.abs(this.position.z) > 19) {
             this.position.z = Math.sign(this.position.z) * 19;
-            this.velocity.z = -this.velocity.z * 0.3;
-            didCrash = true; // Crash on wall hit during training — must learn boundaries
+            didCrash = true;
         }
-        
+
         if (didCrash && !this.crashed) this.crash("Collision with boundary");
     }
     
     crash(reason) {
         if (this.crashed || this.isDestroyed) return;
         this.crashed = true;
-        console.log(`Drone ${this.id} crashed: ${reason}`);
         this.body.material.color.set(0xff0000);
-        
-        if (!window.trainingEnabled) {
+
+        // During evolution a crash means you're out for the generation.
+        // Only auto-respawn in idle demo mode.
+        if (!window.evolutionRunning) {
             clearTimeout(this.crashTimeout);
             this.crashTimeout = setTimeout(() => this.reset(), 1000);
         }
     }
-    
+
     reset() {
-        this.resetWithPosition({ x: 0, y: 1, z: 0 });
+        this.resetWithPosition(this.spawnPos);
     }
-    
+
     resetWithPosition(position) {
+        this.spawnPos = { x: position.x, y: position.y, z: position.z };
         this.position.set(position.x, position.y, position.z);
         this.rotation.set(0, 0, 0);
         this.quaternion.identity();
         this.velocity.set(0, 0, 0);
         this.angularVelocity.set(0, 0, 0);
-        this.rotorThrusts = [0, 0, 0, 0];
-        this.rotorThrustsTarget = [0, 0, 0, 0];
+        // Spawn with rotors pre-spun to hover. Spinning up from zero costs
+        // ~1 m/s of downward velocity that exact-hover thrust never cancels —
+        // a slow permanent sink that the lethal floor would execute.
+        const hover = (this.mass * this.gravity) / this.maxThrust;
+        this.rotorThrusts = [hover, hover, hover, hover];
+        this.rotorThrustsTarget = [hover, hover, hover, hover];
         this.externalForce.set(0, 0, 0);
         
         this.rollPID.reset();
         this.pitchPID.reset();
         this.yawPID.reset();
         this.altitudePID.reset();
+        this.tiltX = 0;
+        this.tiltZ = 0;
         
         this.controlInputs = { roll: 0, pitch: 0, yaw: 0, thrust: 0 };
         
@@ -873,10 +904,10 @@ class Drone {
     
     updateVisionCone() {
         if (!this.visionCone) return;
-        
+
         if (this.detectedDrones.length > 0) {
-            this.visionCone.material.opacity = 0.3;
-            this.visionConeWireframe.material.opacity = 0.7;
+            this.visionCone.material.opacity = 0.16;
+            this.visionConeWireframe.material.opacity = 0.45;
             
             if (this.nearestDrone) {
                 const droneForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion);
@@ -891,10 +922,21 @@ class Drone {
                 }
             }
         } else {
-            this.visionCone.material.opacity = 0.1;
-            this.visionConeWireframe.material.opacity = 0.3;
+            this.visionCone.material.opacity = 0.05;
+            this.visionConeWireframe.material.opacity = 0.15;
             this.visionCone.material.color.set(this.color);
             this.visionConeWireframe.material.color.set(this.color);
+        }
+    }
+
+    // Re-color the whole drone to its lineage color (called every generation)
+    setTeamColor(color) {
+        this.color = color;
+        this.body.material.color.set(color);
+        if (this.frontLedMat) this.frontLedMat.color.set(color);
+        if (this.visionCone) {
+            this.visionCone.material.color.set(color);
+            this.visionConeWireframe.material.color.set(color);
         }
     }
 }

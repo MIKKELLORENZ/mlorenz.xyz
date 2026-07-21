@@ -194,6 +194,30 @@ document.addEventListener('DOMContentLoaded', function() {
             type: "iframe"
         },
 
+        {
+            id: "neural_moon_landers",
+            title: "Neural Moon Landers",
+            description: "A population of recurrent neural-network pilots evolves to touch down softly on the moon. Five terrains — from open plains to a needle rift — test how well the champion generalizes beyond what it trained on.",
+            thumbnail: "../vibe-code/simulations/moon_lander_reinforcement_learning/thumbnail.png",
+            category: "simulations",
+            tags: ["moon lander", "neural network", "evolution", "reinforcement learning", "machine learning", "physics", "javascript"],
+            date: "2026-07-18",
+            path: "simulations/moon_lander_reinforcement_learning/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "food_delivery_neuro_evolution",
+            title: "Food Delivery Neuroevolution",
+            description: "Neural-network couriers evolve to follow a GPS route through procedurally generated towns, picking up food and delivering it to customers — dodging trees, pedestrians and each other while learning to keep right and stop for red lights. Copy-paste crossover and slider-driven mutation, no backpropagation.",
+            thumbnail: "../vibe-code/simulations/food_delivery_neuro_evolution/thumbnail.png",
+            category: "simulations",
+            tags: ["food delivery", "self-driving", "neural network", "neuroevolution", "genetic algorithm", "a-star", "machine learning", "javascript"],
+            date: "2026-07-19",
+            path: "simulations/food_delivery_neuro_evolution/index.html",
+            type: "iframe"
+        },
+
 
 
     ];

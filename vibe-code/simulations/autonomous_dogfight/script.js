@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
-//  Autonomous Dogfight – Main Application
+//  Autonomous Dogfight – Neuroevolution Battle Royale
+//  A whole population of drones fights in the gym; the best breed.
 // ═══════════════════════════════════════════════════════════════════
 
 let scene, camera, renderer;
@@ -12,21 +13,73 @@ let mouseSensitivity = 0.0015;
 let moveSpeed = 12.0;
 let running = false;
 
-// Simulation
+// ─── Evolution simulation state ──────────────────────────────────
 let drones = [];
-let rlAgents = [];
+let evolution;
 let visualizer;
-let trainingEnabled = false;
-let centralizedTrainer;
-let trainingSpeed = 1; // 1×, 5×, 20×
+let evolutionRunning = false;
+let simSpeed = 1;            // simulation ticks per rendered frame (1–20×)
+let populationSize = 16;     // applied on Reset
+let genTime = 0;             // sim-seconds elapsed in current round
+let genRound = 1;            // 1..ROUNDS within the current generation
+let simDead = [];            // per-drone "death already booked" flags
+let lastHudUpdate = 0;
+let chartsDirty = false;     // generation ended since last chart refresh
 
-// Drone spawn configuration (2v2)
-const DRONE_SPAWNS = [
-    { pos: { x: -12, y: 5, z: -5 }, color: 0x3366ff, team: 0 },
-    { pos: { x: -12, y: 5, z:  5 }, color: 0x3388ff, team: 0 },
-    { pos: { x:  12, y: 5, z: -5 }, color: 0xff3333, team: 1 },
-    { pos: { x:  12, y: 5, z:  5 }, color: 0xff5533, team: 1 },
-];
+// Headless training: no rendering at all — every frame's time budget goes
+// into simulation ticks. Typically ~5-10× faster than the 20× rendered mode.
+let headlessMode = false;
+const HEADLESS_BUDGET_MS = 12;   // per-frame sim budget (leaves time for UI)
+let headlessTicks = 0;           // ticks executed while headless (for rate display)
+let headlessStats = { t: 0, gen: 0, ticks: 0, gensPerMin: 0, ticksPerSec: 0 };
+
+// Each generation is evaluated over ROUNDS battles — fitness accumulates, so
+// one lucky spawn or stray bullet can't crown a bad genome. Round 1 is a
+// DISARMED flight qualification: no weapons, so every genome gets one
+// low-noise measurement of pure flying skill each generation (combat luck was
+// drowning the flight signal — measured signal/noise of 0.58 without it).
+const ROUNDS = 4;
+const ROUND_DURATION = 12;   // max sim-seconds per round
+const TICK_DT = 1 / 60;
+
+// Control trim: NN outputs are centered on stable flight. Thrust output 0 =
+// hover (without this every random genome pins ~1.5g and ceiling-crashes in
+// 2s — evolution never gets airborne long enough to select on anything), and
+// roll/pitch are scaled so random nets drift instead of instantly diving into
+// a wall. The network keeps full authority within these envelopes.
+// Trim slightly ABOVE exact hover (1/3): tilting sheds ~6% of vertical lift,
+// so an exactly-hover-trimmed drone sinks whenever it maneuvers — floor
+// crashes were 84% of all deaths. At 0.35 the typical combat tilt is
+// lift-neutral.
+const HOVER_THRUST = 0.35;
+const THRUST_RANGE = 0.32;
+const TILT_AUTHORITY = 0.6;
+
+// Lineage colors — you can literally see the genetic operators flying around
+const ORIGIN_COLORS = {
+    best: 0xffd700,       // gold: the reigning leader (exact, un-mutated)
+    contender: 0xe8e8f0,  // silver: the challenger building its track record
+    elite: 0xff8c3a,      // orange: elite survivors (mutated)
+    child: 0x00c8ff,      // cyan: crossover children (mom + dad copy-paste)
+    immigrant: 0xc44dff   // purple: fresh random genomes
+};
+
+// Global wind — same weather for everyone, so it's a fair fight
+const wind = {
+    dir: new THREE.Vector3(1, 0, 0),
+    strength: 0.8,
+    turbulence: 0.18,
+    changeTimer: 0
+};
+
+// Scratch objects (avoid per-tick allocations in the hot loop)
+const _stateBuf = new Float64Array(25);
+const _invQ = new THREE.Quaternion();
+const _bodyV = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
+const _threatFwd = new THREE.Vector3();
+const _threatDir = new THREE.Vector3();
+const _windV = new THREE.Vector3();
 
 // Mobile detection
 const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
@@ -41,7 +94,8 @@ const textureURLs = {
 };
 
 // Make globals accessible
-window.trainingEnabled = false;
+window.evolutionRunning = false;
+window.fxEnabled = true;
 window.drones = drones;
 
 init();
@@ -49,13 +103,13 @@ animate();
 
 function init() {
     scene = new THREE.Scene();
-    
+
     const textureLoader = new THREE.TextureLoader();
     const skyTexture = textureLoader.load(textureURLs.sky);
     scene.background = skyTexture;
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(15, 10, 15);
+    camera.position.set(17, 10, 17);
     camera.rotation.order = 'YXZ';
     camera.lookAt(0, 5, 0);
 
@@ -72,12 +126,15 @@ function init() {
     addLighting();
     createOutdoorEnvironment();
     createGymHall();
+
+    evolution = new Evolution(populationSize, (Math.random() * 0xffffffff) >>> 0);
     createDrones();
-    initializeRL();
-    
-    visualizer = new TrainingVisualizer();
+    respawnPopulation();
+
+    visualizer = new EvolutionVisualizer();
     setupControlPanel();
     setupControls();
+    updateHUD();
 
     if (isMobile) {
         document.body.classList.add('mobile');
@@ -130,7 +187,7 @@ function createOutdoorEnvironment() {
     grassTex.wrapS = THREE.RepeatWrapping;
     grassTex.wrapT = THREE.RepeatWrapping;
     grassTex.repeat.set(30, 30);
-    
+
     const grass = new THREE.Mesh(
         new THREE.PlaneGeometry(200, 200),
         new THREE.MeshStandardMaterial({ map: grassTex, side: THREE.DoubleSide })
@@ -367,43 +424,43 @@ function createWallWithWindows(x, y, z, width, height, rotationY, wallTexture) {
     const windowWidth = sectionWidth * 0.6;
     const windowHeight = 4;
     const windowY = 8;
-    
+
     const wallMat = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.85, metalness: 0.0 });
-    
+
     const lowerWall = new THREE.Mesh(new THREE.BoxGeometry(width, windowY - windowHeight / 2, 0.3), wallMat);
     lowerWall.position.set(x, (windowY - windowHeight / 2) / 2, z);
     lowerWall.rotation.y = rotationY;
     lowerWall.castShadow = true;
     lowerWall.receiveShadow = true;
     scene.add(lowerWall);
-    
+
     const upperWall = new THREE.Mesh(new THREE.BoxGeometry(width, height - (windowY + windowHeight / 2), 0.3), wallMat);
     upperWall.position.set(x, windowY + windowHeight / 2 + (height - (windowY + windowHeight / 2)) / 2, z);
     upperWall.rotation.y = rotationY;
     upperWall.castShadow = true;
     upperWall.receiveShadow = true;
     scene.add(upperWall);
-    
+
     for (let i = 0; i < numSections - 1; i++) {
         const windowX = -width / 2 + sectionWidth / 2 + sectionWidth * (i + 1);
-        
+
         const glassMat = new THREE.MeshPhysicalMaterial({
             color: 0xd4e8f0, transparent: true, opacity: 0.25,
             roughness: 0.05, metalness: 0.1, transmission: 0.92
         });
         const windowPane = new THREE.Mesh(new THREE.BoxGeometry(windowWidth, windowHeight, 0.1), glassMat);
-        
+
         let offsetX = 0, offsetZ = 0;
         if (rotationY === 0) { offsetX = windowX; }
         else if (rotationY === Math.PI) { offsetX = -windowX; }
         else if (rotationY === Math.PI / 2) { offsetZ = windowX; }
         else if (rotationY === -Math.PI / 2) { offsetZ = -windowX; }
-        
+
         windowPane.position.set(x + offsetX, windowY, z + offsetZ);
         windowPane.rotation.y = rotationY;
         windowPane.receiveShadow = true;
         scene.add(windowPane);
-        
+
         // Window frame outer border
         const frameMat = new THREE.MeshStandardMaterial({ color: 0x4a3018, roughness: 0.7 });
         const fOuter = new THREE.Mesh(
@@ -443,14 +500,14 @@ function createWallWithWindows(x, y, z, width, height, rotationY, wallTexture) {
         sill.position.set(x + offsetX, sillY, z + offsetZ);
         sill.rotation.y = rotationY;
         scene.add(sill);
-        
+
         // Window light – NO shadow casting (perf fix)
         let lightX = 0, lightZ = 0;
         if (rotationY === 0) { lightX = x + windowX; lightZ = z + 0.5; }
         else if (rotationY === Math.PI) { lightX = x - windowX; lightZ = z - 0.5; }
         else if (rotationY === Math.PI / 2) { lightX = x + 0.5; lightZ = z + windowX; }
         else if (rotationY === -Math.PI / 2) { lightX = x - 0.5; lightZ = z - windowX; }
-        
+
         const windowLight = new THREE.SpotLight(0xfff8e0, 0.3);
         windowLight.position.set(lightX, windowY, lightZ);
         windowLight.target.position.set(x, windowY, z);
@@ -488,7 +545,7 @@ function createGymEquipment() {
 
     createGymMat(-25, 0, -15);
     createGymMat(25, 0, -15);
-    
+
     createVaultingHorse(-20, 0, 0);
     createWallBars(28, 0, -15);
 }
@@ -683,7 +740,6 @@ function setupControls() {
         }
     }, false);
 
-    // FIXED: A/D key swap corrected — A=left, D=right
     document.addEventListener('keydown', (event) => {
         switch (event.code) {
             case 'ArrowUp': case 'KeyW': moveForward = true; break;
@@ -714,14 +770,14 @@ function setupTouchControls() {
     const leftZone = document.getElementById('joystick-left');
     const rightZone = document.getElementById('joystick-right');
     if (!leftZone || !rightZone) return;
-    
+
     const thumbL = leftZone.querySelector('.joystick-thumb');
     const thumbR = rightZone.querySelector('.joystick-thumb');
-    
+
     let leftTouch = null, rightTouch = null;
     let leftOrigin = null, rightOrigin = null;
     const maxDist = 40;
-    
+
     function handleStart(e) {
         for (const t of e.changedTouches) {
             const x = t.clientX;
@@ -735,14 +791,14 @@ function setupTouchControls() {
         }
         e.preventDefault();
     }
-    
+
     function handleMove(e) {
         for (const t of e.changedTouches) {
             if (t.identifier === leftTouch && leftOrigin) {
                 const dx = Math.max(-maxDist, Math.min(maxDist, t.clientX - leftOrigin.x));
                 const dy = Math.max(-maxDist, Math.min(maxDist, t.clientY - leftOrigin.y));
                 thumbL.style.transform = `translate(${dx}px, ${dy}px)`;
-                
+
                 // Movement
                 moveForward = dy < -10;
                 moveBackward = dy > 10;
@@ -755,7 +811,7 @@ function setupTouchControls() {
                 const clampDx = Math.max(-maxDist, Math.min(maxDist, dx));
                 const clampDy = Math.max(-maxDist, Math.min(maxDist, dy));
                 thumbR.style.transform = `translate(${clampDx}px, ${clampDy}px)`;
-                
+
                 // Camera look
                 camera.rotation.y -= dx * 0.001;
                 camera.rotation.x -= dy * 0.001;
@@ -765,7 +821,7 @@ function setupTouchControls() {
         }
         e.preventDefault();
     }
-    
+
     function handleEnd(e) {
         for (const t of e.changedTouches) {
             if (t.identifier === leftTouch) {
@@ -782,7 +838,7 @@ function setupTouchControls() {
         }
         e.preventDefault();
     }
-    
+
     document.addEventListener('touchstart', handleStart, { passive: false });
     document.addEventListener('touchmove', handleMove, { passive: false });
     document.addEventListener('touchend', handleEnd, { passive: false });
@@ -795,270 +851,654 @@ function onWindowResize() {
     renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// ─── Control Panel (using CSS classes from style.css) ────────────
+// ═══════════════════════════════════════════════════════════════════
+//  Population management
+// ═══════════════════════════════════════════════════════════════════
+
+// Spawn points on an ellipse around the court center. Uniform height and a
+// random rotation each call — spawn position must never decide who wins.
+// Kept well clear of the walls so random genomes get a few seconds of flight
+// to differentiate before physics executes them.
+function spawnLayout(n) {
+    const pts = [];
+    const rx = 16, rz = 10;
+    const offset = Math.random() * Math.PI * 2;
+    for (let i = 0; i < n; i++) {
+        const a = offset + (i / n) * Math.PI * 2;
+        pts.push({
+            x: Math.cos(a) * rx,
+            y: 6.0,
+            z: Math.sin(a) * rz
+        });
+    }
+    return pts;
+}
+
+function createDrones() {
+    const layout = spawnLayout(populationSize);
+    for (let i = 0; i < populationSize; i++) {
+        const drone = new Drone(scene, layout[i], ORIGIN_COLORS.immigrant, i);
+        wireDroneEvents(drone);
+        drones.push(drone);
+    }
+    window.drones = drones;
+}
+
+// Fitness bookkeeping rides on the drone combat events
+function wireDroneEvents(drone) {
+    drone.onDamaged = (amount, fromId) => {
+        if (!evolutionRunning) return;
+        if (typeof fromId === 'number' && evolution.pop[fromId]) {
+            evolution.registerHit(fromId, drone.id);
+        }
+    };
+    drone.onDestroyed = (fromId) => {
+        if (!evolutionRunning) return;
+        if (typeof fromId === 'number' && evolution.pop[fromId]) {
+            evolution.registerKill(fromId);
+        }
+        if (!simDead[drone.id]) {
+            simDead[drone.id] = true;
+            evolution.registerDeath(drone.id, genTime, false);
+        }
+    };
+}
+
+function disposeDrone(d) {
+    for (const p of d.projectiles) scene.remove(p.mesh);
+    for (const tp of d.trailParticles) scene.remove(tp.mesh);
+    scene.remove(d.mesh);
+}
+
+// Fresh battle: reset positions, apply lineage colors, aim at the arena.
+// Spawn slots are shuffled every generation so no genome inherits a lucky
+// starting spot.
+function respawnPopulation() {
+    const layout = spawnLayout(drones.length);
+    const slot = [...Array(drones.length).keys()];
+    for (let i = slot.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [slot[i], slot[j]] = [slot[j], slot[i]];
+    }
+    const disarmed = genRound === 1; // round 1 = flight qualification
+    for (let i = 0; i < drones.length; i++) {
+        drones[i].resetWithPosition(layout[slot[i]]);
+        drones[i].hasWeapon = !disarmed;
+        const origin = evolution.pop[i] ? evolution.pop[i].origin : 'immigrant';
+        drones[i].setTeamColor(ORIGIN_COLORS[origin] || ORIGIN_COLORS.child);
+    }
+    orientDronesAtCenter();
+    genTime = 0;
+    simDead = new Array(drones.length).fill(false);
+}
+
+function orientDronesAtCenter() {
+    for (const d of drones) {
+        const dx = -d.position.x;
+        const dz = -d.position.z;
+        const baseYaw = Math.atan2(dx, -dz);
+        const dev = (Math.random() - 0.5) * (Math.PI / 4);
+        d.setInitialRotation(0, baseYaw + dev, 0);
+    }
+}
+
+function resetEvolution() {
+    for (const d of drones) disposeDrone(d);
+    drones = [];
+    window.drones = drones;
+    evolution = new Evolution(populationSize, (Math.random() * 0xffffffff) >>> 0);
+    genRound = 1;
+    createDrones();
+    respawnPopulation();
+    if (visualizer) visualizer.reset();
+    updateHUD();
+    updateInfoDisplay();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Simulation core — one tick of the whole battle
+// ═══════════════════════════════════════════════════════════════════
+
+function updateWind(dt) {
+    wind.changeTimer -= dt;
+    if (wind.changeTimer <= 0) {
+        wind.changeTimer = 5 + Math.random() * 10;
+        const a = Math.random() * Math.PI * 2;
+        wind.dir.set(Math.cos(a), Math.random() * 0.3 - 0.15, Math.sin(a)).normalize();
+        wind.strength = 0.4 + Math.random() * 1.1;
+    }
+}
+
+// Wind curriculum: calm skies while the population learns to fly, then a
+// breeze fades in across generations 30-100, capped at 35% strength.
+// Measured: full-strength wind blows even a perfectly-trimmed hover into the
+// wall in ~8s — unsurvivable weather teaches nothing, it just resets the
+// population every round.
+function windRamp() {
+    return 0.2 * Math.min(1, Math.max(0, (evolution.gen - 30) / 70));
+}
+
+function applyWindTo(d) {
+    const ramp = windRamp();
+    if (ramp <= 0) return;
+    _windV.copy(wind.dir).multiplyScalar(wind.strength * ramp);
+    const turb = wind.turbulence * ramp;
+    _windV.x += (Math.random() * 2 - 1) * turb;
+    _windV.y += (Math.random() * 2 - 1) * turb;
+    _windV.z += (Math.random() * 2 - 1) * turb;
+    d.applyExternalForce(_windV);
+}
+
+// 25 inputs — must match NN_ARCH[0] in nn.js
+function buildStateVector(d, aliveCount) {
+    const s = _stateBuf;
+    let k = 0;
+    // where am I
+    s[k++] = d.position.x / 29;
+    s[k++] = (d.position.y / 7.5) - 1;
+    s[k++] = d.position.z / 19;
+    // attitude (yaw-independent lean — rotation.x/z Euler angles flip at
+    // |yaw| > 90° and would poison these inputs for half the compass)
+    s[k++] = d.tiltX / (Math.PI / 2);
+    s[k++] = d.tiltZ / (Math.PI / 2);
+    const q = d.quaternion;
+    const yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.z * q.z));
+    s[k++] = Math.sin(yaw);
+    s[k++] = Math.cos(yaw);
+    // body-frame velocity
+    _invQ.copy(q).invert();
+    _bodyV.copy(d.velocity).applyQuaternion(_invQ);
+    s[k++] = Math.tanh(_bodyV.x / 8);
+    s[k++] = Math.tanh(_bodyV.y / 8);
+    s[k++] = Math.tanh(_bodyV.z / 8);
+    // angular velocity
+    s[k++] = Math.tanh(d.angularVelocity.x / 4);
+    s[k++] = Math.tanh(d.angularVelocity.y / 4);
+    s[k++] = Math.tanh(d.angularVelocity.z / 4);
+    // own health
+    s[k++] = d.health / 100;
+    // nearest enemy
+    if (d.nearestDrone) {
+        const e = d.nearestDrone;
+        s[k++] = 1;                                          // enemy in sensor range
+        s[k++] = Math.tanh(d.nearestDroneDistance / 15);
+        _bodyV.copy(d.nearestDroneDirection).applyQuaternion(_invQ);
+        s[k++] = _bodyV.x;
+        s[k++] = _bodyV.y;
+        s[k++] = _bodyV.z;
+        // is that enemy aiming at ME? (evasion cue)
+        _threatFwd.set(0, 0, -1).applyQuaternion(e.quaternion);
+        _threatDir.copy(d.position).sub(e.position).normalize();
+        s[k++] = _threatFwd.dot(_threatDir);
+        s[k++] = e.health / 100;                             // finish off the weak
+    } else {
+        s[k++] = 0; s[k++] = 1;
+        s[k++] = 0; s[k++] = 0; s[k++] = 0;
+        s[k++] = 0; s[k++] = 0;
+    }
+    // weapon ready?
+    s[k++] = Math.max(0, d.weaponCooldown) / d.weaponCooldownTime;
+    // wall danger
+    s[k++] = Math.max(0, 1 - (29 - Math.abs(d.position.x)) / 10);
+    s[k++] = Math.max(0, 1 - (19 - Math.abs(d.position.z)) / 10);
+    // how crowded is the fight still
+    s[k++] = (aliveCount - 1) / Math.max(1, drones.length - 1);
+    return s;
+}
+
+// Continuous shaping rewards — small nudges toward flying well and hunting.
+// All rates live in REWARDS (evolution.js).
+function accrueShaping(d, i, dt, align) {
+    let r = REWARDS.alivePerSec;
+
+    const tilt = Math.abs(d.tiltX) + Math.abs(d.tiltZ);
+    r += Math.max(0, 1 - tilt / 0.6) * REWARDS.uprightPerSec;
+    r += Math.min(1, d.angularVelocity.length() / 4) * REWARDS.spinPenaltyPerSec;
+
+    const y = d.position.y;
+    r += Math.exp(-Math.pow(y - 7, 2) / 18) * REWARDS.altitudeBandPerSec;
+
+    const dwx = 29 - Math.abs(d.position.x);
+    const dwz = 19 - Math.abs(d.position.z);
+    if (dwx < 8) r += Math.pow((8 - dwx) / 8, 2) * REWARDS.wallPenaltyPerSec;
+    if (dwz < 8) r += Math.pow((8 - dwz) / 8, 2) * REWARDS.wallPenaltyPerSec;
+    if (y < 1.5) r += Math.pow((1.5 - y) / 1.5, 2) * REWARDS.wallPenaltyPerSec * 1.4;
+    if (y > 13) r += Math.pow((y - 13) / 2, 2) * REWARDS.wallPenaltyPerSec;
+
+    if (d.nearestDrone) {
+        r += Math.max(0, align) * REWARDS.facingPerSec;
+        r += Math.exp(-Math.pow(d.nearestDroneDistance - 10, 2) / 60) * REWARDS.rangePerSec;
+    }
+
+    evolution.addFitness(i, r * dt);
+}
+
+function simTick(dt, renderTick) {
+    genTime += dt;
+    updateWind(dt);
+
+    // active list shared by sensing and hit detection (wrecks are ghosts)
+    const active = drones.filter(o => !o.crashed && !o.isDestroyed);
+    const aliveCount = active.length;
+
+    for (let i = 0; i < drones.length; i++) {
+        const d = drones[i];
+        if (d.crashed || d.isDestroyed) continue;
+
+        d.detectDrones(active);
+        applyWindTo(d);
+
+        // think — one forward pass through this drone's genome
+        const state = buildStateVector(d, aliveCount);
+        const out = forward(evolution.pop[i].genome, state);
+        d.setControlInputs(
+            out[0] * TILT_AUTHORITY,
+            out[1] * TILT_AUTHORITY,
+            out[2],
+            HOVER_THRUST + out[3] * THRUST_RANGE
+        );
+
+        let align = -1;
+        if (d.nearestDrone) {
+            _fwd.set(0, 0, -1).applyQuaternion(d.quaternion);
+            align = _fwd.dot(d.nearestDroneDirection);
+        }
+        if (out[4] > 0 && d.weaponCooldown <= 0) {
+            if (d.shoot()) {
+                const aimed = align > 0.85 && d.nearestDroneDistance < 22;
+                evolution.registerShot(i, aimed);
+            }
+        }
+
+        d.update(dt, renderTick);
+        accrueShaping(d, i, dt, align);
+
+        // boundary crashes discovered during the physics step
+        if ((d.crashed || d.isDestroyed) && !simDead[i]) {
+            simDead[i] = true;
+            evolution.registerDeath(i, genTime, !d.isDestroyed);
+        }
+    }
+
+    // projectiles advance exactly once per tick (even for dead shooters —
+    // their bullets stay live)
+    for (const d of drones) {
+        if (d.projectiles.length > 0 || d.weaponCooldown > 0) {
+            d.updateProjectiles(dt, active);
+        }
+    }
+
+    // deaths caused by projectiles this tick
+    for (let i = 0; i < drones.length; i++) {
+        if ((drones[i].crashed || drones[i].isDestroyed) && !simDead[i]) {
+            simDead[i] = true;
+            evolution.registerDeath(i, genTime, !drones[i].isDestroyed);
+        }
+    }
+
+    // Run the round's full clock even with one drone left — a lone survivor
+    // still has to PROVE it can fly. Ending at "last man standing" would erase
+    // the fitness difference between hovering 20s and outliving the crowd by
+    // 0.1s.
+    const stillAlive = drones.reduce((n, d) => n + (!d.crashed && !d.isDestroyed ? 1 : 0), 0);
+    if (stillAlive === 0 || genTime >= ROUND_DURATION) {
+        evolution.endRound(genTime);
+        if (genRound < ROUNDS) {
+            genRound++;
+            respawnPopulation(); // same genomes, fresh battle
+        } else {
+            finishGeneration();
+        }
+    }
+}
+
+function finishGeneration() {
+    evolution.endGeneration();
+    genRound = 1;
+    respawnPopulation();
+    // UI refresh is throttled from the animate loop — at headless speeds
+    // generations can turn over many times per second, and rebuilding the
+    // charts for each one would eat the training budget.
+    chartsDirty = true;
+}
+
+// Periodic UI refresh shared by rendered and headless modes.
+function refreshThrottledUI(time) {
+    updateHUD();
+    updateInfoDisplay();
+    if (chartsDirty && visualizer) {
+        chartsDirty = false;
+        visualizer.updateCharts(evolution);
+    }
+    if (headlessMode) updateHeadlessOverlay(time);
+}
+
+// Run simulation ticks until the wall-clock deadline (headless mode).
+// Checked in small batches — performance.now() is cheap but not free.
+function runHeadlessTicks(deadline) {
+    let n = 0;
+    while (performance.now() < deadline) {
+        for (let k = 0; k < 20; k++) {
+            simTick(TICK_DT, false);
+            n++;
+        }
+    }
+    headlessTicks += n;
+    return n;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  UI — control panel, HUD, scoreboard
+// ═══════════════════════════════════════════════════════════════════
+
 function setupControlPanel() {
     const controlPanel = document.createElement('div');
     controlPanel.id = 'control-panel';
-    
-    // Button row
+
+    const title = document.createElement('div');
+    title.className = 'panel-title';
+    title.textContent = 'Neuroevolution';
+    controlPanel.appendChild(title);
+
+    // Mode row: start/pause + headless
     const btnRow = document.createElement('div');
     btnRow.className = 'btn-row';
-    
-    const trainingBtn = document.createElement('button');
-    trainingBtn.id = 'training-toggle';
-    trainingBtn.textContent = 'Start Training';
-    
-    const centralizedBtn = document.createElement('button');
-    centralizedBtn.id = 'centralized-toggle';
-    centralizedBtn.textContent = 'Centralized: OFF';
-    
-    const resetBtn = document.createElement('button');
-    resetBtn.textContent = 'Reset Drones';
-    
-    btnRow.append(trainingBtn, centralizedBtn, resetBtn);
+
+    const evoBtn = document.createElement('button');
+    evoBtn.id = 'evolution-toggle';
+    evoBtn.textContent = 'Start Evolution';
+
+    const headlessBtn = document.createElement('button');
+    headlessBtn.id = 'headless-toggle';
+    headlessBtn.textContent = 'Headless: OFF';
+
+    btnRow.append(evoBtn, headlessBtn);
     controlPanel.appendChild(btnRow);
-    
-    // Speed slider row
+
+    const resetRow = document.createElement('div');
+    resetRow.className = 'btn-row';
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Reset Population';
+    resetRow.append(resetBtn);
+    controlPanel.appendChild(resetRow);
+
+    // Champion save/load row
+    const champRow = document.createElement('div');
+    champRow.className = 'btn-row';
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save Champion';
+    const loadBtn = document.createElement('button');
+    loadBtn.textContent = 'Load Champion';
+    champRow.append(saveBtn, loadBtn);
+    controlPanel.appendChild(champRow);
+
+    // Speed slider
     const speedRow = document.createElement('div');
-    speedRow.className = 'btn-row';
-    speedRow.style.alignItems = 'center';
-    
-    const speedLabel = document.createElement('label');
-    speedLabel.textContent = 'Speed: 1×';
-    speedLabel.id = 'speed-label';
-    speedLabel.style.color = '#ccc';
-    speedLabel.style.fontSize = '12px';
-    speedLabel.style.marginRight = '8px';
-    
+    speedRow.className = 'speed-row';
+    speedRow.innerHTML = '<div class="speed-label"><span>Speed</span><span id="speed-value">1×</span></div>';
     const speedSlider = document.createElement('input');
     speedSlider.type = 'range';
-    speedSlider.id = 'speed-slider';
     speedSlider.min = '1';
     speedSlider.max = '20';
     speedSlider.value = '1';
-    speedSlider.style.flex = '1';
-    
-    speedRow.append(speedLabel, speedSlider);
+    speedRow.appendChild(speedSlider);
     controlPanel.appendChild(speedRow);
-    
+
+    // Population slider (applies on reset)
+    const popRow = document.createElement('div');
+    popRow.className = 'speed-row';
+    popRow.innerHTML = `<div class="speed-label"><span>Population (on reset)</span><span id="pop-value">${populationSize}</span></div>`;
+    const popSlider = document.createElement('input');
+    popSlider.type = 'range';
+    popSlider.min = '6';
+    popSlider.max = '24';
+    popSlider.step = '2';
+    popSlider.value = String(populationSize);
+    popRow.appendChild(popSlider);
+    controlPanel.appendChild(popRow);
+
+    // Lineage color legend
+    const legend = document.createElement('div');
+    legend.className = 'lineage-legend';
+    legend.innerHTML =
+        '<span class="chip"><i style="background:#ffd700"></i>leader</span>' +
+        '<span class="chip"><i style="background:#e8e8f0"></i>contender</span>' +
+        '<span class="chip"><i style="background:#ff8c3a"></i>elite</span>' +
+        '<span class="chip"><i style="background:#00c8ff"></i>child</span>' +
+        '<span class="chip"><i style="background:#c44dff"></i>immigrant</span>';
+    controlPanel.appendChild(legend);
+
     // Info display
     const infoDisplay = document.createElement('div');
     infoDisplay.id = 'info-display';
-    infoDisplay.innerHTML = 'Status: Ready<br>Training: Not started';
+    infoDisplay.innerHTML = 'Status: Ready';
     controlPanel.appendChild(infoDisplay);
-    
-    // Episode counter (prominent)
-    const episodeCounter = document.createElement('div');
-    episodeCounter.id = 'episode-counter';
-    episodeCounter.innerHTML = '<span class="ep-label">EPISODE</span><span class="ep-value" id="ep-count">0</span>';
-    controlPanel.appendChild(episodeCounter);
-    
+
+    // Generation counter (prominent)
+    const genCounter = document.createElement('div');
+    genCounter.id = 'episode-counter';
+    genCounter.innerHTML = '<span class="ep-label">GENERATION</span><span class="ep-value" id="gen-count">1</span>';
+    controlPanel.appendChild(genCounter);
+
     document.body.appendChild(controlPanel);
-    
-    // Speed slider handler
+
+    // ── handlers ──
     speedSlider.addEventListener('input', () => {
-        trainingSpeed = parseInt(speedSlider.value);
-        speedLabel.textContent = `Speed: ${trainingSpeed}×`;
+        simSpeed = parseInt(speedSlider.value);
+        document.getElementById('speed-value').textContent = `${simSpeed}×`;
     });
-    
-    // Training toggle
-    trainingBtn.addEventListener('click', () => {
-        trainingEnabled = !trainingEnabled;
-        window.trainingEnabled = trainingEnabled;
-        
-        if (trainingEnabled) {
-            for (const agent of rlAgents) agent.startTraining();
-            trainingBtn.textContent = 'Stop Training';
-            trainingBtn.classList.add('danger');
+
+    popSlider.addEventListener('input', () => {
+        populationSize = parseInt(popSlider.value);
+        document.getElementById('pop-value').textContent = populationSize;
+    });
+
+    evoBtn.addEventListener('click', () => {
+        evolutionRunning = !evolutionRunning;
+        window.evolutionRunning = evolutionRunning;
+        if (evolutionRunning) {
+            evoBtn.textContent = 'Pause Evolution';
+            evoBtn.classList.add('danger');
         } else {
-            for (const agent of rlAgents) agent.stopTraining();
-            if (centralizedTrainer && centralizedTrainer.isActive) {
-                centralizedTrainer.deactivate();
-                centralizedBtn.textContent = 'Centralized: OFF';
-                centralizedBtn.classList.remove('active');
-            }
-            trainingBtn.textContent = 'Start Training';
-            trainingBtn.classList.remove('danger');
+            evoBtn.textContent = 'Resume Evolution';
+            evoBtn.classList.remove('danger');
         }
         updateInfoDisplay();
+        if (headlessMode) updateHeadlessOverlay(performance.now());
     });
-    
-    // Centralized toggle
-    centralizedBtn.addEventListener('click', () => {
-        if (!centralizedTrainer) return;
-        if (!trainingEnabled) { alert('Start training first.'); return; }
-        
-        if (centralizedTrainer.isActive) {
-            centralizedTrainer.deactivate();
-            centralizedBtn.textContent = 'Centralized: OFF';
-            centralizedBtn.classList.remove('active');
-        } else {
-            centralizedTrainer.activate();
-            centralizedBtn.textContent = 'Centralized: ON';
-            centralizedBtn.classList.add('active');
+
+    headlessBtn.addEventListener('click', () => {
+        setHeadlessMode(!headlessMode);
+    });
+
+    resetBtn.addEventListener('click', () => {
+        resetEvolution();
+    });
+
+    saveBtn.addEventListener('click', () => {
+        const json = evolution.serializeChampion();
+        if (!json) { flashButton(saveBtn, 'No champion yet'); return; }
+        try {
+            localStorage.setItem('dogfight-ne-champion', json);
+            flashButton(saveBtn, 'Saved ✓');
+        } catch (e) {
+            flashButton(saveBtn, 'Save failed');
         }
-        updateInfoDisplay();
     });
-    
-    resetBtn.addEventListener('click', () => { resetAllDrones(); updateInfoDisplay(); });
-    
+
+    loadBtn.addEventListener('click', () => {
+        const json = localStorage.getItem('dogfight-ne-champion');
+        if (json && evolution.loadChampion(json)) {
+            flashButton(loadBtn, 'Loaded → next gen');
+        } else {
+            flashButton(loadBtn, 'Nothing saved');
+        }
+    });
+
     updateInfoDisplay();
+}
+
+function flashButton(btn, text) {
+    const orig = btn.dataset.label || btn.textContent;
+    btn.dataset.label = orig;
+    btn.textContent = text;
+    setTimeout(() => { btn.textContent = orig; }, 1400);
+}
+
+// ─── Headless mode ───────────────────────────────────────────────
+function setHeadlessMode(on) {
+    headlessMode = on;
+    const overlay = document.getElementById('headless-overlay');
+    if (overlay) overlay.classList.toggle('show', on);
+    const btn = document.getElementById('headless-toggle');
+    if (btn) {
+        btn.textContent = on ? 'Headless: ON' : 'Headless: OFF';
+        btn.classList.toggle('active', on);
+    }
+    // reset rate sampling so gens/min doesn't average across the off-period
+    headlessStats = {
+        t: 0,
+        gen: evolution ? evolution.gen : 0,
+        ticks: headlessTicks,
+        gensPerMin: 0,
+        ticksPerSec: 0
+    };
+    if (on) updateHeadlessOverlay(performance.now());
+    updateInfoDisplay();
+}
+
+function updateHeadlessOverlay(time) {
+    const badge = document.getElementById('headless-badge-text');
+    const genEl = document.getElementById('headless-gen');
+    const rateEl = document.getElementById('headless-rate');
+    const tpsEl = document.getElementById('headless-tps');
+    const bestEl = document.getElementById('headless-best');
+    const champEl = document.getElementById('headless-champ');
+    if (!genEl || !evolution) return;
+
+    // sample throughput about once a second
+    if (time - headlessStats.t > 1000) {
+        if (headlessStats.t > 0) {
+            const dt = (time - headlessStats.t) / 1000;
+            headlessStats.gensPerMin = ((evolution.gen - headlessStats.gen) / dt) * 60;
+            headlessStats.ticksPerSec = (headlessTicks - headlessStats.ticks) / dt;
+        }
+        headlessStats.t = time;
+        headlessStats.gen = evolution.gen;
+        headlessStats.ticks = headlessTicks;
+    }
+
+    if (badge) badge.textContent = evolutionRunning ? 'HEADLESS TRAINING' : 'HEADLESS · PAUSED';
+    genEl.textContent = evolution.gen;
+    rateEl.textContent = headlessStats.gensPerMin > 0 ? headlessStats.gensPerMin.toFixed(1) : '–';
+    tpsEl.textContent = headlessStats.ticksPerSec > 0
+        ? (headlessStats.ticksPerSec / 1000).toFixed(1) + 'k' : '–';
+    const h = evolution.history;
+    bestEl.textContent = h.best.length ? h.best[h.best.length - 1].toFixed(0) : '–';
+    champEl.textContent = evolution.champion ? evolution.champion.fitness.toFixed(0) : '–';
 }
 
 function updateInfoDisplay() {
     const infoDisplay = document.getElementById('info-display');
-    if (!infoDisplay || rlAgents.length === 0) return;
-    
-    // Aggregate stats across all agents
-    const maxEpisode = Math.max(...rlAgents.map(a => a.episode));
-    const avgExploration = rlAgents.reduce((s, a) => s + a.noiseScale, 0) / rlAgents.length;
-    const totalEpisodes = rlAgents.reduce((s, a) => s + a.episode, 0);
-    
-    // Update episode counter (total across all agents)
-    const epCount = document.getElementById('ep-count');
-    if (epCount) epCount.textContent = totalEpisodes;
-    
-    let html = `Status: ${trainingEnabled ? '<b style="color:#00c8ff">Training</b>' : 'Ready'}<br>`;
-    html += `Drones: ${drones.length} (${drones.filter(d => d.team === 0).length}v${drones.filter(d => d.team === 1).length})<br>`;
-    
-    if (centralizedTrainer) html += `Centralized: ${centralizedTrainer.isActive ? '<b style="color:#00c8ff">Active</b>' : 'Off'}<br>`;
-    
-    if (trainingEnabled) {
-        html += `Exploration: ${avgExploration.toFixed(3)}<br>`;
-        // Best running average across agents
-        const bestAvg = Math.max(...rlAgents.map(a => a.runningAvgReward || 0));
-        const latestRewards = rlAgents.filter(a => a.totalRewards.length > 0).map(a => a.totalRewards[a.totalRewards.length - 1]);
-        if (latestRewards.length > 0) {
-            html += `Last Reward: ${(latestRewards.reduce((s,v) => s+v, 0) / latestRewards.length).toFixed(1)}<br>`;
-        }
-        if (bestAvg) html += `Best Avg Reward: <b>${bestAvg.toFixed(1)}</b><br>`;
-        const avgSR = rlAgents.reduce((s, a) => s + a.successWindow.filter(x => x).length / Math.max(1, a.successWindow.length), 0) / rlAgents.length;
-        html += `Success: ${(avgSR * 100).toFixed(0)}%<br>`;
-        const totalBuffer = rlAgents.reduce((s, a) => s + a.replayBuffer.length, 0);
-        html += `Buffer: ${totalBuffer.toLocaleString()}<br>`;
-        // Aggregate kills/deaths
-        const totalKills = rlAgents.reduce((s, a) => s + a.kills, 0);
-        const totalDeaths = rlAgents.reduce((s, a) => s + a.deaths, 0);
-        html += `Total K/D: ${totalKills}/${totalDeaths}<br>`;
-        html += `Speed: ${trainingSpeed}×`;
+    if (!infoDisplay || !evolution) return;
+
+    const h = evolution.history;
+    const alive = drones.reduce((n, d) => n + (!d.crashed && !d.isDestroyed ? 1 : 0), 0);
+    const mut = evolution.effectiveMutation();
+
+    let html = `Status: ${evolutionRunning ? '<b style="color:#00c8ff">Evolving</b>' : 'Paused'}<br>`;
+    html += `Population: ${drones.length} (${alive} alive)<br>`;
+    if (h.best.length > 0) {
+        html += `Best (last gen): <b>${h.best[h.best.length - 1].toFixed(1)}</b><br>`;
+        html += `Mean: ${h.mean[h.mean.length - 1].toFixed(1)}<br>`;
+        html += `Kills last gen: ${h.kills[h.kills.length - 1]}<br>`;
     }
-    
+    if (evolution.leader && evolution.leader.fits.length > 0) {
+        const lf = evolution.leader.fits;
+        const lAvg = lf.reduce((s, v) => s + v, 0) / lf.length;
+        const t = evolution.leader.tenure;
+        const grace = t < GA.leaderGraceGens ? ` <span style="color:#ffd700">(grace ${t}/${GA.leaderGraceGens})</span>` : ` (reign ${t})`;
+        html += `Leader avg: <b style="color:#ffd700">${lAvg.toFixed(0)}</b>${grace}<br>`;
+    }
+    if (evolution.contender && evolution.contender.fits.length > 0) {
+        const cf = evolution.contender.fits;
+        const cAvg = cf.reduce((s, v) => s + v, 0) / cf.length;
+        html += `Contender avg: <b style="color:#e8e8f0">${cAvg.toFixed(0)}</b> (${cf.length} eval${cf.length > 1 ? 's' : ''})<br>`;
+    }
+    if (evolution.champion) {
+        html += `Champion: <b>${evolution.champion.fitness.toFixed(1)}</b> (gen ${evolution.champion.gen}, ${evolution.champion.kills} kills)<br>`;
+    }
+    html += `Mutation rate: ${mut.rate.toFixed(3)}${evolution.stagnantGens > 0 ? ` <span style="color:#ff9f43">(+${evolution.stagnantGens} stagnant)</span>` : ''}<br>`;
+    html += `Diversity: ${evolution.diversity.toFixed(3)}<br>`;
+    html += `Wind: ${(windRamp() * 100).toFixed(0)}%<br>`;
+    html += headlessMode ? 'Speed: <b style="color:#ffd700">headless (max)</b>' : `Speed: ${simSpeed}×`;
+
     infoDisplay.innerHTML = html;
 }
 
-// ─── Scoreboard HUD Update ───────────────────────────────────────
-function updateScoreboard() {
-    if (drones.length < 2 || rlAgents.length < 2) return;
-    
-    // Team health = average of alive team members
-    const blueTeam = drones.filter(d => d.team === 0);
-    const redTeam  = drones.filter(d => d.team === 1);
-    const blueHP = blueTeam.reduce((s, d) => s + Math.max(0, d.health), 0) / blueTeam.length;
-    const redHP  = redTeam.reduce((s, d) => s + Math.max(0, d.health), 0) / redTeam.length;
-    
-    const bh = document.querySelector('.blue-health');
-    const rh = document.querySelector('.red-health');
-    if (bh) bh.style.width = blueHP + '%';
-    if (rh) rh.style.width = redHP + '%';
-    
-    // Team kills/deaths
-    const blueAgents = rlAgents.filter((_, i) => drones[i] && drones[i].team === 0);
-    const redAgents  = rlAgents.filter((_, i) => drones[i] && drones[i].team === 1);
-    const bk = document.getElementById('blue-kills');
-    const bd = document.getElementById('blue-deaths');
-    const rk = document.getElementById('red-kills');
-    const rd = document.getElementById('red-deaths');
-    if (bk) bk.textContent = blueAgents.reduce((s, a) => s + a.kills, 0);
-    if (bd) bd.textContent = blueAgents.reduce((s, a) => s + a.deaths, 0);
-    if (rk) rk.textContent = redAgents.reduce((s, a) => s + a.kills, 0);
-    if (rd) rd.textContent = redAgents.reduce((s, a) => s + a.deaths, 0);
+function updateHUD() {
+    const genEl = document.getElementById('hud-gen');
+    const aliveEl = document.getElementById('hud-alive');
+    const timeEl = document.getElementById('hud-time');
+    const bestEl = document.getElementById('hud-best');
+    const genCount = document.getElementById('gen-count');
+
+    const alive = drones.reduce((n, d) => n + (!d.crashed && !d.isDestroyed ? 1 : 0), 0);
+    if (genEl) genEl.textContent = evolution.gen;
+    if (genCount) genCount.textContent = evolution.gen;
+    if (aliveEl) aliveEl.textContent = `${alive}/${drones.length}`;
+    const roundLabel = genRound === 1 ? 'QUAL' : `R${genRound}`;
+    if (timeEl) timeEl.textContent = `${roundLabel}·${Math.max(0, ROUND_DURATION - genTime).toFixed(0)}s`;
+    const h = evolution.history;
+    if (bestEl) bestEl.textContent = h.best.length ? h.best[h.best.length - 1].toFixed(0) : '–';
 }
 
 // ─── Animation Loop ──────────────────────────────────────────────
 function animate() {
     requestAnimationFrame(animate);
-    
+
     const time = performance.now();
     const delta = Math.min((time - prevTime) / 1000, 0.1);
-    
-    // Update drones
-    for (let i = 0; i < drones.length; i++) {
-        if (drones[i].isDestroyed) continue;
-        drones[i].update(delta);
-        drones[i].detectDrones(drones.filter(d => d.id !== drones[i].id));
-        drones[i].updateProjectiles(delta, drones.filter(d => d.id !== drones[i].id));
-    }
-    
-    // Training loop with speed multiplier
-    if (trainingEnabled) {
-        // Reset crashed drones independently (don't block training for others)
-        for (let i = 0; i < drones.length; i++) {
-            if (drones[i].crashed || drones[i].isDestroyed) {
-                drones[i].resetWithPosition(DRONE_SPAWNS[i].pos);
-                drones[i].body.material.color.set(DRONE_SPAWNS[i].color);
-                // Orient only THIS drone toward enemies
-                const enemies = drones.filter(o => o.team !== drones[i].team);
-                if (enemies.length > 0) {
-                    const cx = enemies.reduce((s, e) => s + e.position.x, 0) / enemies.length;
-                    const cz = enemies.reduce((s, e) => s + e.position.z, 0) / enemies.length;
-                    const dx = cx - drones[i].position.x;
-                    const dz = cz - drones[i].position.z;
-                    const baseYaw = Math.atan2(dx, -dz);
-                    const dev = (Math.random() - 0.5) * (Math.PI / 3);
-                    drones[i].setInitialRotation(0, baseYaw + dev, 0);
-                }
-                // RL agent already called endEpisode() in step()
-                if (rlAgents[i]) {
-                    rlAgents[i].prevAction = null;
-                    rlAgents[i].prevStates = [];
-                    rlAgents[i].noiseState.fill(0);
-                    if (trainingEnabled) rlAgents[i].isTraining = true;
-                }
+
+    if (evolutionRunning) {
+        if (headlessMode) {
+            // Flat-out: fill the frame's time budget with sim ticks, render nothing
+            window.fxEnabled = false;
+            runHeadlessTicks(time + HEADLESS_BUDGET_MS);
+        } else {
+            // Heavy FX only at watchable speeds
+            window.fxEnabled = simSpeed <= 3;
+            for (let t = 0; t < simSpeed; t++) {
+                simTick(TICK_DT, t === simSpeed - 1);
             }
         }
-        
-        // Run multiple RL steps per frame when speed > 1
-        const stepsPerFrame = Math.min(trainingSpeed, 20);
-        for (let s = 0; s < stepsPerFrame; s++) {
-            for (let i = 0; i < rlAgents.length; i++) {
-                if (!drones[i].isDestroyed && !drones[i].crashed) rlAgents[i].step(delta / stepsPerFrame);
-            }
-        }
-        
-        if (centralizedTrainer && centralizedTrainer.isActive) {
-            centralizedTrainer.step(delta);
-        }
-        
-        // Update viz — faster at high speeds, minimum 200ms interval
-        const updateInterval = trainingSpeed > 5 ? 200 : 500;
-        if (Math.floor(time / updateInterval) > Math.floor(prevTime / updateInterval)) {
-            // Aggregate stats across all agents for charts
-            const allStats = rlAgents.map(a => a.getStats());
-            const best = allStats.reduce((b, s) => s.episode >= b.episode ? s : b, allStats[0]);
-            const mergedStats = {
-                episode: rlAgents.reduce((s, a) => s + a.episode, 0),
-                totalRewards: best.totalRewards,
-                episodeLengths: best.episodeLengths,
-                runningAvgReward: Math.max(...allStats.map(s => s.runningAvgReward || 0)),
-                explorationRate: allStats.reduce((s, x) => s + x.explorationRate, 0) / allStats.length,
-                stabilityScores: best.stabilityScores,
-                successRate: allStats.reduce((s, x) => s + x.successRate, 0) / allStats.length,
-                kills: allStats.reduce((s, x) => s + x.kills, 0),
-                deaths: allStats.reduce((s, x) => s + x.deaths, 0),
-                replayBufferSize: allStats.reduce((s, x) => s + x.replayBufferSize, 0),
-                criticUpdates: allStats.reduce((s, x) => s + x.criticUpdates, 0),
-                weightDrift: best.weightDrift
-            };
-            visualizer.updateCharts(mergedStats);
-            updateInfoDisplay();
-            updateScoreboard();
-        }
-    } else {
+    } else if (!headlessMode) {
+        // Idle demo mode: gentle hover
+        window.fxEnabled = true;
         for (const d of drones) {
-            if (!d.isDestroyed) applyHoverControl(d, delta);
+            if (!d.isDestroyed && !d.crashed) {
+                applyHoverControl(d, delta);
+                d.update(delta, true);
+            }
+            if (d.projectiles.length > 0 || d.weaponCooldown > 0) {
+                d.updateProjectiles(delta, []);
+            }
         }
     }
-    
+
+    // Throttled UI refresh — at headless speeds generations turn over many
+    // times a second, so charts/HUD redraw on a timer, not per generation.
+    if (time - lastHudUpdate > 250) {
+        lastHudUpdate = time;
+        refreshThrottledUI(time);
+    }
+
+    if (headlessMode) {
+        // No camera, no render — the overlay explains the frozen scene
+        prevTime = time;
+        return;
+    }
+
     // Camera movement (desktop)
     if (document.pointerLockElement === document.getElementById('canvas')) {
         const friction = 10.0;
@@ -1073,11 +1513,11 @@ function animate() {
 
         const currentSpeed = running ? moveSpeed * 1.5 : moveSpeed;
         const acceleration = 65.0 * delta;
-        
+
         const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
         const upVector = new THREE.Vector3(0, 1, 0);
         const rightVector = new THREE.Vector3().crossVectors(upVector, forwardVector).normalize();
-        
+
         if (moveForward || moveBackward) {
             velocity.x += forwardVector.x * direction.z * acceleration;
             velocity.y += forwardVector.y * direction.z * acceleration;
@@ -1090,7 +1530,7 @@ function animate() {
         if (moveUp || moveDown) {
             velocity.y += direction.y * acceleration;
         }
-        
+
         const maxVelocity = currentSpeed;
         const curVel = Math.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2);
         if (curVel > maxVelocity) {
@@ -1123,7 +1563,7 @@ function animate() {
         forwardVector.y = 0;
         forwardVector.normalize();
         const rightVector = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), forwardVector).normalize();
-        
+
         if (moveForward || moveBackward) {
             velocity.x += forwardVector.x * direction.z * acceleration;
             velocity.z += forwardVector.z * direction.z * acceleration;
@@ -1132,97 +1572,28 @@ function animate() {
             velocity.x += rightVector.x * direction.x * acceleration;
             velocity.z += rightVector.z * direction.x * acceleration;
         }
-        
+
         camera.position.x += velocity.x * delta;
         camera.position.z += velocity.z * delta;
-        
+
         camera.position.y = Math.max(1, Math.min(14, camera.position.y));
         camera.position.x = Math.max(-29, Math.min(29, camera.position.x));
         camera.position.z = Math.max(-19, Math.min(19, camera.position.z));
     }
 
     prevTime = time;
-    
-    // At very high speeds, skip some renders
-    if (trainingSpeed > 10 && trainingEnabled && time % 3 !== 0) return;
     renderer.render(scene, camera);
 }
 
 function applyHoverControl(drone, deltaTime) {
-    const state = drone.getState();
     const targetHeight = 5.0;
-    const heightError = targetHeight - state.position.y;
+    const heightError = targetHeight - drone.position.y;
     let thrust = Math.max(0.1, Math.min(0.9, 0.5 + heightError * 0.05));
-    
+
     drone.setControlInputs(
-        -state.rotation.x * 0.5,
-        -state.rotation.z * 0.5,
+        -drone.tiltX * 0.5,
+        -drone.tiltZ * 0.5,
         0,
         thrust
     );
-}
-
-// ─── Drone & RL Initialization ───────────────────────────────────
-function createDrones() {
-    for (let i = 0; i < DRONE_SPAWNS.length; i++) {
-        const s = DRONE_SPAWNS[i];
-        const drone = new Drone(scene, s.pos, s.color, i);
-        drone.team = s.team;
-        drones.push(drone);
-    }
-    window.drones = drones;
-    orientDronesAtOpponents();
-}
-
-function orientDronesAtOpponents() {
-    for (let i = 0; i < drones.length; i++) {
-        const d = drones[i];
-        const enemies = drones.filter(o => o.team !== d.team);
-        if (enemies.length === 0) continue;
-        const cx = enemies.reduce((s, e) => s + e.position.x, 0) / enemies.length;
-        const cz = enemies.reduce((s, e) => s + e.position.z, 0) / enemies.length;
-        const dx = cx - d.position.x;
-        const dz = cz - d.position.z;
-        const baseYaw = Math.atan2(dx, -dz);
-        const dev = (Math.random() - 0.5) * (Math.PI / 3);
-        d.setInitialRotation(0, baseYaw + dev, 0);
-    }
-}
-
-function initializeRL() {
-    for (let i = 0; i < drones.length; i++) {
-        const others = drones.filter((_, j) => j !== i);
-        const rl = new ReinforcementLearning(drones[i], others);
-        rlAgents.push(rl);
-    }
-    centralizedTrainer = new CentralizedTraining(rlAgents);
-}
-
-function resetAllDrones() {
-    for (let i = 0; i < drones.length; i++) {
-        drones[i].resetWithPosition(DRONE_SPAWNS[i].pos);
-        drones[i].body.material.color.set(DRONE_SPAWNS[i].color);
-    }
-    orientDronesAtOpponents();
-    
-    for (let i = 0; i < rlAgents.length; i++) {
-        if (rlAgents[i].isTraining && rlAgents[i].episodeStep > 0) {
-            rlAgents[i].endEpisode();
-        } else {
-            rlAgents[i].episodeStep = 0;
-            rlAgents[i].episodeReward = 0;
-            rlAgents[i].prevAction = null;
-            rlAgents[i].prevStates = [];
-            rlAgents[i].stabilityScores = [];
-            rlAgents[i].noiseState.fill(0);
-        }
-        if (trainingEnabled) rlAgents[i].isTraining = true;
-    }
-    
-    if (centralizedTrainer && centralizedTrainer.isActive) centralizedTrainer.reset();
-    updateScoreboard();
-}
-
-function resetDronesForCombat() {
-    resetAllDrones();
 }

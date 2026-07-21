@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Food Delivery Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Food Delivery Neuroevolution</h1>
+            <span class="brand-sub">GPS-guided couriers · no gradients</span>
+        </div>
+        <div id="top-stats">
+            <span class="tstat">gen <b id="stat-gen">1</b></span>
+            <span class="tstat badge" id="stat-phase">phase 0 · delivery only</span>
+            <span class="tstat">champion <b id="stat-best">–</b></span>
+            <span class="tstat" title="best / population mean deliveries last generation">deliveries <b id="stat-deliv">–</b></span>
+            <span class="tstat">rate <b id="stat-rate">1×</b></span>
+        </div>
+        <div id="top-actions">
+            <div id="speed-group" aria-label="Simulation speed"></div>
+            <button id="btn-pause" class="btn primary">Pause</button>
+            <label class="check-row top-check" title="Skip world rendering and run evolution at maximum speed">
+                <input type="checkbox" id="chk-headless">
+                <span>Headless</span>
+            </label>
+            <label class="check-row top-check" title="Frozen eval: no time limit and no evolution — the current brains drive until every car is eliminated (stagnant survivors time out), then the run restarts">
+                <input type="checkbox" id="chk-eval">
+                <span>Eval</span>
+            </label>
+        </div>
+    </header>
+
+    <main id="layout">
+        <aside id="panel-left">
+            <section class="card">
+                <h2>Evolution</h2>
+                <label class="slider-row">
+                    <span>Population <b id="lb-pop">64</b> <i class="hint">next gen</i></span>
+                    <input type="range" id="sl-pop" min="16" max="256" value="64" step="16">
+                </label>
+                <label class="slider-row">
+                    <span>Elites kept unmutated <b id="lb-elites">2</b></span>
+                    <input type="range" id="sl-elites" min="1" max="8" value="2" step="1">
+                </label>
+                <label class="slider-row" title="How many generations an elite survives after earning its slot, even if unlucky deaths tank its score. Longer grace = safer leaders but slower learning (benchmarked)">
+                    <span>Elite grace <b id="lb-grace">4 gens</b></span>
+                    <input type="range" id="sl-grace" min="0" max="15" value="4" step="1">
+                </label>
+                <label class="slider-row">
+                    <span>Mutation chance / child <b id="lb-mutchance">90%</b></span>
+                    <input type="range" id="sl-mutchance" min="0" max="100" value="90" step="5">
+                </label>
+                <label class="slider-row" title="How many of the 3,210 weights get gaussian noise per mutation event — few-but-strong won the benchmark">
+                    <span>Genes per mutation <b id="lb-mutgenes">8</b></span>
+                    <input type="range" id="sl-mutgenes" min="0" max="100" value="26" step="1">
+                </label>
+                <label class="slider-row">
+                    <span>Mutation strength <b id="lb-sigma">σ 0.30</b></span>
+                    <input type="range" id="sl-sigma" min="0.01" max="1" value="0.30" step="0.01">
+                </label>
+                <label class="slider-row" title="Share of the population given to mutated copies of the elite cars; their unmutated originals always survive alongside for the grace window. At 100% every free slot is an elite variant — no crossover children, no immigrants. Applies at the next generation, no reset needed">
+                    <span>Elite variants <b id="lb-elitemut">8%</b></span>
+                    <input type="range" id="sl-elitemut" min="0" max="100" value="8" step="1">
+                </label>
+                <label class="slider-row" title="Mutation spread applied to the elite copies — small probes near the elite, large explores far from it">
+                    <span>Elite variant spread <b id="lb-elitesigma">σ 0.18</b></span>
+                    <input type="range" id="sl-elitesigma" min="0.01" max="1" value="0.18" step="0.01">
+                </label>
+                <label class="slider-row">
+                    <span>Random immigrants <b id="lb-immigrants">12%</b></span>
+                    <input type="range" id="sl-immigrants" min="0" max="25" value="12" step="1">
+                </label>
+                <label class="slider-row">
+                    <span>Selection pressure <b id="lb-pressure">2.0</b></span>
+                    <input type="range" id="sl-pressure" min="1" max="3" value="2" step="0.1">
+                </label>
+                <label class="check-row" title="Automatically raise mutation when evolution stagnates">
+                    <input type="checkbox" id="chk-stagnation" checked>
+                    <span>Boost mutation on stagnation</span>
+                </label>
+            </section>
+
+            <section class="card">
+                <h2>Environment</h2>
+                <label class="slider-row">
+                    <span>Episode length <b id="lb-eplen">90s</b></span>
+                    <input type="range" id="sl-eplen" min="30" max="240" value="90" step="5">
+                </label>
+                <label class="slider-row" title="Episodes per generation — spawns and jobs reshuffle every generation, but within a generation every car drives the same shared scenarios; fitness aggregates mean/median/worst">
+                    <span>Episodes / generation <b id="lb-episodes">2</b></span>
+                    <input type="range" id="sl-episodes" min="1" max="4" value="2" step="1">
+                </label>
+                <label class="select-row">
+                    <span>Auto-change town</span>
+                    <select id="sel-autochange">
+                        <option value="0">off</option>
+                        <option value="3">every 3 gens</option>
+                        <option value="5">every 5 gens</option>
+                        <option value="10">every 10 gens</option>
+                        <option value="20">every 20 gens</option>
+                    </select>
+                </label>
+                <label class="select-row" title="Car-to-car contact (collisions + radar). Ghost episodes let cars pass through each other so clean route driving is selected for; contact episodes keep collision avoidance under selection. Applies per episode slot each generation — episode 1 always has contact.">
+                    <span>Car contact</span>
+                    <select id="sel-carcontact">
+                        <option value="1">every episode</option>
+                        <option value="2" selected>1 in 2 episodes</option>
+                        <option value="3">1 in 3 episodes</option>
+                    </select>
+                </label>
+                <label class="slider-row" title="Median deliveries per episode needed to advance the spawn curriculum: delivery-only &rarr; pickup first &rarr; full job pool">
+                    <span>Curriculum threshold <b id="lb-curriculum">1.0</b></span>
+                    <input type="range" id="sl-curriculum" min="0" max="3" value="1" step="0.5">
+                </label>
+                <div class="row">
+                    <button id="btn-newtown" class="btn">New town</button>
+                    <span class="hint" id="seed-label">#–</span>
+                </div>
+                <div class="stats-grid mini">
+                    <div class="stat"><span class="stat-label">Alive</span><span class="stat-value" id="stat-alive">–</span></div>
+                    <div class="stat"><span class="stat-label">Episode</span><span class="stat-value" id="stat-episode">–</span></div>
+                    <div class="stat"><span class="stat-label">Stagnation</span><span class="stat-value" id="stat-stag">0</span></div>
+                    <div class="stat"><span class="stat-label">Diversity</span><span class="stat-value" id="stat-div">–</span></div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Save</h2>
+                <p class="note" id="save-note">autosaves at generation end</p>
+                <div class="row">
+                    <button id="btn-export" class="btn" title="Download the champion genome as JSON">Export</button>
+                    <button id="btn-import" class="btn" title="Load a previously exported champion">Import</button>
+                    <button id="btn-reset" class="btn danger" title="Wipe champion, population and history">Reset</button>
+                    <button id="btn-selftest" class="btn" title="Run the in-page assertion suite">Test</button>
+                    <input type="file" id="file-import" accept=".json" hidden>
+                </div>
+            </section>
+
+            <details class="card about">
+                <summary>How it works</summary>
+                <p>Every car is driven by a feed-forward network (61 &rarr; 32 &rarr; 24 &rarr; 16 &rarr; 2) whose full set of <b>weights and biases is its genome</b>. It sees 14 rays &times; 3 channels (walls, cars, people &mdash; trees sit on the already-fatal grass, so sensing them was pure noise), its speed and compass, a fictional <b>GPS</b> (heading error, cross-track offset, the next two turns, a red-light warning, lane position) and a <b>dwell-progress signal</b> that rises while a stop registers and snaps to zero when it completes &mdash; the cue to pull away again. Outputs are steering and throttle; the speed limit is generous and <b>cruising pace is the net's own choice</b>. There is no backpropagation anywhere.</p>
+                <p>Each generation the whole population drives the same seeded episodes at once, and car-to-car contact follows a schedule (Car contact select): in <b>ghost episodes</b> cars neither see nor hit each other &mdash; drawn translucent &mdash; isolating clean route driving, while contact episodes keep collision avoidance under selection; with the default 1-in-2 every generation scores both skills. Fitness is dominated by <b>completed deliveries</b>, then pickups (paid <b>in proportion to the route driven</b> to earn them), a dense <b>carry ramp</b> &mdash; every px the food gets closer to its door than ever before on that leg pays out, once &mdash; route coverage, a graded <b>approach credit</b> for reaching a door slowly, distance, collisions and traffic law. Ending a job any way other than delivering &mdash; parked out, crashed, executed at a red &mdash; <b>forfeits that pickup's credit</b>: arriving alive always beats arriving fast and dead, and parking on a banked reward never beats carrying the food. Survivors breed by <b>copy-paste crossover</b> &mdash; contiguous slices or single genes copied directly from each parent &mdash; plus gaussian noise on a slider-chosen number of genes. Elites survive byte-identical with a <b>grace window</b> (slider, default 4 generations &mdash; longer grace was benchmarked slower; graced elites don't breed until they re-earn their rank) &mdash; getting rammed by another car cannot erase a good genome; only a newcomer that clearly beats an elite's record <b>and beats it head-to-head in every episode</b> of a generation (or expiry) ends its protection &mdash; one lucky episode evicts nobody &mdash; while a slider-chosen share of <b>mutated elite copies</b> &mdash; with their own mutation-spread slider &mdash; competes alongside random immigrants; a variant only takes over by genuinely out-scoring its untouched original.</p>
+                <p>Towns rotate through <b>four layout styles</b> &mdash; classic grid, roundabout, one-way couplet, and curved streets &mdash; with dense traffic lights. Slim <b>one-way streets</b> and the <b>roundabout ring</b> are single-lane; driving against them counts as wrong-side driving. Cars spawn evenly spread along the road network, and the scenario <b>reshuffles every generation</b>: fresh spawn positions, job draws and pedestrian streams each time, so leaders must re-prove themselves instead of replaying one memorized route &mdash; while within a generation every car drives the <b>same shared scenario</b>, keeping the ranking fair. The curriculum climbs three rungs: cars first spawn <b>already carrying</b> with the nearest home door as target &mdash; the drive-a-leg-then-stop endgame is trained directly &mdash; then, once the population median delivers reliably, they start empty and must reach the <b>nearest short-route pickup</b> first; finally jobs rotate across the whole pool and chain pickup &rarr; delivery &rarr; next pickup. Driving off the route triggers an A* <b>replan</b>, exactly like a satnav. Overshooting a door opens a short <b>recovery window</b>: the GPS aims back at the target so braking or reversing can save the stop; blowing past it counts as a <b>miss</b> and reroutes around the block, since U-turns are banned. A first miss costs a little fitness &mdash; <b>repeat misses on the same stop cost 350 each</b>, and route coverage pays at most once per leg, so circling a missed door only bleeds points. Deliveries require a genuine <b>standstill</b> at the door. Buildings, trees, <b>the grass</b>, <b>other cars</b>, <b>pedestrians</b> and <b>red lights</b> are all instantly fatal &mdash; but fairly so: lights carry a one-second <b>all-red clearance</b> (a just-flipped red is not an execution), pedestrians <b>look both ways</b> before stepping off the curb and bumping into a stationary car is their blunder, and lawful waiting &mdash; at a red, boxed into a queue, or yielding to a crossing pedestrian &mdash; never counts as stagnation (though a car that makes no progress at all for a full minute is retired, abandoning any carried job). In a head-on crash the <b>wrong-side driver bears the heavier penalty</b> (2&times;) while the car in its legal lane pays a reduced one (0.35&times;). The <b>Eval</b> toggle freezes evolution and lifts the time limit: the current brains simply drive until the last car is out.</p>
+            </details>
+        </aside>
+
+        <div id="viewport">
+            <canvas id="sim"></canvas>
+            <div id="toasts"></div>
+        </div>
+
+        <aside id="panel-right">
+            <section class="card">
+                <h2>Selected car's brain <span class="hint">live activations</span></h2>
+                <canvas id="nnviz" width="300" height="268"></canvas>
+            </section>
+            <section class="card">
+                <h2>Fitness <span class="hint">per generation</span></h2>
+                <canvas id="chart-fitness" width="300" height="100"></canvas>
+                <p class="legend"><i class="dot dot-orange"></i>best <i class="dot dot-blue"></i>population mean · shaded bands = town changes</p>
+            </section>
+            <section class="card">
+                <h2>Deliveries <span class="hint">per episode</span></h2>
+                <canvas id="chart-deliveries" width="300" height="84"></canvas>
+                <p class="legend"><i class="dot dot-green"></i>best <i class="dot dot-blue"></i>population mean</p>
+            </section>
+            <section class="card">
+                <h2>Selected car</h2>
+                <div class="check-line">
+                    <label class="check-row"><input type="checkbox" id="chk-autobest" checked><span>auto-select best</span></label>
+                    <label class="check-row"><input type="checkbox" id="chk-follow"><span>follow cam</span></label>
+                    <label class="check-row"><input type="checkbox" id="chk-sensors" checked><span>sensors</span></label>
+                </div>
+                <div class="tele">
+                    <div><span>State</span><b id="tele-state">–</b></div>
+                    <div><span>Speed</span><b id="tele-speed">–</b></div>
+                    <div><span>Jobs</span><b id="tele-jobs">–</b></div>
+                    <div><span>Route</span><b id="tele-cover">–</b></div>
+                    <div><span>Collisions</span><b id="tele-coll">–</b></div>
+                    <div><span>Law</span><b id="tele-law">–</b></div>
+                    <div><span>Fitness</span><b id="tele-fit">–</b></div>
+                </div>
+            </section>
+        </aside>
+    </main>
+</div>
+<script src="rng.js"></script>
+<script src="nn.js"></script>
+<script src="town.js"></script>
+<script src="route.js"></script>
+<script src="world.js"></script>
+<script src="evolution.js"></script>
+<script src="ui.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

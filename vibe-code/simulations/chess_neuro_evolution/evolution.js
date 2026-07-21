@@ -106,6 +106,15 @@ function chooseMove(game, genome, noise, rng, record) {
     let best = null, bestScore = -Infinity, bestFeatRecord = null;
     for (const m of moves) {
         const undo = game._make(m);
+        // Exact terminal detection: a 1-ply evaluator cannot tell checkmate
+        // from a harmless check (it never sees the opponent's reply count),
+        // so a move that mates on the spot is always played. Only computed
+        // when the move gives check, which keeps it cheap.
+        if (game.inCheck(-side) && game.moves().length === 0) {
+            game._unmake(m, undo);
+            if (record) record.score = 1;
+            return m;
+        }
         const feats = encodeFeatures(game, side, oppMoves, game.ply + 1);
         const wantRecord = record ? [] : null;
         let score = forward(genome, feats, wantRecord);
@@ -131,11 +140,14 @@ class Match {
     }
 
     // Advance one ply. Returns true if the game just finished.
-    step(pop, noise, rng, record) {
+    // Protected genomes (exact elites + champion, indices < protectedCount)
+    // play without exploration noise so their results are deterministic.
+    step(pop, noise, rng, record, protectedCount) {
         if (this.done) return false;
         const g = this.game;
         const idx = g.turn === 1 ? this.white : this.black;
-        const move = chooseMove(g, pop[idx].genome, noise, rng, record);
+        const useNoise = idx < (protectedCount | 0) ? 0 : noise;
+        const move = chooseMove(g, pop[idx].genome, useNoise, rng, record);
         if (move === null) {
             this._finish(g.result() || { winner: 0, reason: 'stalemate' });
             return true;
@@ -158,11 +170,15 @@ class Match {
     }
 
     // Fitness for one player. Wins dominate everything; material, survival and
-    // speed are small shaping terms only.
+    // speed are small shaping terms only. Checkmates beat adjudications so
+    // evolution is pushed toward actually finishing games.
     fitnessFor(side) {
         const mat = Math.max(-10, Math.min(10, this.game.material() * side));
         const plies = this.game.ply;
-        if (this.outcome.winner === side) return WIN_REWARD + (MAX_PLIES - plies) * 5 + mat * 20;
+        if (this.outcome.winner === side) {
+            const mateBonus = this.outcome.reason === 'checkmate' ? 1500 : 0;
+            return WIN_REWARD + mateBonus + (MAX_PLIES - plies) * 5 + mat * 20;
+        }
         if (this.outcome.winner === 0) return 1000 + mat * 40;
         return -1000 + mat * 40 + plies * 2;
     }
@@ -185,6 +201,7 @@ class Evolution {
         this.diversity = 0;
         this.leaderIdx = 0;
         this.recordLeader = true; // UI turns this off in headless mode
+        this._protectedCount = 0; // gen 1 is fully random, nothing protected yet
         this.pop = [];
         for (let i = 0; i < this.popSize; i++) {
             this.pop.push(this._newIndividual(randomGenome(this.rng)));
@@ -264,7 +281,7 @@ class Evolution {
             const isLeader = this.recordLeader &&
                 (m.white === this.leaderIdx || m.black === this.leaderIdx);
             const record = isLeader ? {} : null;
-            const finished = m.step(this.pop, this.noise, this.rng, record);
+            const finished = m.step(this.pop, this.noise, this.rng, record, this._protectedCount);
             if (record && record.layers) this.leaderRecord = record;
             made++;
             if (finished) {
@@ -418,6 +435,7 @@ class Evolution {
             next.push(this._newIndividual(cloneGenome(this.champion.genome)));
         }
         this._champRef = next.length > GA.elites ? next[GA.elites].genome : next[0].genome;
+        this._protectedCount = next.length; // elites + champion play noise-free
         this.leaderIdx = 0; // elites are placed first; slot 0 is last gen's best
 
         // rank-biased parent sampling
