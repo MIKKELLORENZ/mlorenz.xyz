@@ -420,6 +420,20 @@ function followRoute(route, car) {
     };
 }
 
+// Compass heading (radians) of the route's tangent at an arc-length position
+// `dist` px along the route, clamped to the route's extent. Used to feed the
+// net the direction the GPS line points AHEAD of the car's current position -
+// a look-ahead heading it can steer toward before the turn arrives.
+function routeHeadingAt(route, dist) {
+    const pts = route.pts, cum = route.cum, last = pts.length - 1;
+    if (last < 1) return 0;
+    const d = clamp(dist, 0, route.total);
+    let i = 0;
+    while (i < last - 1 && cum[i + 1] < d) i++;
+    const A = pts[i], B = pts[i + 1];
+    return Math.atan2(B.y - A.y, B.x - A.x);
+}
+
 // Next light-controlled stop line ahead on the route within `range` px.
 // Returns {dist, state} or null.
 function routeLightAhead(town, route, routeDist, simTime, range) {
@@ -460,6 +474,6 @@ function generateJobs(town, seed, count) {
 if (typeof module !== 'undefined') {
     module.exports = {
         WAYPOINT_SPACING, OFFROUTE_DIST, RECOVER_DIST, buildAdjacency, nearestLanePoint,
-        buildRoute, followRoute, routeLightAhead, generateJobs
+        buildRoute, followRoute, routeHeadingAt, routeLightAhead, generateJobs
     };
 }

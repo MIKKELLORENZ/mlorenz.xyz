@@ -15,6 +15,14 @@ const CAR_LEN = 18, CAR_W = 9;
 const CAR_MAXV = 360, CAR_MAXREV = 40;
 const CAR_ACCEL = 240, CAR_BRAKE = 420;
 const WHEELBASE = 12, MAX_STEER = 0.45;
+// Low-speed steering boost. In a pure bicycle model turn radius is
+// speed-independent, so a crawling car can't tuck into a tight corner any
+// better than one at cruise. Real cars (and the tight-canal boats) can crank
+// the wheel harder when slow, so scale the steer limit up as speed drops: full
+// LOW_SPEED_STEER_BOOST at standstill, tapering to the nominal cap by
+// STEER_FULL_V. This lets the net make genuinely sharper turns at low speed.
+const STEER_FULL_V = 180;            // px/s at/above which no boost is applied
+const LOW_SPEED_STEER_BOOST = 1.9;   // steer-limit multiplier at a standstill
 const ACTION_SMOOTH = 0.22;            // per physics tick toward the raw NN action
 // Pickups/deliveries require a genuine STANDSTILL at the door (<6 px/s held
 // for the dwell time), not just slow rolling.
@@ -22,6 +30,16 @@ const ARRIVE_RADIUS = 26, ARRIVE_SPEED = 6, ARRIVE_DWELL = 0.4;
 const RED_GRACE = 1.0;      // s: crossing within the all-red clearance is legal
 const NOPROGRESS_TIMEOUT = 18;   // s unblocked without route progress
 const NOPROGRESS_ABS = 60;       // s without progress from ANY cause (jams must dissolve)
+// Live "unstick" jolt: a car sitting COMPLETELY still on a clear road - not
+// held at a red, not boxed in behind a car, not yielding to a pedestrian - is a
+// brain that has simply stopped driving. Rather than waste the rest of the
+// round on it (or wait out the full no-progress timeout), we flag it so the
+// evolution loop can randomly mutate its genome live and give it a chance to
+// get moving again. FROZEN_SPEED sits at the stiction pin, so a parked car
+// reads exactly 0; the jolt only fires after FROZEN_JOLT_TIME of unbroken,
+// unheld standstill, then re-arms.
+const FROZEN_SPEED = 12;         // px/s below which the car counts as frozen
+const FROZEN_JOLT_TIME = 4.0;    // s of continuous unheld standstill before a jolt
 const OFFROUTE_TICKS = 10;             // NN ticks (0.5 s) before a replan
 const REPLAN_COOLDOWN = 2;
 const MISS_DIST = 130;                 // replanning this close to the target door
@@ -34,18 +52,23 @@ const MISS_DIST = 130;                 // replanning this close to the target do
 // cars parked there forever - the "one delivery wall".
 const RAMP_PAY_CAP = 700;              // px of paid progress per leg
 const N_PEDS = 16, PED_SPEED = 20, PED_R = 4;
+const ROUTE_LOOKAHEAD = 90;            // px ahead of the car's route position at
+                                       // which the GPS look-ahead heading is read
 
 function createWorld(town, jobs) {
     return {
         town, jobs, cars: [], peds: [], simTime: 0, tick: 0,
         phase: 0, episodeIdx: 0,
-        // Car-to-car contact schedule: episode slots where episodeIdx %
-        // carContactEvery === 0 run with full contact (collisions + radar);
-        // the other slots are GHOST episodes - cars neither see nor hit each
-        // other, so route driving is selected on undisturbed, while contact
-        // slots keep collision avoidance under selection every generation.
-        // (Per-slot, not per-generation: mixing inside the generation keeps
-        // elite records and head-to-head comparisons on a stationary scale.)
+        // Car-to-car contact schedule. carContactEvery = N > 0: episode slots
+        // where episodeIdx % N === 0 run with full contact (collisions + radar),
+        // the rest are GHOST episodes - cars neither see nor hit each other, so
+        // route driving is selected on undisturbed while contact slots keep
+        // collision avoidance under selection. carContactEvery === 0 is PURE
+        // GHOST mode: every episode is a ghost, cars can never hit each other at
+        // all (train without any car-crash risk). (Per-slot, not per-generation:
+        // mixing inside a generation keeps elite records and head-to-head
+        // comparisons on a stationary scale; pure-ghost is uniform, so it stays
+        // consistent too - every generation is scored on the same ghost world.)
         carContactEvery: 1, carContact: true,
         dynGrid: null, recordCarIdx: -1, lastRecord: null,
         pedRng: mulberry32(1), epRng: mulberry32(1)
@@ -70,16 +93,24 @@ function _newCar(idx, genome) {
         steer: 0, throttle: 0, rawSteer: 0, rawThrottle: 0,
         alive: true, retired: null,
         inp: new Float64Array(NN_IN),
+        // Temporal window (v6): a ring buffer of the last MAXHIST base-channel
+        // vectors. computeInputs fills the current slot, then assembles inp as
+        // a lag-0 block plus the per-channel lags DEPTH asks for. All-zero at
+        // spawn = "no history yet" (a car reads its own rates as 0 for the
+        // first MAXHIST ticks, exactly as a real sensor filter would boot).
+        histBuf: Array.from({ length: MAXHIST }, () => new Float64Array(NC)),
+        histWrite: 0,
         route: null, routeIdx: 0, maxRouteDist: 0, nextLightIdx: 0,
         carrying: false, job: null, jobsDone: 0, leg: 'toDelivery', curPickupEarned: 0,
         offRouteTicks: 0, replanCooldown: 0,
         dwell: 0,
         progressTimer: 0, lastProgress: 0, sinceProgress: 0,
+        frozenTime: 0, _joltPending: false,
         coverageBase: 0, legCoverage: 0, legMisses: 0, lastFollow: null,
         approachBase: 0, legApproachMax: 0, _minTD: Infinity, _minTDv: 0, legStartDist: 0,
         bestRemain: Infinity, legRampPaid: 0,
         _frontCarPx: SENSOR_RANGE, _frontPedPx: SENSOR_RANGE,
-        m: { deliveries: 0, pickups: 0, pickupEarned: 0, legProgress: 0, coverage: 0, approach: 0, distance: 0, carColl: 0, carCollFault: 0, pedColl: 0, crash: 0, wrongSideSec: 0, redLightRuns: 0, replans: 0, misses: 0, repeatMisses: 0 }
+        m: { deliveries: 0, pickups: 0, pickupEarned: 0, legProgress: 0, coverage: 0, approach: 0, distance: 0, carColl: 0, carCollFault: 0, pedColl: 0, crash: 0, wrongSideSec: 0, redLightRuns: 0, replans: 0, misses: 0, repeatMisses: 0, jolts: 0 }
     };
 }
 
@@ -182,7 +213,10 @@ function _jobForNearest(world, slot, doorKey) {
 function startEpisode(world, genomes, phase, episodeIdx, epSeed) {
     world.phase = phase;
     world.episodeIdx = episodeIdx;
-    world.carContact = (episodeIdx % Math.max(1, Math.round(world.carContactEvery || 1))) === 0;
+    // every >= 1: contact on every `every`-th episode slot; every === 0 (or
+    // unset/NaN): pure-ghost mode, no car-to-car contact ever.
+    const every = Math.round(world.carContactEvery);
+    world.carContact = every >= 1 ? (episodeIdx % every === 0) : false;
     world.simTime = 0;
     world.tick = 0;
     world.epRng = mulberry32(mixSeed(epSeed, episodeIdx, 0xE915));
@@ -463,7 +497,10 @@ function _castRay(world, self, px, py, angle, res) {
 const _rayRes = { wall: 0, car: 0, person: 0 };
 
 function computeInputs(world, car) {
-    const inp = car.inp;
+    // Fill this tick's base-channel vector into the ring buffer's current slot;
+    // the temporal window is assembled from it (+ older slots) into car.inp at
+    // the end. inp[0..NC-1] below therefore addresses base channels, unchanged.
+    const inp = car.histBuf[car.histWrite];
     let fCar = SENSOR_RANGE, fPed = SENSOR_RANGE;
     for (let r = 0; r < N_RAYS; r++) {
         _rayRes.wall = SENSOR_RANGE; _rayRes.car = SENSOR_RANGE;
@@ -523,6 +560,28 @@ function computeInputs(world, car) {
     // back to 0 the moment the job advances - a direct "stop is done, GO"
     // signal the net can learn to release the brake on.
     inp[32] = clamp(car.dwell / ARRIVE_DWELL, 0, 1);
+    // Look-ahead GPS heading: the compass direction the route points at a fixed
+    // distance AHEAD of the car's current route position, relative to the car's
+    // own heading (sin/cos so there is no wrap discontinuity). Distinct from the
+    // immediate heading error (15/16): this reads the bend the car is driving
+    // INTO, so the net can begin the turn - and slow for it - before it arrives.
+    const aheadHeading = routeHeadingAt(car.route, f.routeDist + ROUTE_LOOKAHEAD);
+    const aheadRel = wrapAngle(aheadHeading - car.theta);
+    inp[33] = Math.sin(aheadRel);
+    inp[34] = Math.cos(aheadRel);
+
+    // Assemble the temporal window (v6): lag-0 full block first (keeps base
+    // channels at inp[0..NC-1] for the bootstrap prior and the overlay), then
+    // each deeper lag appends only the channels whose DEPTH reaches that far
+    // back. Then advance the ring so this tick becomes lag-1 next time.
+    const nin = car.inp;
+    let k = 0;
+    for (let c = 0; c < NC; c++) nin[k++] = inp[c];
+    for (let lag = 1; lag < MAXHIST; lag++) {
+        const s = car.histBuf[(car.histWrite - lag + MAXHIST) % MAXHIST];
+        for (let c = 0; c < NC; c++) if (DEPTH[c] > lag) nin[k++] = s[c];
+    }
+    car.histWrite = (car.histWrite + 1) % MAXHIST;
     return f;
 }
 
@@ -747,7 +806,10 @@ function stepWorld(world) {
         // whole population from ever registering stops from a moving
         // approach. A firm reverse (throttle < -0.15) still backs out.
         if (Math.abs(car.v) < 12 && car.throttle <= 0.02 && car.throttle > -0.15) car.v = 0;
-        car.theta += (car.v / WHEELBASE) * Math.tan(car.steer * MAX_STEER) * dt;
+        // Speed-scaled steering authority (sharper turns when slow, see const).
+        const speedFrac = Math.min(Math.abs(car.v), STEER_FULL_V) / STEER_FULL_V;
+        const steerLimit = MAX_STEER * (LOW_SPEED_STEER_BOOST - (LOW_SPEED_STEER_BOOST - 1) * speedFrac);
+        car.theta += (car.v / WHEELBASE) * Math.tan(car.steer * steerLimit) * dt;
         car.theta = wrapAngle(car.theta);
         car.x += Math.cos(car.theta) * car.v * dt;
         car.y += Math.sin(car.theta) * car.v * dt;
@@ -781,11 +843,26 @@ function stepWorld(world) {
             car.lastProgress = car.maxRouteDist;
             car.progressTimer = 0;
             car.sinceProgress = 0;
+            car.frozenTime = 0;                      // moving again = not frozen
         } else {
             car.sinceProgress += dt;
             const held = (car._frontCarPx < 34 || car._frontPedPx < 40 || car._lightWait) &&
                 Math.abs(car.v) < 30;
             if (!held) car.progressTimer += dt;
+            // Live-jolt arming: completely frozen, NOT lawfully waiting (held
+            // already covers reds, car queues and ped yields), not in the middle
+            // of registering a stop at a door, and NOT carrying food - a random
+            // kick could steer a carrying car into a wall and forfeit the
+            // hard-won pickup, so laden cars ride out the ordinary timeout
+            // instead. Flag it for the evolution loop to mutate, then re-arm the
+            // timer. The no-progress timeout below still eliminates a car that
+            // never recovers even after jolts.
+            if (!held && !car.carrying && car.dwell <= 0 && Math.abs(car.v) < FROZEN_SPEED) {
+                car.frozenTime += dt;
+                if (car.frozenTime >= FROZEN_JOLT_TIME) { car._joltPending = true; car.frozenTime = 0; }
+            } else {
+                car.frozenTime = 0;
+            }
             if (car.progressTimer > NOPROGRESS_TIMEOUT || car.sinceProgress > NOPROGRESS_ABS) {
                 _retire(car, 'timeout'); continue;   // _retire forfeits any carried pickup
             }

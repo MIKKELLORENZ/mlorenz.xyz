@@ -7,6 +7,30 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Smart Ocean Boats</h2>
+        <p>Tiny hydrofoil boats that taught <b>themselves</b> to run GPS courier routes
+           through islands — evolved generation by generation, no gradients, no maps
+           memorised. Pick how to begin:</p>
+        <div class="intro-choices">
+            <button id="intro-watch" class="intro-choice primary">
+                <b>▶&nbsp; Watch the trained champion</b>
+                <small>The best evolved brain sails the whole fleet at once</small>
+            </button>
+            <button id="intro-scratch" class="intro-choice">
+                <b>🧬&nbsp; Evolve from scratch</b>
+                <small>Random brains — watch them learn over generations</small>
+            </button>
+        </div>
+        <label class="intro-eval" title="Keeps a byte-for-byte copy of the best brain in the fleet every generation, so it re-spawns unchanged instead of drifting under mutation. Great for watching a fixed brain; leave off to let evolution keep tuning it.">
+            <input type="checkbox" id="intro-eval">
+            <span><b>Eval mode</b> — freeze the best brain so it spawns unchanged every generation</span>
+        </label>
+        <button id="intro-explore" class="intro-dismiss">or just explore the controls →</button>
+    </div>
+</div>
 <div id="app">
     <header id="topbar">
         <div class="brand">
@@ -71,7 +95,7 @@
                 </label>
                 <label class="slider-row" title="The reigning champion keeps an untouched seat for this many generations even when beaten — the boat that beat it becomes an elite alongside it. Only one boat holds grace at a time. 0 = off.">
                     <span>Champion grace <b id="lb-grace">3 gens</b></span>
-                    <input type="range" id="sl-grace" min="0" max="10" value="3" step="1">
+                    <input type="range" id="sl-grace" min="0" max="20" value="3" step="1">
                 </label>
                 <label class="slider-row">
                     <span>Mutation rate <b id="lb-mutrate">10%</b></span>
@@ -81,11 +105,22 @@
                     <span>Mutation strength <b id="lb-mutsig">0.15</b></span>
                     <input type="range" id="sl-mutsig" min="2" max="60" value="15" step="1">
                 </label>
+                <label class="slider-row" title="Once the best-ever fitness passes this, fresh random immigrant brains stop being injected — the population is refined only by children and elite mutations. 'never' keeps injecting them forever.">
+                    <span>Stop immigrants past <b id="lb-imm-zero">15k</b></span>
+                    <input type="range" id="sl-imm-zero" min="0" max="40000" value="15000" step="1000">
+                </label>
+                <label class="slider-row" title="Once the best-ever fitness passes this, crossover breeding stops too — the population becomes pure hill-climbing: untouched elites plus mutated copies of the survivors. Set above the immigrant gate. 'never' keeps crossover on forever.">
+                    <span>Stop crossover past <b id="lb-child-zero">25k</b></span>
+                    <input type="range" id="sl-child-zero" min="0" max="60000" value="25000" step="1000">
+                </label>
                 <button id="btn-restart" class="btn danger wide">Restart evolution</button>
             </section>
 
             <section class="card">
                 <h2>View</h2>
+                <label class="check-row" title="Turn off all rendering and pour every millisecond into physics + evolution — the fastest way to train. The scene is replaced by a small status card.">
+                    <input type="checkbox" id="chk-headless"><span><b>Headless mode</b> — no visuals, max speed</span>
+                </label>
                 <label class="check-row"><input type="checkbox" id="chk-sensors"><span>Sensor rays (best boat)</span></label>
                 <label class="check-row"><input type="checkbox" id="chk-currents" checked><span>Current field</span></label>
                 <label class="check-row"><input type="checkbox" id="chk-routes" checked><span>GPS route (best boat)</span></label>
@@ -102,7 +137,13 @@
                 </div>
                 <input type="file" id="file-import" accept=".json" style="display:none">
                 <button id="btn-import" class="btn wide">Import .json</button>
-                <p class="hint">Export gives you the raw weight matrices — same 47-in / 5-out contract a real boat controller would use.</p>
+                <button id="btn-default" class="btn wide primary">Load built-in champion</button>
+                <button id="btn-showcase" class="btn wide">Showcase — whole fleet</button>
+                <button id="btn-inject" class="btn wide" title="Drop the built-in champion into the evolving pool and shelter it for at least 10 generations so it can't be bred out before it proves itself.">Inject best brain — 10-gen grace</button>
+                <label class="check-row" title="Keeps a byte-for-byte copy of the best-ever brain in the fleet every generation, so the elite re-spawns unchanged instead of drifting under mutation.">
+                    <input type="checkbox" id="chk-eval"><span><b>Eval mode</b> — elite frozen, spawns unchanged</span>
+                </label>
+                <p class="hint">Export gives you the raw weight matrices — same 201-in / 5-out contract a real boat controller would use (46 channels, per-channel history depth).</p>
             </section>
         </aside>
 
@@ -143,6 +184,7 @@
 <script src="boat.js"></script>
 <script src="world.js"></script>
 <script src="evolution.js"></script>
+<script src="default_brain.js"></script>
 <script src="ui.js"></script>
 <script src="main.js"></script>
 </body>

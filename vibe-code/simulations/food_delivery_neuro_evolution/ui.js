@@ -304,7 +304,8 @@ function drawHistoryChart(canvas, history, keys, colors, fmt) {
 const SCALAR_LABELS = [
     'speed', 'sin hErr', 'cos hErr', 'x-track', 'wp dist', 'turn 1', 'turn 2',
     'route left', 'carrying', 'stop dist', 'light', 'glob x', 'glob y',
-    'sin θ', 'cos θ', 'prv steer', 'prv gas', 'lane pos', 'dwell'
+    'sin θ', 'cos θ', 'prv steer', 'prv gas', 'lane pos', 'dwell',
+    'sin ahd', 'cos ahd'
 ];
 
 function drawNNViz(canvas, record, genome) {
@@ -319,15 +320,22 @@ function drawNNViz(canvas, record, genome) {
     }
     const inp = record[0], h1 = record[1], h2 = record[2], h3 = record[3], out = record[4];
 
-    // Input geometry: 1x14 type-blind sensor row top-left, 19 scalar rows below.
+    // Input geometry: 1x14 type-blind sensor row top-left, 19 scalar rows below,
+    // then a compact grid of the temporal-window LAG channels (inputs >= NC) to
+    // the right - the channel history the v6 brain reads rates from.
     const gridX = 30, gridY = 16, cellW = 6.6, cellH = 9;
     const rowX = 12, rowY0 = gridY + cellH + 14, rowH = 11;
+    const lagCols = 5, lagX = rowX + 84, lagY = rowY0, lagCell = 7;
     const inputPos = i => {
         if (i < 14) {
             return { x: gridX + i * cellW + cellW / 2, y: gridY + cellH / 2 };
         }
-        const r = i - 14;
-        return { x: rowX + 52, y: rowY0 + r * rowH + rowH / 2 };
+        if (i < NC) {
+            const r = i - 14;
+            return { x: rowX + 52, y: rowY0 + r * rowH + rowH / 2 };
+        }
+        const k = i - NC;
+        return { x: lagX + (k % lagCols) * lagCell + lagCell / 2, y: lagY + Math.floor(k / lagCols) * lagCell + lagCell / 2 };
     };
     const h1X = W - 148, h2X = W - 110, h3X = W - 70, outX = W - 28;
     const h1Pos = j => ({ x: h1X, y: 12 + j * ((H - 24) / 31) });
@@ -389,13 +397,26 @@ function drawNNViz(canvas, record, genome) {
     ctx.fillText('sensors: rays 0-13 ↔', gridX, gridY - 4);
 
     // Scalar inputs.
-    for (let r = 0; r < 19; r++) {
+    for (let r = 0; r < SCALAR_LABELS.length; r++) {
         const v = inp[14 + r];
         ctx.fillStyle = 'rgba(235,242,255,0.5)';
         ctx.fillText(SCALAR_LABELS[r], rowX, rowY0 + r * rowH + 8);
         ctx.fillStyle = actColor(v);
         const p = inputPos(14 + r);
         ctx.beginPath(); ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Temporal-window lag channels (inputs >= NC): the last-tick copy of every
+    // channel the net reads a rate from, in a compact grid. Dimmer + smaller -
+    // they are history, not fresh sensing.
+    if (inp.length > NC) {
+        ctx.fillStyle = 'rgba(235,242,255,0.4)';
+        ctx.fillText('history (t-1)', lagX, lagY - 3);
+        for (let i = NC; i < inp.length; i++) {
+            const p = inputPos(i);
+            ctx.fillStyle = actColor(inp[i]);
+            ctx.fillRect(p.x - lagCell / 2 + 0.5, p.y - lagCell / 2 + 0.5, lagCell - 1.5, lagCell - 1.5);
+        }
     }
 
     // Hidden neurons.

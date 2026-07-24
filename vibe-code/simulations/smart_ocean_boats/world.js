@@ -9,7 +9,13 @@
 const DT = 1 / 30;              // physics tick
 const CONTROL_EVERY = 2;        // 15 Hz control loop, like the real hull
 const ARRIVAL_TIME_BONUS = 60;  // seconds added to a boat's own clock per arrival
-const EPISODE_HARD_CAP = 480;   // extra seconds past the start budget, total, ever
+// A boat sails as long as its own clock holds out — every arrival tops it up, so
+// a boat that keeps finding points keeps going. These are only safety ceilings so
+// an unbeatable boat can't make a generation run literally forever: the wall-time
+// backstop is set well above the ~55 arrivals a 100k score needs, and the arrival
+// freeze is the hard stop. Reaching 100k must stay possible, so both are generous.
+const EPISODE_HARD_CAP = 1600;  // seconds past the start budget before a forced stop
+const MAX_ARRIVALS = 80;        // freeze a boat after this many points (~150k ceiling)
 
 class World {
     constructor(map, router, brains, opts) {
@@ -87,6 +93,15 @@ class World {
             }
         }
         this._reachCells = cells;
+        // Cells eligible to host a GPS target: reachable AND with real sea-room,
+        // so a waypoint is never planted against a shore or the map wall (which
+        // would force every route into a close final approach). Fall back to the
+        // full reachable set only if a map is too tight to offer enough of them.
+        const good = cells.filter(c => {
+            const x = ((c % rgw) + 0.5) * rcell, y = (((c / rgw) | 0) + 0.5) * rcell;
+            return this.router._clearAt(x, y) >= 1.2;
+        });
+        this._pointCells = good.length >= Math.max(8, cells.length * 0.15) ? good : cells;
     }
 
     /* Roll the next shared GPS point: reachable water, a meaningful sail away
@@ -96,7 +111,7 @@ class World {
         const prev = this.points[this.points.length - 1] || this.map.spawn;
         let best = null;
         for (let tries = 0; tries < 200; tries++) {
-            const c = this._reachCells[(this._pointRng() * this._reachCells.length) | 0];
+            const c = this._pointCells[(this._pointRng() * this._pointCells.length) | 0];
             const x = ((c % rgw) + 0.5) * rcell;
             const y = (((c / rgw) | 0) + 0.5) * rcell;
             const d = Math.hypot(x - prev.x, y - prev.y);
@@ -142,6 +157,7 @@ class World {
         boat.legInitStraight = Math.max(1, Math.hypot(tx - boat.x, ty - boat.y));
         boat.bestRemainAlong = boat.tracker.total;
         boat.bestStraight = boat.legInitStraight;
+        boat.legDist = 0;
     }
 
     _nearestEnemy(boat) {
@@ -205,10 +221,20 @@ class World {
                 } else if (b._nav && b._nav.straight < 2.2) {
                     const legTime = this.time - b.legStartTime;
                     b.arrivals++;
-                    b.fitScore += 1000 + 600 + 150 + Math.max(0, 240 - 6 * legTime);
+                    // reward the point + a fast-arrival bonus, minus how far this
+                    // leg strayed past the direct route (bank the efficiency now,
+                    // before _assignMission resets the odometer for the next leg)
+                    const excess = Math.max(0, b.legDist - b.tracker.total * BOAT.EFF_SLACK);
+                    const effPen = Math.min(BOAT.EFF_CAP, BOAT.EFF_W * excess);
+                    b.fitScore += 1000 + 600 + 150 + Math.max(0, 240 - 6 * legTime) - effPen;
                     b.timeLeft += ARRIVAL_TIME_BONUS;   // earn more sailing time
                     b.missionIdx++;
-                    this._assignMission(b);
+                    if (b.arrivals >= MAX_ARRIVALS) {
+                        // hit the safety ceiling — lock the score in, no double-count
+                        b.done = true; b.tracker = null;
+                    } else {
+                        this._assignMission(b);
+                    }
                     if (b.idx === this.leaderIdx) {
                         this.events.push(`boat ${b.idx} reached GPS #${b.missionIdx} @ ${legTime.toFixed(1)}s`);
                     }
@@ -232,10 +258,13 @@ class World {
         this.tick++;
     }
 
-    /* The episode ends when every boat has run out its personal clock (or
-     * been sunk), or at a hard wall-time cap so champions can't run forever. */
+    /* The episode ends when every boat has run out its personal clock (or been
+     * sunk / hit the arrival ceiling). The wall-time backstop is a last resort so
+     * an unbeatable boat can't run forever; it sits far above what a 100k score
+     * needs. opts.hardCap overrides it per episode. */
     isOver() {
-        if (this.time >= this.startBudget + EPISODE_HARD_CAP) return true;
+        const hardCap = this.opts.hardCap != null ? this.opts.hardCap : EPISODE_HARD_CAP;
+        if (this.time >= this.startBudget + hardCap) return true;
         return this.boats.every(b => b.done || !b.alive);
     }
 

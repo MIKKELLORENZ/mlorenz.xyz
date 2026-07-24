@@ -18,21 +18,31 @@ to 0.5 — top speed ≈ 3.6 m/s foiling, ≈ 1.9 m/s displacement.
 
 ## Brain contract (what a real controller would implement)
 
-**47 inputs:** 14 land-detecting rays + 14 ship-detecting rays (evenly spaced,
-26 m range) · speed · the last three commanded acceleration states · body-frame
-accelerometer x/y · distance remaining along the GPS route · straight-line
-distance to target · sin/cos of the compass bearing to target · heading of the
-current GPS stretch (relative) · sin/cos of the ocean-current direction
-relative to the bow (scaled by strength) · sin/cos of the wind direction
-relative to the bow (scaled by strength) · the same four flow readings from
-the previous control tick, so the net can sense gust onset and current shear
-by differencing. A real hull estimates the flow inputs from GPS drift and a
-wind vane.
+**46 channels fed as a per-channel temporal window = 201 inputs.** Each channel is
+fed as its last few control ticks (newest first), so the net reads rates and
+trends — closing speed on an obstacle ray, bearing rate, gust onset, the yaw/steer
+history that turns a P heading loop into a PD one — with no recurrence. Fast,
+rate-critical channels run deep (rays, yaw rate, and the steering commands go 5
+ticks back); slow ones run shallow (route/straight distance and leg heading go 2),
+since deep history there is just redundant weight. The channels: 14
+land-detecting rays + 14 ship-detecting rays (evenly spaced, 26 m range) · signed
+surge speed · body-frame accelerometer x/y · distance remaining along the GPS
+route · straight-line distance to target · sin/cos of the compass bearing to
+target · heading of the current GPS stretch (relative) · sin/cos of the
+ocean-current direction relative to the bow (scaled by strength) · sin/cos of the
+wind direction relative to the bow (scaled by strength) · yaw rate (rate gyro) ·
+signed cross-track error from the route leg · body-frame sway velocity · and the
+commanded accel / steer / diff-thrust the net issued last tick (efference copies
+still working through the actuator lag). Without the yaw-rate/steering channels
+the policy is structurally P-only and a hull with rotational inertia snakes in a
+limit cycle; their history is the D term it was missing. A real hull estimates the
+flow channels from GPS drift and a wind vane, and the rates from the same IMU as
+the accelerometer.
 
 **5 outputs:** engine 1 · engine 2 · brake · rotate left · rotate right.
 
 Export the champion from the UI: the JSON holds raw weight matrices for the
-fixed 47→32→18→5 tanh/sigmoid net.
+fixed 201→32→18→5 tanh/sigmoid net.
 
 ## Evolution (no gradient descent)
 

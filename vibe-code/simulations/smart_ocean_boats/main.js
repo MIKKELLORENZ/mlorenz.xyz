@@ -5,6 +5,7 @@ let map, router, evolution, world;
 let stageState = { collisions: false, combat: false };
 let simAccum = 0, lastFrame = 0, lastDom = 0;
 let mapCanvas = null;
+let headlessRate = 0, lastGenT = 0;   // smoothed generations/sec, for the headless HUD
 
 const canvas = document.getElementById("sea");
 const ctx = canvas.getContext("2d");
@@ -62,19 +63,33 @@ function currentStage() {
     return { shipCollisions: stageState.collisions, combat: stageState.combat };
 }
 
-/* Each generation is scored over TRIALS episodes with different missions and
- * weather — a single lucky route stops looking like skill. */
+/* Each generation is scored over TRIALS episodes (they average out the unseeded
+ * sensor/actuator noise). The route + weather come from a single seed that holds
+ * for a whole ROUTE_GENS-generation block, so every trial in gens 1-2 sails the
+ * SAME course, gens 3-4 the next, and so on — one route per pair, no alternating.
+ *   gen:  1  2  3  4  5  6      seed: 0  0  1  1  2  2 */
 const TRIALS = 2;
+const ROUTE_GENS = 2;
 let trial = 0, trialFit = null, trialArr = null;
 
 function newWorld() {
     const stage = currentStage();
+    // seed depends ONLY on the block, not the trial, so the course never changes
+    // within a generation or across the pair — it just advances every ROUTE_GENS.
+    const missionSeed = Math.floor((evolution.gen - 1) / ROUTE_GENS);
     world = new World(map, router, evolution.brains, {
         shipCollisions: stage.shipCollisions,
         combat: stage.combat,
-        missionSeed: evolution.gen * TRIALS + trial,
+        missionSeed,
         noise: CFG.noise,
-        startBudget: CFG.episodeTime
+        startBudget: CFG.episodeTime,
+        // Interactive cap: the world default (1600 s) is a training artifact — a
+        // strong champion never times out, so one episode would run ~1700 s and a
+        // generation would take many minutes, leaving the fitness chart blank for
+        // ages. 60 s past the budget keeps episodes watchable and generations
+        // (hence the chart) turning over promptly. Weak/scratch boats time out on
+        // their own clock well before this, so it only reins in the good ones.
+        hardCap: 60
     });
 }
 
@@ -93,7 +108,19 @@ function endGeneration() {
         brain, fitness: trialFit[i], arrivals: trialArr[i]
     }));
     trial = 0; trialFit = null; trialArr = null;
-    const sum = evolution.evolve(results, CFG.mutRate, CFG.mutSigma, CFG.gracePeriod);
+    const sum = evolution.evolve(results, CFG.mutRate, CFG.mutSigma, CFG.gracePeriod,
+        { immZeroFit: CFG.immZeroFit, childZeroFit: CFG.childZeroFit });
+    if (CFG.evalMode && evolution.champion) {
+        // eval mode: keep a byte-for-byte copy of the best-ever brain in the pool
+        // so the elite re-spawns unchanged each generation instead of drifting.
+        evolution.brains[evolution.brains.length - 1] = evolution.champion.clone();
+    }
+    const nowT = performance.now();
+    if (lastGenT) {
+        const inst = 1000 / Math.max(1, nowT - lastGenT);
+        headlessRate = headlessRate ? headlessRate * 0.7 + inst * 0.3 : inst;
+    }
+    lastGenT = nowT;
     const stage = currentStage();
     const stageName = stage.combat ? "3·combat" : stage.shipCollisions ? "2·collide" : "1·navigate";
     uiLog(`<span class="gen">gen ${evolution.gen - 1}</span> best ${Math.round(sum.best)} · mean ${Math.round(sum.avg)} · arrivals ${sum.bestArr}/${sum.avgArr.toFixed(1)} · s${stageName}`);
@@ -143,7 +170,7 @@ const brainIO = {
         a.click();
         URL.revokeObjectURL(a.href);
     },
-    importJSON(text) {
+    importJSON(text, label) {
         try {
             const o = JSON.parse(text);
             const src = o.net || o;
@@ -156,10 +183,56 @@ const brainIO = {
             // becomes the reigning champion benchmark
             evolution.brains[evolution.brains.length - 1] = net;
             evolution.champion = net.clone();
-            uiLog(`<span class="evt">brain imported — seeded into the population</span>`);
+            uiLog(`<span class="evt">${label || "brain imported"} — seeded into the population</span>`);
         } catch (e) {
             uiLog(`import failed: ${e.message}`);
         }
+    },
+    // Seed the built-in champion bundled in default_brain.js (no fetch needed).
+    loadDefault() {
+        if (!window.DEFAULT_BRAIN) { uiLog("no built-in champion bundled yet"); return; }
+        brainIO.importJSON(JSON.stringify(window.DEFAULT_BRAIN), "built-in champion loaded");
+    },
+    /* Fill every slot with the champion and start a fresh episode, so the whole
+     * fleet sails it at once. Purely for watching — the next generation breeds
+     * from this pool as usual, so mutation reintroduces variety immediately. */
+    showcase() {
+        if (!window.DEFAULT_BRAIN) { uiLog("no built-in champion bundled yet"); return; }
+        const src = window.DEFAULT_BRAIN.net || window.DEFAULT_BRAIN;
+        if (JSON.stringify(src.sizes) !== JSON.stringify(NET_SIZES)) {
+            uiLog(`showcase failed: brain is ${src.sizes ? src.sizes.join("×") : "unknown"}, this build expects ${NET_SIZES.join("×")}`);
+            return;
+        }
+        const net = Net.fromJSON(src);
+        for (let i = 0; i < evolution.brains.length; i++) evolution.brains[i] = net.clone();
+        evolution.champion = net.clone();
+        // start a clean generation so the swapped-in fleet is scored from scratch
+        // (otherwise a half-finished trial from the previous population leaks in)
+        trial = 0; trialFit = null; trialArr = null;
+        newWorld();
+        drawChart(evolution.history);
+        uiLog(`<span class="evt">showcase — all ${evolution.brains.length} boats are the built-in champion</span>`);
+    },
+    /* Drop the built-in champion into the evolving pool and shelter it for at
+     * least 10 generations, so a strong brain can't be bred out before it has
+     * proven itself against the current population. */
+    injectBest() {
+        if (!window.DEFAULT_BRAIN) { uiLog("no built-in champion bundled yet"); return; }
+        const src = window.DEFAULT_BRAIN.net || window.DEFAULT_BRAIN;
+        if (JSON.stringify(src.sizes) !== JSON.stringify(NET_SIZES)) {
+            uiLog(`inject failed: brain is ${src.sizes ? src.sizes.join("×") : "unknown"}, this build expects ${NET_SIZES.join("×")}`);
+            return;
+        }
+        const net = Net.fromJSON(src);
+        evolution.brains[evolution.brains.length - 1] = net;
+        evolution.champion = net.clone();
+        const g = Math.max(10, CFG.gracePeriod | 0);   // 10-generation grace minimum
+        CFG.gracePeriod = g;
+        // left = g+1 so the brain is present for a full g generations before it can
+        // be culled (grace decrements once per beaten generation, dropping at 0).
+        evolution.grace = { net, left: g + 1 };
+        if (typeof UI !== "undefined" && UI.setGrace) UI.setGrace(g);
+        uiLog(`<span class="evt">best brain injected — sheltered ${g} generations</span>`);
     }
 };
 
@@ -216,6 +289,31 @@ function drawBoat(b, isLeader) {
     ctx.fillRect(-L * 0.5, -W * 0.34, L * 0.14, W * 0.2);
     ctx.fillRect(-L * 0.5, W * 0.14, L * 0.14, W * 0.2);
     ctx.restore();
+}
+
+/* Headless: skip the whole scene and paint a cheap status card instead, so the
+ * GPU does nothing and every millisecond goes to physics + evolution. */
+function renderHeadless() {
+    const cw = canvas.parentElement.clientWidth, chh = canvas.parentElement.clientHeight;
+    ctx.clearRect(0, 0, cw, chh);
+    ctx.fillStyle = "#0b1622";
+    ctx.fillRect(0, 0, cw, chh);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#4fe0a8";
+    ctx.font = "600 20px 'Segoe UI', sans-serif";
+    ctx.fillText("⚡ Headless training", cw / 2, chh / 2 - 40);
+    ctx.fillStyle = "#9fc4e8";
+    ctx.font = "14px 'Segoe UI', sans-serif";
+    ctx.fillText("visuals off — all compute goes to the evolution", cw / 2, chh / 2 - 12);
+    const h = evolution.history;
+    const best = h.length ? Math.round(h[h.length - 1].best) : "–";
+    ctx.fillStyle = "#e7eef7";
+    ctx.font = "600 15px 'Segoe UI', sans-serif";
+    ctx.fillText(`generation ${evolution.gen}   ·   best ${best}`, cw / 2, chh / 2 + 24);
+    ctx.fillStyle = "#7d93ab";
+    ctx.font = "12px 'Segoe UI', sans-serif";
+    ctx.fillText(headlessRate ? `${headlessRate.toFixed(2)} generations / sec` : "measuring…",
+        cw / 2, chh / 2 + 48);
 }
 
 function render(t) {
@@ -391,9 +489,12 @@ function frame(now) {
     lastFrame = now;
 
     if (!CFG.paused) {
-        if (CFG.speed === 0) {
+        if (CFG.headless || CFG.speed === 0) {
+            // headless or MAX: run a time-budgeted burst of physics, no pacing.
+            // Headless spends a longer slice since no frame time is owed to render.
+            const budget = CFG.headless ? 32 : 22;
             const t0 = performance.now();
-            while (performance.now() - t0 < 22) {
+            while (performance.now() - t0 < budget) {
                 world.step();
                 if (world.isOver()) endGeneration();
             }
@@ -406,8 +507,8 @@ function frame(now) {
                 if (world.isOver()) endGeneration();
             }
         }
-        // wakes (render-rate sampling keeps them smooth and cheap)
-        if (CFG.showTrails && CFG.speed !== 0) {
+        // wakes (render-rate sampling keeps them smooth and cheap) — pointless headless
+        if (CFG.showTrails && !CFG.headless && CFG.speed !== 0) {
             for (const b of world.boats) {
                 if (b.speed > 0.3) {
                     b.trail.push([b.x, b.y]);
@@ -417,7 +518,8 @@ function frame(now) {
         }
     }
 
-    render(now / 1000);
+    if (CFG.headless) renderHeadless();
+    else render(now / 1000);
     if (now - lastDom > 250) { lastDom = now; updateDom(); }
 }
 
@@ -446,4 +548,7 @@ if (_bench > 0) {
 }
 window.addEventListener("resize", resize);
 uiLog(`<span class="evt">fleet launched — ${CFG.popSize} boats, ${map.name}</span>`);
+// Ship with the trained generalist already in the fleet so a fresh page shows a
+// capable leader; "Restart evolution" still starts from scratch.
+if (window.DEFAULT_BRAIN) brainIO.loadDefault();
 requestAnimationFrame(frame);

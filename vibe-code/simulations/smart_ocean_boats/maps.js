@@ -110,6 +110,75 @@ const MAP_DEFS = [
         vortices: [],
         tidalPeriod: 70
     }
+},
+{
+    name: "Lantern Canals",
+    desc: "A flooded stone quarter — a tight grid of narrow canals threading between blockhouses. Almost no open water to build speed, and every crossing is a hard turn.",
+    w: 100, h: 62,
+    palette: {
+        deep: [18, 40, 60], shallow: [46, 110, 130], sand: [150, 140, 120],
+        land: [120, 112, 96], interior: [86, 80, 68], peak: null
+    },
+    // near-solid landmass: a 4×3 grid of big overlapping blocks fills the map,
+    // then the channels below carve the canals back out of it
+    blobs: [
+        [12, 12, 14], [37, 12, 14], [62, 12, 14], [87, 12, 13],
+        [12, 31, 14], [37, 31, 14], [62, 31, 14], [87, 31, 13],
+        [12, 50, 14], [37, 50, 14], [62, 50, 14], [87, 50, 13]
+    ],
+    channels: [
+        // horizontal canals (carve = half-width of the water strip), inset from
+        // the map edge so routes never graze the border wall
+        { pts: [[6, 12], [94, 12]], carve: 3.1, width: 4.0, speed: 0.30 },
+        { pts: [[6, 31], [94, 31]], carve: 3.5, width: 4.0, speed: 0.30 },
+        { pts: [[6, 50], [94, 50]], carve: 3.1, width: 4.0, speed: 0.30 },
+        // vertical canals (x=37 is a deliberately tight strait; x=62 tighter too)
+        { pts: [[12, 6], [12, 56]], carve: 3.1, width: 4.0, speed: 0.30 },
+        { pts: [[37, 6], [37, 56]], carve: 2.1, width: 3.5, speed: 0.30 },
+        { pts: [[62, 6], [62, 56]], carve: 2.4, width: 3.5, speed: 0.30 },
+        { pts: [[87, 6], [87, 56]], carve: 2.9, width: 4.0, speed: 0.30 },
+        // diagonal cut-throughs — non-grid routes and awkward acute turns
+        { pts: [[12, 31], [37, 12]], carve: 2.3, width: 3.0, speed: 0.30 },
+        { pts: [[62, 50], [87, 31]], carve: 2.8, width: 3.5, speed: 0.30 }
+    ],
+    docks: [
+        { x: 12, y: 12, name: "Old Lock" },
+        { x: 62, y: 12, name: "North Gate" },
+        { x: 37, y: 31, name: "Market Cross" },
+        { x: 87, y: 50, name: "South Basin" },
+        { x: 12, y: 50, name: "West Wharf" }
+    ],
+    spawn: { x: 37, y: 50, r: 4 },
+    wind: { dir: 1.2, speed: 1.0, gust: 1.0 },
+    currents: {
+        drift: [0.03, 0.0],
+        vortices: [],
+        tidalPeriod: 0
+    }
+},
+{
+    name: "Open Ocean",
+    desc: "Empty blue water to the horizon — no land, no hazards. Point at the mark and open the throttle: where a boat learns to foil flat-out and hold a dead-straight line.",
+    w: 100, h: 62,
+    palette: {
+        deep: [8, 54, 92], shallow: [30, 120, 168], sand: [210, 200, 170],
+        land: [120, 140, 110], interior: [90, 110, 80], peak: null
+    },
+    blobs: [],       // nothing at all — open water inside the border walls
+    channels: [],
+    docks: [
+        { x: 22, y: 16, name: "Buoy Alpha" },
+        { x: 78, y: 15, name: "Buoy Bravo" },
+        { x: 82, y: 47, name: "Buoy Charlie" },
+        { x: 18, y: 46, name: "Buoy Delta" }
+    ],
+    spawn: { x: 50, y: 31, r: 6 },
+    wind: { dir: 0.5, speed: 0.6, gust: 0.6 },
+    currents: {
+        drift: [0.02, 0.0],
+        vortices: [],
+        tidalPeriod: 0
+    }
 }
 ];
 

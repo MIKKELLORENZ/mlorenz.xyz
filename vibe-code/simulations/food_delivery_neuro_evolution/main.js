@@ -7,10 +7,11 @@
 
     const SPEED_STOPS = [0.5, 1, 2, 4, 8, 16, Infinity];
     const SPEED_LABELS = ['0.5×', '1×', '2×', '4×', '8×', '16×', 'Max'];
-    const SAVE_KEY = 'food_delivery_ne_v5';   // arch v5: single type-blind ray channel
+    const SAVE_KEY = 'food_delivery_ne_v7';   // arch v7: + look-ahead GPS heading input
 
     const S = {
         town: null, jobs: null, world: null, ev: null, staticCanvas: null,
+        townPool: null, _activeStatic: null,
         townSeedBase: 0, townCounter: 0,
         speedStop: 1, preHeadlessStop: 1, paused: false, headless: false,
         selectedIdx: 0, autoSelectBest: true, showSensors: true,
@@ -27,18 +28,70 @@
 
     function townSeedFor(counter) { return mixSeed(S.townSeedBase, counter, 0x70FF); }
 
+    // How many distinct towns the pool should hold this session (see
+    // GA_DEFAULTS.townsPerGen). Read from the live Evolution when it exists so
+    // the pool tracks the setting; clamped so a stray value can't build dozens.
+    function poolWant() {
+        const n = S.ev ? S.ev.s.townsPerGen : (GA_DEFAULTS.townsPerGen || 1);
+        return Math.max(1, Math.min(5, n | 0));
+    }
+
+    function makeTownEntry(variant, seed) {
+        const town = generateTown(seed, variant);
+        buildAdjacency(town);
+        const jobs = generateJobs(town, seed, 60);
+        return { town, jobs, staticCanvas: renderTownStatic(town), seed };
+    }
+
+    // Install the per-episode town selector on the Evolution engine. At the
+    // full-pool phase it rotates the shared world through the town pool (one
+    // town per episode); earlier phases and single-town runs always use pool[0]
+    // - the primary town, byte-identical to the old single-town behaviour.
+    function installTownProvider() {
+        if (!S.ev) return;
+        S.ev.setTownProvider((world, epIdx, phase) => {
+            const pool = S.townPool || [];
+            const want = Math.max(1, Math.min(pool.length, S.ev.s.townsPerGen | 0));
+            const multi = phase >= 2 && want > 1;
+            const t = pool[multi ? (epIdx % want) : 0] || pool[0];
+            if (!t) return;
+            world.town = t.town;
+            world.jobs = t.jobs;
+            S._activeStatic = t.staticCanvas;
+        });
+    }
+
     function buildTown(counter) {
         S.townCounter = counter;
-        // Rotate through the four town layout variants (classic grid,
-        // roundabout, one-way couplet, curves+roundabout+one-way).
-        S.town = generateTown(townSeedFor(counter), counter % 4);
-        buildAdjacency(S.town);
-        S.jobs = generateJobs(S.town, townSeedFor(counter), 60);
-        S.staticCanvas = renderTownStatic(S.town);
+        // pool[0] is the PRIMARY town: same seed + layout variant the single-town
+        // build always used, so phases 0-1 and the sweep benchmark are unchanged.
+        // The rest are extra layouts (distinct seeds) used only for the phase-2
+        // multi-town generalization pass. Rotate the four layout variants
+        // (classic grid, roundabout, one-way couplet, curves+roundabout).
+        const primary = makeTownEntry(counter % 4, townSeedFor(counter));
+        const pool = [primary];
+        const want = poolWant();
+        for (let k = 1; k < want; k++) {
+            const seed = mixSeed(S.townSeedBase, counter * 16 + k * 101, 0x5EED);
+            pool.push(makeTownEntry((counter + k) % 4, seed));
+        }
+        S.townPool = pool;
+        S.town = primary.town;
+        S.jobs = primary.jobs;
+        S.staticCanvas = primary.staticCanvas;
+        S._activeStatic = primary.staticCanvas;
         S.world = createWorld(S.town, S.jobs);
-        if (S.ev) S.ev.attach(S.world);
+        if (S.ev) { S.ev.attach(S.world); installTownProvider(); }
         const seedEl = $('seed-label');
-        if (seedEl) seedEl.textContent = '#' + townSeedFor(counter).toString(16);
+        if (seedEl) seedEl.textContent = '#' + townSeedFor(counter).toString(16)
+            + (pool.length > 1 ? ` +${pool.length - 1}` : '');
+    }
+
+    // Rebuild the pool if its size no longer matches the setting (e.g. after a
+    // Reset changed townsPerGen), then ensure the provider is installed.
+    function syncTownPool() {
+        if (!S.townPool || S.townPool.length !== poolWant()) buildTown(S.townCounter);
+        installTownProvider();
     }
 
     function changeTown() {
@@ -136,7 +189,7 @@
         if (S.headless && maxed) {
             renderHeadlessSummary(simCanvas, simCtx, S.world, S.ev, S.simRate / 60);
         } else {
-            renderWorld(simCanvas, simCtx, S.world, S.staticCanvas, {
+            renderWorld(simCanvas, simCtx, S.world, S._activeStatic || S.staticCanvas, {
                 selectedIdx: S.selectedIdx,
                 bestIdx: currentBestIdx(),
                 showSensors: S.showSensors
@@ -160,7 +213,8 @@
         $('stat-deliv').textContent = hist ? `${hist.dBest.toFixed(1)} / ${hist.dMean.toFixed(2)}` : '–';
         $('stat-rate').textContent = (S.simRate / 60).toFixed(S.simRate < 300 ? 1 : 0) + '×';
         $('stat-alive').textContent = S.world.cars.filter(c => c.alive).length + '/' + S.world.cars.length;
-        $('stat-episode').textContent = `${ev.episodeIdx + 1}/${ev.s.episodesPerGen} · t=${S.world.simTime.toFixed(0)}s` +
+        $('stat-episode').textContent = `${ev.episodeIdx + 1}/${ev._epCount || ev.s.episodesPerGen} · t=${S.world.simTime.toFixed(0)}s` +
+            (S.townPool && S.townPool.length > 1 && ev.phase >= 2 ? ` · town ${(ev.episodeIdx % S.townPool.length) + 1}` : '') +
             (S.world.carContact ? '' : ' · ghost');
         $('stat-stag').textContent = ev.stagnation + (ev.s.stagnationAdapt && ev.stagnation >= 10 ? ' (boosted)' : '');
         $('stat-div').textContent = ev.diversity ? ev.diversity.toFixed(3) : '–';
@@ -172,7 +226,7 @@
                 : sel.retired || 'idle';
             $('tele-speed').textContent = Math.abs(sel.v).toFixed(0) + ' px/s';
             $('tele-jobs').textContent = `${sel.m.deliveries} deliv · ${sel.m.pickups} pick`;
-            $('tele-cover').textContent = (sel.m.coverage * 100 / Math.max(1, sel.m.deliveries + sel.m.pickups + 1)).toFixed(0) + `% avg · ${sel.m.replans} rp · ${sel.m.misses} miss`;
+            $('tele-cover').textContent = (sel.m.coverage * 100 / Math.max(1, sel.m.deliveries + sel.m.pickups + 1)).toFixed(0) + `% avg · ${sel.m.replans} rp · ${sel.m.misses} miss` + (sel.m.jolts ? ` · ${sel.m.jolts} jolt` : '');
             $('tele-coll').textContent = `${sel.m.carColl} car · ${sel.m.pedColl} ped`;
             $('tele-law').textContent = `${sel.m.wrongSideSec.toFixed(1)}s wrong side · ${sel.m.redLightRuns} red`;
             $('tele-fit').textContent = Math.round(episodeFitness(sel.m)).toLocaleString();
@@ -279,7 +333,9 @@
         const settings = readSettingsFromUI();
         const seed = readSeedFromUI();
         S.ev = new Evolution(settings, seed);
+        syncTownPool();               // pool size may have changed with the setting
         S.ev.attach(S.world);
+        installTownProvider();
         S.ev.startGeneration();
         drawCharts();
         toast(`Training reset — fresh population, seed ${seed}`, 'info');
@@ -651,7 +707,9 @@
             immigrantFrac: parseInt($('sl-immigrants').value, 10) / 100,
             pressure: parseFloat($('sl-pressure').value),
             stagnationAdapt: $('chk-stagnation').checked,
+            frozenJolt: $('chk-jolt').checked,
             episodesPerGen: parseInt($('sl-episodes').value, 10),
+            townsPerGen: parseInt($('sl-towns').value, 10),
             episodeLen: parseInt($('sl-eplen').value, 10),
             autoChangeEvery: parseInt($('sel-autochange').value, 10),
             carContactEvery: parseInt($('sel-carcontact').value, 10),
@@ -680,8 +738,20 @@
         bindRange('sl-pressure', 'lb-pressure', v => v.toFixed(1), v => ev.s.pressure = v);
         bindRange('sl-eplen', 'lb-eplen', v => v + 's', v => ev.s.episodeLen = v);
         bindRange('sl-episodes', 'lb-episodes', v => v, v => ev.s.episodesPerGen = v);
+        // Changing the town count resizes the pool; rebuild it and cleanly
+        // restart the current generation (like a manual town change) so scoring
+        // never straddles two pool sizes.
+        bindRange('sl-towns', 'lb-towns', v => v, v => {
+            // Skip the no-op fire bindRange does at boot (value already applied
+            // and the pool already sized); only a real change rebuilds+restarts.
+            if (v === S.ev.s.townsPerGen && S.townPool && S.townPool.length === poolWant()) return;
+            ev.s.townsPerGen = v;
+            syncTownPool();
+            S.ev.startGeneration();
+        });
         bindRange('sl-curriculum', 'lb-curriculum', v => v.toFixed(1), v => ev.s.curriculumThreshold = v);
         $('chk-stagnation').addEventListener('change', e => ev.s.stagnationAdapt = e.target.checked);
+        $('chk-jolt').addEventListener('change', e => ev.s.frozenJolt = e.target.checked);
         $('sel-autochange').addEventListener('change', e => ev.s.autoChangeEvery = parseInt(e.target.value, 10));
         $('sel-carcontact').addEventListener('change', e => ev.s.carContactEvery = parseInt(e.target.value, 10));
 
@@ -772,10 +842,12 @@
         $('sl-immigrants').value = Math.round(s.immigrantFrac * 100);
         $('sl-pressure').value = s.pressure;
         $('chk-stagnation').checked = !!s.stagnationAdapt;
+        $('chk-jolt').checked = s.frozenJolt !== false;
         $('sl-eplen').value = s.episodeLen;
         $('sl-episodes').value = s.episodesPerGen;
+        $('sl-towns').value = (s.townsPerGen === undefined ? 3 : s.townsPerGen);
         $('sel-autochange').value = String(s.autoChangeEvery || 0);
-        $('sel-carcontact').value = String(s.carContactEvery || 2);
+        $('sel-carcontact').value = String(s.carContactEvery == null ? 2 : s.carContactEvery);
         $('sl-curriculum').value = s.curriculumThreshold;
     }
 
@@ -817,7 +889,9 @@
             buildTown(urlTown);
             S.ev.onTownChanged(S.townCounter);
         }
+        syncTownPool();               // match pool size to the (possibly loaded) setting
         S.ev.attach(S.world);
+        installTownProvider();
         applySettingsToUI(S.ev.s);
         bindControls();
         S.ev.startGeneration();

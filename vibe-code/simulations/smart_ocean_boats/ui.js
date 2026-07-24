@@ -8,18 +8,22 @@ const CFG = {
     mutRate: 0.10,
     mutSigma: 0.15,
     gracePeriod: 3,
+    immZeroFit: 15000,     // best-ever fitness past which random immigrants stop
+    childZeroFit: 25000,   // …and past which crossover children stop too
+    headless: false,       // skip all rendering; pour every ms into training
     collideFromStart: false,
     collideGen: 30,
     collideThreshold: 2.0,
     combatEnabled: false,
     combatGen: 80,
-    speed: 1,              // steps-per-frame multiplier; 0 = MAX
+    speed: 2,              // steps-per-frame multiplier; 0 = MAX
     paused: false,
     showSensors: false,
     showCurrents: true,
     showRoutes: true,
     showTrails: true,
-    noise: true
+    noise: true,
+    evalMode: false        // keep a frozen copy of the best-ever brain in the pool each gen
 };
 
 const UI = {};
@@ -73,6 +77,9 @@ function initUI(onMapChange, onRestart, brainIO) {
     bindSlider("sl-grace", "lb-grace", v => v === 0 ? "off" : v + " gens", v => CFG.gracePeriod = v);
     bindSlider("sl-mutrate", "lb-mutrate", v => v + "%", v => CFG.mutRate = v / 100);
     bindSlider("sl-mutsig", "lb-mutsig", v => (v / 100).toFixed(2), v => CFG.mutSigma = v / 100);
+    const kfit = v => v === 0 ? "never" : (v / 1000) + "k";
+    bindSlider("sl-imm-zero", "lb-imm-zero", kfit, v => CFG.immZeroFit = v);
+    bindSlider("sl-child-zero", "lb-child-zero", kfit, v => CFG.childZeroFit = v);
     bindSlider("sl-collide-gen", "lb-collide-gen", v => v, v => CFG.collideGen = v);
     bindSlider("sl-collide-thr", "lb-collide-thr", v => (v / 10).toFixed(1), v => CFG.collideThreshold = v / 10);
     bindSlider("sl-combat-gen", "lb-combat-gen", v => v, v => CFG.combatGen = v);
@@ -82,6 +89,7 @@ function initUI(onMapChange, onRestart, brainIO) {
         el.onchange = () => apply(el.checked);
         apply(el.checked);
     };
+    bindCheck("chk-headless", v => CFG.headless = v);
     bindCheck("chk-collide-start", v => CFG.collideFromStart = v);
     bindCheck("chk-combat", v => CFG.combatEnabled = v);
     bindCheck("chk-sensors", v => CFG.showSensors = v);
@@ -95,6 +103,9 @@ function initUI(onMapChange, onRestart, brainIO) {
     $("btn-save").onclick = brainIO.save;
     $("btn-load").onclick = brainIO.load;
     $("btn-export").onclick = brainIO.exportFile;
+    $("btn-default").onclick = brainIO.loadDefault;
+    $("btn-showcase").onclick = brainIO.showcase;
+    $("btn-inject").onclick = brainIO.injectBest;
     $("btn-import").onclick = () => $("file-import").click();
     $("file-import").onchange = e => {
         const f = e.target.files[0];
@@ -104,6 +115,21 @@ function initUI(onMapChange, onRestart, brainIO) {
         r.readAsText(f);
         e.target.value = "";
     };
+
+    // eval mode: one source of truth (CFG.evalMode), mirrored on both checkboxes
+    // (the panel one and the intro-modal one).
+    const evalBoxes = [$("chk-eval"), $("intro-eval")].filter(Boolean);
+    const setEval = v => { CFG.evalMode = v; evalBoxes.forEach(b => b.checked = v); };
+    evalBoxes.forEach(b => b.onchange = () => setEval(b.checked));
+
+    // intro modal — a one-click launcher over the running scene
+    const intro = $("intro");
+    const closeIntro = () => intro && intro.classList.add("hidden");
+    if ($("intro-watch")) $("intro-watch").onclick = () => { brainIO.showcase(); closeIntro(); };
+    if ($("intro-scratch")) $("intro-scratch").onclick = () => { onRestart(); closeIntro(); };
+    if ($("intro-explore")) $("intro-explore").onclick = closeIntro;
+    // let the caller (main.js) also nudge grace when a brain is injected
+    UI.setGrace = g => { const sl = $("sl-grace"); if (sl) { sl.value = g; sl.dispatchEvent(new Event("input")); } };
 }
 
 function uiLog(html) {

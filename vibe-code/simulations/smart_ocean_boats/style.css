@@ -12,6 +12,53 @@
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
+
+/* ---- intro modal ---- */
+#intro {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    background: rgba(4, 10, 18, 0.72); backdrop-filter: blur(3px);
+}
+#intro.hidden { display: none; }
+.intro-card {
+    width: 100%; max-width: 440px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px 26px 20px; text-align: center;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+}
+.intro-dot {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 14px var(--accent); margin-bottom: 10px;
+}
+.intro-card h2 { font-size: 22px; margin-bottom: 8px; }
+.intro-card > p { color: var(--muted); font-size: 13.5px; line-height: 1.55; margin-bottom: 18px; }
+.intro-card > p b { color: var(--text); font-weight: 600; }
+.intro-choices { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.intro-choice {
+    display: block; text-align: left; cursor: pointer;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+    transition: border-color .12s, background .12s;
+}
+.intro-choice:hover { border-color: var(--accent); background: #17324a; }
+.intro-choice b { display: block; font-size: 15px; margin-bottom: 2px; }
+.intro-choice small { color: var(--muted); font-size: 12px; }
+.intro-choice.primary { border-color: var(--accent); background: #14344d; }
+.intro-choice.primary:hover { background: #184061; }
+.intro-eval {
+    display: flex; align-items: flex-start; gap: 8px; cursor: pointer;
+    text-align: left; color: var(--muted); font-size: 12.5px; line-height: 1.4;
+    padding: 8px 4px; margin-bottom: 6px;
+}
+.intro-eval b { color: var(--text); font-weight: 600; }
+.intro-eval input { margin-top: 2px; accent-color: var(--accent); flex: none; }
+.intro-dismiss {
+    background: none; border: 0; color: var(--muted); cursor: pointer;
+    font-size: 12.5px; padding: 6px; text-decoration: underline; text-underline-offset: 2px;
+}
+.intro-dismiss:hover { color: var(--text); }
+
 body {
     background: var(--bg);
     color: var(--text);
@@ -104,6 +151,9 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
     text-shadow: 0 1px 3px rgba(0,0,0,.7);
 }
 
+/* keep the fitness sparkline inside its card — the 280px drawing buffer is
+   scaled down to whatever the panel width allows instead of overflowing it */
+#chart { display: block; width: 100%; height: auto; }
 .legend { display: flex; gap: 14px; margin-top: 6px; color: var(--muted); font-size: 11px; }
 .legend .sw { display: inline-block; width: 14px; height: 3px; margin-right: 5px; vertical-align: middle; border-radius: 2px; }
 .sw-best { background: var(--gold); }

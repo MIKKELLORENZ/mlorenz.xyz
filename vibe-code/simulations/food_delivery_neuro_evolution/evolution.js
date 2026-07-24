@@ -7,24 +7,25 @@
 const GA_DEFAULTS = {
     population: 64,
     elites: 2,
-    mutChance: 0.9,          // probability a crossover child is mutated at all
-    mutGenes: 8,             // K genes touched per mutation event (1..genome);
-    sigma: 0.30,             // few-but-strong won a 24-cell grid search (K in
-                             // {8,32,64,200} x sigma {0.06,0.15,0.30} x 3 seeds:
-                             // K=8 sigma=0.30 delivered on 3/3 seeds, old
-                             // 64/0.15 on ~1/3)
-    immigrantFrac: 0.12,
+    // Hand-tuned defaults captured from a live run (2026-07-24, user preference):
+    // a single-gene, strong-sigma hill-climb - one weight nudged hard per event,
+    // no random immigrants, longer elite grace - leaning on the elites + the
+    // frozen-car jolt for exploration rather than population churn. (A v7 headless
+    // sweep had liked gentle sigma ~.2 / low immigrants; the user's live tuning
+    // pushed further in that direction: K=1, no immigrants at all.)
+    mutChance: 0.5,          // probability a crossover child is mutated at all
+    mutGenes: 1,             // K genes touched per mutation event (1..genome)
+    sigma: 0.53,             // strong per-gene step (few-but-strong)
+    immigrantFrac: 0.0,      // no random immigrants
     eliteMutants: 0.08,      // share of slots for mutated copies of the elite
                              // cars (their unmutated originals always survive
                              // alongside, protected by the grace window).
                              // At 1.0 the whole generation becomes elite
                              // variants: no crossover children, no immigrants
-    eliteSigma: 0.18,        // mutation spread applied to those elite variants
+    eliteSigma: 0.39,        // mutation spread applied to those elite variants
     pressure: 2.0,           // rank-selection pressure
-    eliteGrace: 4,           // generations an elite survives after earning its
-                             // slot (rolling; graced old elites don't breed).
-                             // Benchmark note: longer grace slows learning -
-                             // 60-gen delivery-gens at grace 4: 24-38, at 10: 2-9
+    eliteGrace: 10,          // generations an elite survives after earning its
+                             // slot (rolling; graced old elites don't breed)
     stagnationAdapt: true,
     episodesPerGen: 2,
     episodeLen: 120,         // seconds of sim time per episode. The 2026-07
@@ -43,7 +44,24 @@ const GA_DEFAULTS = {
                              // generation. 1 = contact in every episode.
     curriculumThreshold: 1,  // median deliveries/episode to advance a spawn
                              // rung (0 carry-spawn -> 1 short jobs -> 2 full pool)
-    bootstrapPriors: true
+    bootstrapPriors: true,
+    frozenJolt: true,        // live-mutate a car's brain when it sits completely
+                             // frozen on a clear road (not at a red / not queued)
+                             // so the rest of the round isn't wasted - a random
+                             // kick that may get it driving again. In-place, so
+                             // the genome that gets scored is the one that drove.
+    townsPerGen: 3           // at the FULL-POOL phase (2), evaluate every genome
+                             // across this many DIFFERENT town layouts in one
+                             // generation, each as its own episode. The robust
+                             // aggregate already worst-weights across episodes,
+                             // so a genome that only drives one street layout
+                             // well is scored by its weakest town - the in-browser
+                             // analogue of the boats "worst-map-gated" training
+                             // that closed its generalization gap. It engages
+                             // only at phase 2: the sweep found switching towns
+                             // during the early curriculum hurts, so phases 0-1
+                             // stay on the single primary town (byte-identical to
+                             // the v5 behaviour). 1 = classic single-town.
 };
 
 const FIT = {
@@ -69,6 +87,14 @@ const FIT = {
     // costs 75+275 = 350.
     MISS: 75, MISS_REPEAT: 275
 };
+
+// Live-jolt magnitude: a moderate kick - big enough to change what the frozen
+// brain outputs, small enough that it's more likely to nudge the car into
+// motion than to randomize it into a wall. Applied to a fraction of the genes
+// with a small chance of a fresh-value reset per touched gene.
+const JOLT_FRAC = 0.012;   // ~1.2% of genes per jolt
+const JOLT_SIGMA = 0.3;
+const JOLT_RESET = 0.03;
 
 function episodeFitness(m) {
     // pickupEarned scales each pickup by the route length driven for it
@@ -155,7 +181,29 @@ class Evolution {
         this.lastAgg = [];
         this.diversity = 0;
         this.events = [];                // UI toast queue
+        // Optional multi-town hook: fn(world, episodeIdx, phase, epCount) that
+        // swaps world.town / world.jobs to the town this episode should run on.
+        // Set by the host (main.js) which owns the town pool + render assets;
+        // null = single-town (the world keeps whatever town it was attached to).
+        this.townProvider = null;
+        this._epCount = this.s.episodesPerGen;   // episodes in the current gen
         this.initPopulation();
+    }
+
+    setTownProvider(fn) { this.townProvider = fn; }
+
+    // Episodes to run this generation. At the full-pool phase, one episode per
+    // town in the pool so every genome is scored across all layouts; earlier
+    // phases keep the classic episodesPerGen on the single primary town.
+    _episodesThisGen() {
+        return (this.phase >= 2 && this.townProvider && this.s.townsPerGen > 1)
+            ? this.s.townsPerGen : this.s.episodesPerGen;
+    }
+
+    // Point the shared world at the town this episode should run on (no-op
+    // unless a multi-town provider is installed).
+    _prepTown(episodeIdx) {
+        if (this.townProvider) this.townProvider(this.world, episodeIdx, this.phase, this._epCount);
     }
 
     rng() {
@@ -191,8 +239,41 @@ class Evolution {
         this.epFits = this.genomes.map(() => []);
         this.epDeliv = this.genomes.map(() => []);
         this.episodeIdx = 0;
+        this._epCount = this._episodesThisGen();
+        this._protectedSlots = this._computeProtectedSlots();
         this.world.carContactEvery = this.s.carContactEvery;
+        this._prepTown(0);
         startEpisode(this.world, this.genomes, this.phase, 0, this.epSeed(0));
+    }
+
+    // Population slots holding a byte-identical preserved brain (the global
+    // champion + every protected elite). These are NEVER live-jolted: a frozen
+    // champion is eliminated by the ordinary no-progress timeout rather than
+    // having its hard-won genome scrambled mid-round (grace still shelters its
+    // lineage across generations). Everyone else is fair game.
+    _computeProtectedSlots() {
+        const s = new Set();
+        if (this.champion && Number.isInteger(this.champion.idx)) s.add(this.champion.idx);
+        for (const e of this.eliteRoster) if (Number.isInteger(e.idx)) s.add(e.idx);
+        return s;
+    }
+
+    // Live-mutate any car flagged as frozen-on-a-clear-road by the world
+    // watchdog. In place, so the (now-jolted) genome is exactly what this
+    // generation ranks and breeds - no attribution gap. Deterministic via a
+    // dedicated seeded stream so it never disturbs the breeding RNG.
+    _applyFrozenJolts() {
+        if (!this.world) return;
+        const rng = this._joltRng || (this._joltRng = mulberry32(mixSeed(this.runSeed, 0x30172B)));
+        const K = Math.max(8, Math.round(NN_GENOME_LEN * JOLT_FRAC));
+        for (const car of this.world.cars) {
+            if (!car._joltPending) continue;
+            car._joltPending = false;
+            if (!car.alive) continue;
+            car.m.jolts++;
+            if (this._protectedSlots && this._protectedSlots.has(car.idx)) continue;
+            mutateGenomeK(car.genome, K, JOLT_SIGMA, JOLT_RESET, rng);
+        }
     }
 
     // One physics tick. Returns flags for the caller (main loop / UI).
@@ -202,18 +283,22 @@ class Evolution {
     // then the same episode restarts. Nothing is scored or bred.
     tick() {
         const anyAlive = stepWorld(this.world);
+        // Frozen-car rescue jolts (training only; eval must never mutate brains).
+        if (!this.evalMode && this.s.frozenJolt !== false) this._applyFrozenJolts();
         if (this.evalMode) {
             if (anyAlive) return { generationEnded: false };
             this.world.carContactEvery = this.s.carContactEvery;
+            this._prepTown(0);
             startEpisode(this.world, this.genomes, this.phase, 0, this.epSeed(0));
             return { generationEnded: false, evalRestarted: true };
         }
         const timeUp = this.world.simTime >= this.s.episodeLen;
         if (anyAlive && !timeUp) return { generationEnded: false };
         this._collectEpisode();
-        if (this.episodeIdx + 1 < this.s.episodesPerGen) {
+        if (this.episodeIdx + 1 < this._epCount) {
             this.episodeIdx++;
             this.world.carContactEvery = this.s.carContactEvery;
+            this._prepTown(this.episodeIdx);
             startEpisode(this.world, this.genomes, this.phase, this.episodeIdx, this.epSeed(this.episodeIdx));
             return { generationEnded: false };
         }

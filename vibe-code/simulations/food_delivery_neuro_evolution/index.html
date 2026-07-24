@@ -48,32 +48,32 @@
                     <input type="range" id="sl-elites" min="1" max="8" value="2" step="1">
                 </label>
                 <label class="slider-row" title="How many generations an elite survives after earning its slot, even if unlucky deaths tank its score. Longer grace = safer leaders but slower learning (benchmarked)">
-                    <span>Elite grace <b id="lb-grace">4 gens</b></span>
-                    <input type="range" id="sl-grace" min="0" max="15" value="4" step="1">
+                    <span>Elite grace <b id="lb-grace">10 gens</b></span>
+                    <input type="range" id="sl-grace" min="0" max="15" value="10" step="1">
                 </label>
                 <label class="slider-row">
-                    <span>Mutation chance / child <b id="lb-mutchance">90%</b></span>
-                    <input type="range" id="sl-mutchance" min="0" max="100" value="90" step="5">
+                    <span>Mutation chance / child <b id="lb-mutchance">50%</b></span>
+                    <input type="range" id="sl-mutchance" min="0" max="100" value="50" step="5">
                 </label>
                 <label class="slider-row" title="How many of the 2,314 weights get gaussian noise per mutation event — few-but-strong won the benchmark">
-                    <span>Genes per mutation <b id="lb-mutgenes">8</b></span>
-                    <input type="range" id="sl-mutgenes" min="0" max="100" value="26" step="1">
+                    <span>Genes per mutation <b id="lb-mutgenes">1</b></span>
+                    <input type="range" id="sl-mutgenes" min="0" max="100" value="0" step="1">
                 </label>
                 <label class="slider-row">
-                    <span>Mutation strength <b id="lb-sigma">σ 0.30</b></span>
-                    <input type="range" id="sl-sigma" min="0.01" max="1" value="0.30" step="0.01">
+                    <span>Mutation strength <b id="lb-sigma">σ 0.53</b></span>
+                    <input type="range" id="sl-sigma" min="0.01" max="1" value="0.53" step="0.01">
                 </label>
                 <label class="slider-row" title="Share of the population given to mutated copies of the elite cars; their unmutated originals always survive alongside for the grace window. At 100% every free slot is an elite variant — no crossover children, no immigrants. Applies at the next generation, no reset needed">
                     <span>Elite variants <b id="lb-elitemut">8%</b></span>
                     <input type="range" id="sl-elitemut" min="0" max="100" value="8" step="1">
                 </label>
                 <label class="slider-row" title="Mutation spread applied to the elite copies — small probes near the elite, large explores far from it">
-                    <span>Elite variant spread <b id="lb-elitesigma">σ 0.18</b></span>
-                    <input type="range" id="sl-elitesigma" min="0.01" max="1" value="0.18" step="0.01">
+                    <span>Elite variant spread <b id="lb-elitesigma">σ 0.39</b></span>
+                    <input type="range" id="sl-elitesigma" min="0.01" max="1" value="0.39" step="0.01">
                 </label>
                 <label class="slider-row">
-                    <span>Random immigrants <b id="lb-immigrants">12%</b></span>
-                    <input type="range" id="sl-immigrants" min="0" max="25" value="12" step="1">
+                    <span>Random immigrants <b id="lb-immigrants">0%</b></span>
+                    <input type="range" id="sl-immigrants" min="0" max="25" value="0" step="1">
                 </label>
                 <label class="slider-row">
                     <span>Selection pressure <b id="lb-pressure">2.0</b></span>
@@ -82,6 +82,10 @@
                 <label class="check-row" title="Automatically raise mutation when evolution stagnates">
                     <input type="checkbox" id="chk-stagnation" checked>
                     <span>Boost mutation on stagnation</span>
+                </label>
+                <label class="check-row" title="When a car sits completely frozen on a clear road (not at a red light, not queued behind traffic) for a few seconds, randomly mutate its brain live to try to get it moving — instead of wasting the rest of the round. The champion and protected elites are never jolted.">
+                    <input type="checkbox" id="chk-jolt" checked>
+                    <span>Jolt frozen cars</span>
                 </label>
             </section>
 
@@ -95,6 +99,10 @@
                     <span>Episodes / generation <b id="lb-episodes">2</b></span>
                     <input type="range" id="sl-episodes" min="1" max="4" value="2" step="1">
                 </label>
+                <label class="slider-row" title="At the full-pool phase (2), score every brain across this many DIFFERENT town layouts in one generation — one town per episode. The worst-weighted fitness then penalizes a brain that only handles one street layout, closing the overfitting gap. Earlier phases stay on the single primary town. 1 = classic single-town.">
+                    <span>Towns / generation (phase 2) <b id="lb-towns">3</b></span>
+                    <input type="range" id="sl-towns" min="1" max="5" value="3" step="1">
+                </label>
                 <label class="select-row">
                     <span>Auto-change town</span>
                     <select id="sel-autochange">
@@ -105,9 +113,10 @@
                         <option value="20">every 20 gens</option>
                     </select>
                 </label>
-                <label class="select-row" title="Car-to-car contact (collisions + radar). Ghost episodes let cars pass through each other so clean route driving is selected for; contact episodes keep collision avoidance under selection. Applies per episode slot each generation — episode 1 always has contact.">
+                <label class="select-row" title="Car-to-car contact (collisions + radar). Ghost episodes let cars pass through each other so clean route driving is selected for; contact episodes keep collision avoidance under selection. 'never' is pure-ghost mode: cars train without any risk of hitting each other. Otherwise applies per episode slot each generation — episode 1 always has contact.">
                     <span>Car contact</span>
                     <select id="sel-carcontact">
+                        <option value="0">never (pure ghost)</option>
                         <option value="1">every episode</option>
                         <option value="2" selected>1 in 2 episodes</option>
                         <option value="3">1 in 3 episodes</option>

@@ -4,20 +4,38 @@
  * at 15 Hz (physics at 30 Hz) — the same cadence a microcontroller on the real
  * hull would use, so a trained brain maps 1:1 onto real hardware.
  *
- * Inputs (47):                              Outputs (5, all 0..1):
- *   0-13  land rays (14, full circle)         0 engine 1 (port)
- *  14-27  ship rays (14, full circle)         1 engine 2 (starboard)
- *  28     speed                               2 brake flap + reverse
- *  29-31  commanded accel state n, n-1, n-2   3 rotate left  (thruster/rudder)
- *  32-33  body accelerometer x (fwd), y      4 rotate right
- *  34     distance left along GPS route
- *  35     straight-line distance to target
- *  36-37  sin/cos of bearing to target relative to compass heading
- *  38     GPS route heading on current stretch, relative to heading
- *  39-40  sin/cos of ocean-current direction relative to heading, ×strength
- *  41-42  sin/cos of wind direction relative to heading, ×strength
- *  43-46  the same four flow readings from the previous control tick (n−1),
- *         so the net can sense gust onset and current shear by differencing
+ * The brain sees a TEMPORAL WINDOW: each channel below is fed as its last
+ * DEPTH[ch] control ticks (newest first), so the net can read rates and trends —
+ * closing speed on an obstacle ray, bearing rate, gust onset, the yaw/steer
+ * history that turns a P heading loop into a PD one — without any recurrence.
+ * Depth is per channel: fast/rate-critical channels run deep, slow ones (route
+ * distance, leg heading) run shallow. The input starts with a full lag-0 block
+ * of all NC channels (so the overlay still reads inp[0..27]), then each deeper
+ * lag appends only the channels whose depth reaches that far back.
+ *
+ * The NC per-tick channels (Outputs: 5, all 0..1):
+ *   0-13  land rays (14, full circle)          0 engine 1 (port)
+ *  14-27  ship rays (14, full circle)          1 engine 2 (starboard)
+ *  28     signed surge speed u (+ = ahead)     2 brake flap + reverse
+ *  29-30  body accelerometer x (fwd), y        3 rotate left (thruster/rudder)
+ *  31     distance left along GPS route        4 rotate right
+ *  32     straight-line distance to target
+ *  33-34  sin/cos of bearing to target relative to compass heading
+ *  35     GPS route heading on current stretch, relative to heading
+ *  36-37  sin/cos of ocean-current direction relative to heading, ×strength
+ *  38-39  sin/cos of wind direction relative to heading, ×strength
+ *  40     yaw rate (gyro Z), + = bow swinging to starboard
+ *  41     signed cross-track error from the route leg, + = right of the line
+ *  42     body-frame sway velocity, + = sliding to starboard
+ *  43     commanded accel (out0+out1)/2 - out2, as issued last tick
+ *  44     commanded steer (out4-out3), as issued last tick, + = starboard
+ *  45     commanded diff thrust (out1-out0), last tick, + = starboard-yaw
+ *
+ * Channels 40-45 close a P-only observability gap: without yaw-rate + steering-
+ * efference history the net sees heading error but not its rate, so a hull with
+ * rotational inertia driven through actuator lag snakes in a limit cycle. Every
+ * angular/lateral sign shares one convention: + = starboard. Lag-0 of channels
+ * 0-27 stays where it was, so the sensor-ray overlay reads inp[0..27] unchanged.
  */
 "use strict";
 
@@ -26,23 +44,57 @@ const BOAT = {
     MASS: 4.2,                    // kg, foiling RC hull with battery
     IZ: 0.12,                     // yaw inertia (kg·m²)
     ENG_OFF: 0.10,                // engine offset from centerline (m)
-    MAX_THRUST: 5.0,              // N per engine
+    MAX_THRUST: 6.0,              // N per engine
     C1_FWD: 0.8,                  // linear forward drag
     C2_DISP: 2.4,                 // quadratic drag, hull in the water
     C2_FOIL: 0.5,                 // quadratic drag, up on the foils
     FOIL_LO: 1.2, FOIL_HI: 1.9,   // takeoff speed band (m/s)
     LAT_LIN: 6.0, LAT_QUAD: 22.0, // lateral (keel/foil) drag
     WIND_KF: 0.055, WIND_KS: 0.11,// windage, frontal / side (30-40 cm topsides)
-    ROT_STATIC: 0.18, ROT_DYN: 0.30, // steering torque: thruster + rudder authority
+    ROT_STATIC: 0.26, ROT_DYN: 0.48, // steering torque: thruster + rudder authority
+                                  // (raised for tighter turns in narrow canals)
     YAW_D1: 0.06, YAW_D2: 0.25,   // yaw damping
+    YAW_RMAX: 1.0,                // rad/s (~57°/s) yaw-rate normalizer; measured
+                                  // peak sustained turn ~1.3 rad/s, fits ±1.5 clamp
     STICTION_F: 0.55,             // N of thrust needed to unstick from rest
     RADIUS: 0.34,                 // collision radius (m)
     SENSOR_N: 14,
     SENSOR_RANGE: 26,             // m
-    HP: 3
+    HP: 3,
+    // path-efficiency scoring: a leg only "should" cost as much distance as the
+    // progress it earns (×EFF_SLACK head-room for turns/current). Distance sailed
+    // beyond that — swaying, circling — is penalised at EFF_W per metre, capped
+    // at EFF_CAP so one bad leg can't dominate. This is what stops a boat from
+    // farming survival points by covering distance instead of reaching GPS points.
+    EFF_W: 6,
+    EFF_SLACK: 1.2,
+    EFF_CAP: 400
 };
 
-const NET_SIZES = [47, 32, 18, 5];
+// Temporal window: each of the NC per-tick channels is fed as its last DEPTH[ch]
+// control ticks. Fast/rate-critical channels get a deep window; slow ones (route
+// distance, leg heading) get a shallow one — deep history there is just redundant
+// weight the net has to learn to ignore. The net input size is the sum of DEPTH.
+const NC = 46;
+const DEPTH = new Uint8Array([
+    // 0-27  land + ship rays — closing speed on an obstacle matters
+    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+    3,          // 28 surge speed
+    3, 3,       // 29-30 accelerometer x/y
+    2, 2,       // 31-32 route-remaining / straight-line distance — slow, shallow
+    4, 4,       // 33-34 bearing sin/cos — bearing rate drives pursuit
+    2,          // 35 leg heading — constant within a leg, shallow
+    3, 3,       // 36-37 ocean current sin/cos — gust/shear onset
+    3, 3,       // 38-39 wind sin/cos
+    5,          // 40 yaw rate — the D term, deep
+    3,          // 41 cross-track error
+    3,          // 42 sway velocity
+    5, 5, 5     // 43-45 commanded accel / steer / diff — the actuator-lag pipeline
+]);
+const MAXHIST = DEPTH.reduce((m, d) => Math.max(m, d), 0);
+const NIN = DEPTH.reduce((a, d) => a + d, 0);
+const NET_SIZES = [NIN, 32, 18, 5];
 
 function wrapPi(a) {
     while (a > Math.PI) a -= 2 * Math.PI;
@@ -74,8 +126,11 @@ class Boat {
         this.inputs = new Float32Array(NET_SIZES[0]);
         this.out = new Float32Array(5);          // commanded by the net
         this.act = new Float32Array(5);          // after ESC/servo lag
-        this.prevCmd = [0, 0, 0];                // commanded accel state history
-        this.prevFlow = new Float32Array(4);     // last tick's current/wind readings
+        // ring buffer of the last MAXHIST channel vectors (all zero = "no past yet")
+        this.histBuf = [];
+        for (let i = 0; i < MAXHIST; i++) this.histBuf.push(new Float32Array(NC));
+        this.histWrite = 0;
+        this.lastCmd = [0, 0, 0];                // [accel, steer, diff] issued last tick
         this.ax = 0; this.ay = 0;                // body-frame accelerometer
         this.speed = 0; this.fwdSpeed = 0;
         this.foil = 0;
@@ -86,6 +141,7 @@ class Boat {
         this.arrivals = 0;
         this.legStartTime = 0;
         this.legInitStraight = 1;
+        this.legDist = 0;         // distance actually sailed on the current leg
         this.bestRemainAlong = 1e9;
         this.bestStraight = 1e9;
         this.fitScore = 0;                       // banked from completed legs
@@ -104,11 +160,13 @@ class Boat {
 
     /* ------------------------------------------------ sensing + control (15 Hz) */
     control(world, noiseOn) {
-        const inp = this.inputs;
         const N = BOAT.SENSOR_N, R = BOAT.SENSOR_RANGE;
         const map = world.map;
+        // write this tick's channel vector into the ring, then assemble the net
+        // input from the last HIST slots (newest first).
+        const cur = this.histBuf[this.histWrite];
 
-        // 14 land rays + 14 ship rays, evenly spaced, ray 0 out the bow
+        // 14 land rays + 14 ship rays, evenly spaced, ray 0 out the bow (0-27)
         for (let i = 0; i < N; i++) {
             const th = this.heading + (i / N) * Math.PI * 2;
             const c = Math.cos(th), s = Math.sin(th);
@@ -117,7 +175,7 @@ class Boat {
             for (let d = 0.5; d < R; d += 0.35) {
                 if (map.isLand(this.x + c * d, this.y + s * d)) { dLand = d; break; }
             }
-            inp[i] = 1 - dLand / R;
+            cur[i] = 1 - dLand / R;
             // ships: nearest boat close to this ray
             let dShip = R;
             for (const o of world.nearOf(this)) {
@@ -127,55 +185,77 @@ class Boat {
                 const perp = Math.abs(rx * -s + ry * c);
                 if (perp < BOAT.RADIUS + 0.25 && along < dShip) dShip = along;
             }
-            inp[N + i] = 1 - dShip / R;
+            cur[N + i] = 1 - dShip / R;
         }
 
-        inp[28] = Math.min(1.2, this.speed / 5);
-        inp[29] = this.prevCmd[0];
-        inp[30] = this.prevCmd[1];
-        inp[31] = this.prevCmd[2];
-        inp[32] = Math.max(-1.5, Math.min(1.5, this.ax / 8));
-        inp[33] = Math.max(-1.5, Math.min(1.5, this.ay / 8));
+        // signed surge (fwd water-relative speed): brake/reverse can make sternway,
+        // which a speed magnitude would hide (28); accelerometer x/y (29-30)
+        cur[28] = Math.max(-1.2, Math.min(1.2, this.fwdSpeed / 5));
+        cur[29] = Math.max(-1.5, Math.min(1.5, this.ax / 8));
+        cur[30] = Math.max(-1.5, Math.min(1.5, this.ay / 8));
 
+        // navigation (31-35) + cross-track error (41)
         if (this.tracker) {
             const nav = this.tracker.update(this.x, this.y);
             this._nav = nav;
             if (nav.remainAlong < this.bestRemainAlong) this.bestRemainAlong = nav.remainAlong;
             if (nav.straight < this.bestStraight) this.bestStraight = nav.straight;
-            inp[34] = Math.min(1.5, nav.remainAlong / 120);
-            inp[35] = Math.min(1.5, nav.straight / 120);
+            cur[31] = Math.min(1.5, nav.remainAlong / 120);
+            cur[32] = Math.min(1.5, nav.straight / 120);
             const rel = wrapPi(nav.bearing - this.heading);
-            inp[36] = Math.sin(rel);
-            inp[37] = Math.cos(rel);
-            inp[38] = wrapPi(nav.legHeading - this.heading) / Math.PI;
+            cur[33] = Math.sin(rel);
+            cur[34] = Math.cos(rel);
+            cur[35] = wrapPi(nav.legHeading - this.heading) / Math.PI;
+            cur[41] = Math.max(-1.5, Math.min(1.5, nav.xte / 15));
         } else {
-            inp[34] = inp[35] = inp[36] = inp[38] = 0; inp[37] = 1;
+            cur[31] = cur[32] = cur[33] = cur[35] = cur[41] = 0; cur[34] = 1;
         }
 
         // ocean current and wind, as sin/cos of their direction relative to the
         // bow, scaled by strength — zero flow reads as (0, 0) instead of an
-        // undefined direction. A real hull estimates these from GPS drift and
-        // a masthead wind vane.
+        // undefined direction (36-39). The temporal window supplies the gust/
+        // shear differencing the old explicit prev-tick copies used to give.
         const [cwx, cwy] = map.current(this.x, this.y, world.time);
         const cmag = Math.hypot(cwx, cwy);
         if (cmag > 0.02) {
             const rel = wrapPi(Math.atan2(cwy, cwx) - this.heading);
             const k = Math.min(1, cmag / 1.0);
-            inp[39] = Math.sin(rel) * k;
-            inp[40] = Math.cos(rel) * k;
-        } else { inp[39] = inp[40] = 0; }
+            cur[36] = Math.sin(rel) * k;
+            cur[37] = Math.cos(rel) * k;
+        } else { cur[36] = cur[37] = 0; }
         const wmagIn = Math.hypot(world.wind[0], world.wind[1]);
         if (wmagIn > 0.1) {
             const rel = wrapPi(Math.atan2(world.wind[1], world.wind[0]) - this.heading);
             const k = Math.min(1, wmagIn / 6.0);
-            inp[41] = Math.sin(rel) * k;
-            inp[42] = Math.cos(rel) * k;
-        } else { inp[41] = inp[42] = 0; }
+            cur[38] = Math.sin(rel) * k;
+            cur[39] = Math.cos(rel) * k;
+        } else { cur[38] = cur[39] = 0; }
 
-        // previous-tick flow readings, then remember this tick's for next time
-        const pf = this.prevFlow;
-        inp[43] = pf[0]; inp[44] = pf[1]; inp[45] = pf[2]; inp[46] = pf[3];
-        pf[0] = inp[39]; pf[1] = inp[40]; pf[2] = inp[41]; pf[3] = inp[42];
+        // yaw rate (40, + = starboard) and body-frame sway (42, + = starboard
+        // slide). With HIST ticks of these plus the command channels below, the
+        // net sees heading-error rate and angular acceleration — the D term.
+        cur[40] = Math.max(-1.5, Math.min(1.5, this.omega / BOAT.YAW_RMAX));
+        const cs0 = Math.cos(this.heading), sn0 = Math.sin(this.heading);
+        const vLat = -this.vx * sn0 + this.vy * cs0;
+        cur[42] = Math.max(-1.5, Math.min(1.5, vLat / 2));
+
+        // efference: the commands issued LAST tick (this tick's aren't formed yet),
+        // still working through the actuator lag (43-45)
+        cur[43] = this.lastCmd[0];
+        cur[44] = this.lastCmd[1];
+        cur[45] = this.lastCmd[2];
+
+        // assemble the lag window: full lag-0 block first (keeps sensor rays at
+        // inp[0..27] for the overlay), then each deeper lag appends only the
+        // channels whose per-channel depth reaches that far back.
+        const inp = this.inputs;
+        let k = 0;
+        for (let ch = 0; ch < NC; ch++) inp[k++] = cur[ch];
+        for (let lag = 1; lag < MAXHIST; lag++) {
+            const s = this.histBuf[(this.histWrite - lag + MAXHIST) % MAXHIST];
+            for (let ch = 0; ch < NC; ch++) if (DEPTH[ch] > lag) inp[k++] = s[ch];
+        }
+        this.histWrite = (this.histWrite + 1) % MAXHIST;
 
         if (noiseOn) {
             for (let i = 0; i < inp.length; i++) inp[i] += (Math.random() * 2 - 1) * 0.02;
@@ -188,11 +268,11 @@ class Boat {
             this.out[i] = Math.max(0, Math.min(1, v));
         }
 
-        // commanded acceleration state history (what the ESC was just told)
-        const cmd = (this.out[0] + this.out[1]) * 0.5 - this.out[2];
-        this.prevCmd[2] = this.prevCmd[1];
-        this.prevCmd[1] = this.prevCmd[0];
-        this.prevCmd[0] = cmd;
+        // remember what we just told the actuators, for next tick's efference
+        // channels (+ = starboard-yaw: torque ~ (tR-tL), so out1-out0 turns +omega)
+        this.lastCmd[0] = (this.out[0] + this.out[1]) * 0.5 - this.out[2];
+        this.lastCmd[1] = this.out[4] - this.out[3];
+        this.lastCmd[2] = this.out[1] - this.out[0];
     }
 
     /* ------------------------------------------------------- physics (30 Hz) */
@@ -257,6 +337,7 @@ class Boat {
         const nx = this.x + this.vx * dt;
         const ny = this.y + this.vy * dt;
 
+        const ox = this.x, oy = this.y;
         if (world.map.isLand(nx, ny)) {
             // grounded: stop dead, take the hit
             this.vx *= 0.15; this.vy *= 0.15; this.omega *= 0.4;
@@ -268,6 +349,7 @@ class Boat {
         } else {
             this.x = nx; this.y = ny;
         }
+        this.legDist += Math.hypot(this.x - ox, this.y - oy);   // odometer (actual travel)
 
         this.hitCooldown -= dt;
         this.gunCooldown -= dt;
@@ -275,21 +357,26 @@ class Boat {
         this.fwdSpeed = u;
     }
 
-    /* live fitness: banked legs + progress on the current leg – penalties */
+    /* live fitness: banked legs + progress on the current leg – penalties.
+     * Priority order: GPS points reached > closeness > efficient/clean sailing.
+     * Progress is measured *along the route toward the goal*, never as raw
+     * distance travelled — and any distance sailed beyond that progress is
+     * penalised, so weaving to rack up the odometer is a net loss. */
     fitness() {
-        // Penalties stay below the value of honest progress (priority order:
-        // arrivals > closeness > clean sailing > speed) — otherwise boats that
-        // never leave the spawn outrank boats that try and clip a rock.
         // Grounding bleeds points for every second spent stuck, not just the
-        // initial strike.
-        const pen = Math.max(-400,
-            -(15 * this.landHits + 10 * this.grindTime + 30 * this.shipHits));
+        // initial strike; land contact is weighted heaviest ("least collisions").
+        const pen = Math.max(-500,
+            -(25 * this.landHits + 15 * this.grindTime + 30 * this.shipHits));
         let f = this.fitScore + pen + this.combatScore;
         if (this.tracker) {
             const prog = Math.max(0, 1 - this.bestRemainAlong / this.tracker.total);
             f += prog * 600;
             const close = Math.max(0, 1 - this.bestStraight / Math.max(this.legInitStraight, 1));
             f += close * 150;
+            // efficiency: penalise distance sailed past what the progress needed
+            const useful = this.tracker.total - this.bestRemainAlong;
+            const excess = Math.max(0, this.legDist - useful * BOAT.EFF_SLACK);
+            f -= Math.min(BOAT.EFF_CAP, BOAT.EFF_W * excess);
         }
         return f;
     }
