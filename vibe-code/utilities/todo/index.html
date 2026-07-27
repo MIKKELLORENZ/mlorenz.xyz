@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<title>Todo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script>
+    /* Set the theme before first paint so the page never flashes. */
+    try {
+        var t = localStorage.getItem('todo.theme');
+        if (t === 'light' || t === 'dark' || t === 'navy') document.documentElement.dataset.theme = t;
+    } catch (e) {}
+</script>
+
+<style>
+    /* =====  THEMES  ===== */
+    /* Accents are Apple's system green / system blue. */
+    :root[data-theme="light"]{
+        --bg:#f5f5f7; --text:#1d1d1f; --muted:#86868b; --faint:#c7c7cc;
+        --line:#e3e3e6; --hover:rgba(0,0,0,.04); --accent:#34c759; --on-accent:#fff;
+    }
+    :root[data-theme="dark"]{
+        --bg:#0f0f0f; --text:#f2f2f7; --muted:#8e8e93; --faint:#48484a;
+        --line:#262628; --hover:rgba(255,255,255,.055); --accent:#30d158; --on-accent:#fff;
+    }
+    :root[data-theme="navy"]{
+        --bg:#16203a; --text:#e5ecf8; --muted:#8496b5; --faint:#4d5d7d;
+        --line:#25314c; --hover:rgba(255,255,255,.06); --accent:#0a84ff; --on-accent:#fff;
+    }
+
+    /* =====  GLOBAL LOOK  ===== */
+    /* SF Pro where it exists (Apple platforms), Inter — its closest sibling — everywhere else. */
+    :root{
+        --ui:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",
+             "Inter","Helvetica Neue",Arial,sans-serif;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    html,body{height:100%;}
+    body{
+        font-family:var(--ui);
+        font-size:16px;
+        letter-spacing:-.01em;
+        background:var(--bg);
+        color:var(--text);
+        display:flex;
+        justify-content:center;
+        padding:clamp(2rem,9vh,6rem) 1.5rem 4rem;
+        transition:background .45s ease,color .45s ease;
+        -webkit-font-smoothing:antialiased;
+    }
+    ::selection{background:var(--accent);color:var(--on-accent);}
+
+    .app{width:100%;max-width:34rem;}
+
+    /* =====  HEADER  ===== */
+    header{
+        display:flex;
+        align-items:baseline;
+        justify-content:space-between;
+        gap:1rem;
+        margin-bottom:2.25rem;
+    }
+    h1{
+        font-weight:600;
+        font-size:2rem;
+        letter-spacing:-.028em;
+        line-height:1.1;
+    }
+    .controls{display:flex;align-items:center;gap:.85rem;}
+
+    .swatches{display:flex;gap:.4rem;}
+    .swatch{
+        width:.7rem;height:.7rem;
+        border-radius:50%;
+        border:1px solid var(--faint);
+        background:var(--sw);
+        cursor:pointer;
+        padding:0;
+        opacity:.55;
+        transition:opacity .2s ease,transform .2s ease,box-shadow .2s ease;
+    }
+    .swatch:hover{opacity:1;transform:scale(1.15);}
+    .swatch[aria-pressed="true"]{
+        opacity:1;
+        box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--accent);
+    }
+
+    .icon-btn{
+        background:none;border:none;padding:0;cursor:pointer;
+        color:var(--faint);line-height:0;
+        transition:color .2s ease;
+    }
+    .icon-btn:hover{color:var(--text);}
+    .icon-btn svg{width:1.05rem;height:1.05rem;}
+
+    /* =====  NEW ITEM  ===== */
+    .new{
+        display:flex;align-items:center;gap:.85rem;
+        padding:.55rem 0 .95rem;
+        border-bottom:1px solid var(--line);
+        transition:border-color .3s ease;
+    }
+    .new:focus-within{border-bottom-color:var(--accent);}
+    .new .mark{
+        width:1.1rem;height:1.1rem;flex:none;
+        border:1px dashed var(--faint);
+        border-radius:50%;
+        transition:border-color .3s ease,transform .3s ease;
+    }
+    .new:focus-within .mark{border-color:var(--accent);transform:rotate(90deg);}
+    .new input{
+        flex:1;
+        font:inherit;
+        font-weight:400;
+        background:none;border:none;outline:none;
+        color:var(--text);
+        padding:.15rem 0;
+    }
+    .new input::placeholder{color:var(--muted);}
+
+    /* =====  LIST  ===== */
+    ul{list-style:none;margin-top:.35rem;}
+    li{
+        display:flex;align-items:flex-start;gap:.85rem;
+        padding:.72rem .6rem;
+        margin:0 -.6rem;
+        border-radius:.65rem;
+        cursor:default;
+        animation:enter .3s cubic-bezier(.2,.7,.3,1) both;
+    }
+    li:hover{background:var(--hover);}
+    li.dragging{opacity:.35;}
+    li.leaving{animation:leave .22s ease forwards;}
+    @keyframes enter{from{opacity:0;transform:translateY(-.4rem);}to{opacity:1;transform:none;}}
+    @keyframes leave{to{opacity:0;transform:translateX(1rem);}}
+
+    .check{
+        position:relative;
+        width:1.1rem;height:1.1rem;flex:none;
+        margin-top:.22rem;
+        border:1.5px solid var(--faint);
+        border-radius:50%;
+        background:none;
+        cursor:pointer;
+        transition:border-color .25s ease,background .25s ease;
+    }
+    .check:hover{border-color:var(--accent);}
+    .check svg{
+        position:absolute;inset:0;
+        width:100%;height:100%;
+        stroke:var(--on-accent);
+        stroke-width:2.6;
+        stroke-linecap:round;
+        stroke-linejoin:round;
+        fill:none;
+        stroke-dasharray:14;
+        stroke-dashoffset:14;
+    }
+    li.done .check{background:var(--accent);border-color:var(--accent);}
+    li.done .check svg{stroke-dashoffset:0;transition:stroke-dashoffset .3s ease .05s;}
+
+    .text{
+        flex:1;
+        font-weight:400;
+        line-height:1.45;
+        word-break:break-word;
+        outline:none;
+        color:var(--text);
+        cursor:text;
+        /* The strike is drawn as a decoration so it hugs the words, even when wrapped. */
+        text-decoration:line-through;
+        text-decoration-thickness:1px;
+        text-decoration-color:transparent;
+        transition:color .35s ease,text-decoration-color .35s ease;
+    }
+    li.done .text{color:var(--muted);text-decoration-color:currentColor;}
+    .text[contenteditable="true"]{text-decoration-color:transparent;}
+
+    .remove{
+        background:none;border:none;padding:.1rem;
+        margin-top:.15rem;
+        line-height:0;color:var(--faint);
+        cursor:pointer;opacity:0;
+        transition:opacity .2s ease,color .2s ease;
+    }
+    li:hover .remove,.remove:focus-visible{opacity:1;}
+    .remove:hover{color:var(--text);}
+    .remove svg{width:.85rem;height:.85rem;}
+
+    /* =====  EMPTY + FOOTER  ===== */
+    .empty{
+        font-size:.95rem;
+        color:var(--muted);
+        padding:2.75rem 0;
+        text-align:center;
+    }
+    footer{
+        display:flex;align-items:center;justify-content:space-between;
+        margin-top:1.5rem;padding-top:1rem;
+        border-top:1px solid var(--line);
+        font-size:.82rem;color:var(--muted);
+        letter-spacing:-.005em;
+    }
+    footer.hidden{display:none;}
+    #clear{
+        background:none;border:none;font:inherit;color:var(--muted);
+        cursor:pointer;padding:0;
+        transition:color .2s ease,opacity .2s ease;
+    }
+    #clear:hover{color:var(--text);}
+    #clear[disabled]{opacity:0;pointer-events:none;}
+
+    @media (prefers-reduced-motion:reduce){
+        *{animation-duration:.01ms!important;transition-duration:.01ms!important;}
+    }
+</style>
+</head>
+<body>
+
+<main class="app">
+    <header>
+        <h1>Todo</h1>
+        <div class="controls">
+            <div class="swatches" id="swatches">
+                <button class="swatch" data-theme="light" style="--sw:#faf9f7" aria-label="Light theme"></button>
+                <button class="swatch" data-theme="dark"  style="--sw:#0f0f0f" aria-label="Dark theme"></button>
+                <button class="swatch" data-theme="navy"  style="--sw:#16203a" aria-label="Navy theme"></button>
+            </div>
+            <button class="icon-btn" id="sound" aria-label="Toggle sound"></button>
+        </div>
+    </header>
+
+    <form class="new" id="new-form">
+        <span class="mark"></span>
+        <input id="new-input" placeholder="What needs doing?" autocomplete="off" maxlength="240" autofocus>
+    </form>
+
+    <ul id="list"></ul>
+
+    <footer id="footer" class="hidden">
+        <span id="count"></span>
+        <button id="clear">Clear completed</button>
+    </footer>
+</main>
+
+<script>
+(function () {
+    'use strict';
+
+    const KEY = 'todo.items';
+    const list    = document.getElementById('list');
+    const form    = document.getElementById('new-form');
+    const input   = document.getElementById('new-input');
+    const footer  = document.getElementById('footer');
+    const countEl = document.getElementById('count');
+    const clearBtn= document.getElementById('clear');
+
+    let items = load();
+
+    function load() {
+        try {
+            const raw = JSON.parse(localStorage.getItem(KEY));
+            if (!Array.isArray(raw)) return [];
+            return raw
+                .filter(i => i && typeof i.text === 'string')
+                .map(i => ({ id: i.id || uid(), text: i.text, done: !!i.done }));
+        } catch (e) { return []; }
+    }
+    function save() {
+        try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) {}
+    }
+    function uid() { return Math.random().toString(36).slice(2, 10); }
+    function find(id) { return items.find(i => i.id === id); }
+
+    /* =====  SOUND  ===== */
+    const sound = (function () {
+        /* The clips are trimmed and level-matched on disk, so one volume suits all three. */
+        const NAMES = ['add', 'complete', 'delete', 'highlight'];
+        const VOLUME = .55;
+
+        let ctx = null;              /* Web Audio: decoded up front, plays with no lag. */
+        const buffers = {};
+        let tags = null;             /* Fallback for file:// where fetch is blocked. */
+
+        if (window.AudioContext || window.webkitAudioContext) {
+            ctx = new (window.AudioContext || window.webkitAudioContext)();
+            NAMES.forEach(function (name) {
+                fetch(name + '.mp3')
+                    .then(r => r.arrayBuffer())
+                    .then(b => ctx.decodeAudioData(b))
+                    .then(buf => { buffers[name] = buf; })
+                    .catch(useTags);
+            });
+            /* Contexts start suspended; wake it on the first gesture, not on the first sound. */
+            ['pointerdown', 'keydown'].forEach(function (evt) {
+                window.addEventListener(evt, wake, { once: true });
+            });
+        } else {
+            useTags();
+        }
+
+        function wake() { if (ctx && ctx.state === 'suspended') ctx.resume(); }
+
+        function useTags() {
+            if (tags) return;
+            tags = {};
+            NAMES.forEach(function (name) {
+                const a = new Audio(name + '.mp3');
+                a.preload = 'auto';
+                a.load();
+                tags[name] = a;
+            });
+        }
+
+        let on = localStorage.getItem('todo.sound') !== 'off';
+
+        const btn = document.getElementById('sound');
+        const ICON = {
+            on:  '<path d="M4 7h3l4-3.5v13L7 13H4z"/><path d="M13.5 6.5a5 5 0 0 1 0 7"/>',
+            off: '<path d="M4 7h3l4-3.5v13L7 13H4z"/><path d="M13 7.5l4 5M17 7.5l-4 5"/>'
+        };
+        function paint() {
+            btn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" ' +
+                'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
+                ICON[on ? 'on' : 'off'] + '</svg>';
+            btn.setAttribute('aria-pressed', on);
+        }
+        paint();
+
+        function play(name) {
+            if (!on) return;
+            if (buffers[name]) {
+                wake();
+                const src = ctx.createBufferSource();
+                const vol = ctx.createGain();
+                src.buffer = buffers[name];
+                vol.gain.value = VOLUME;
+                src.connect(vol).connect(ctx.destination);
+                src.start();
+            } else if (tags && tags[name]) {
+                const a = tags[name];
+                a.volume = VOLUME;
+                a.currentTime = 0;
+                a.play().catch(() => {});
+            }
+        }
+
+        btn.addEventListener('click', function () {
+            on = !on;
+            localStorage.setItem('todo.sound', on ? 'on' : 'off');
+            paint();
+            play('highlight');
+        });
+
+        return play;
+    })();
+
+    /* =====  THEME  ===== */
+    document.getElementById('swatches').addEventListener('click', function (e) {
+        const btn = e.target.closest('.swatch');
+        if (!btn) return;
+        document.documentElement.dataset.theme = btn.dataset.theme;
+        localStorage.setItem('todo.theme', btn.dataset.theme);
+        paintSwatches();
+        sound('highlight');
+    });
+    function paintSwatches() {
+        const current = document.documentElement.dataset.theme;
+        document.querySelectorAll('.swatch').forEach(function (b) {
+            b.setAttribute('aria-pressed', b.dataset.theme === current);
+        });
+    }
+
+    /* =====  RENDER  ===== */
+    const CHECK = '<svg viewBox="0 0 20 20"><path d="M5.5 10.4l3 3 6-6.8"/></svg>';
+    const CROSS = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" ' +
+                  'stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg>';
+
+    function render() {
+        list.innerHTML = '';
+        if (!items.length) {
+            const p = document.createElement('p');
+            p.className = 'empty';
+            p.textContent = 'Nothing yet.';
+            list.appendChild(p);
+        }
+        items.forEach(function (item) {
+            const li = document.createElement('li');
+            li.dataset.id = item.id;
+            li.draggable = true;
+            if (item.done) li.classList.add('done');
+            li.innerHTML =
+                '<button class="check" aria-label="Toggle">' + CHECK + '</button>' +
+                '<span class="text"></span>' +
+                '<button class="remove" aria-label="Delete">' + CROSS + '</button>';
+            li.querySelector('.text').textContent = item.text;
+            list.appendChild(li);
+        });
+        paintFooter();
+    }
+
+    function paintFooter() {
+        const left = items.filter(i => !i.done).length;
+        const done = items.length - left;
+        footer.classList.toggle('hidden', !items.length);
+        countEl.textContent = left === 0 ? 'All done' : left + (left === 1 ? ' thing left' : ' things left');
+        clearBtn.disabled = done === 0;
+    }
+
+    /* =====  ACTIONS  ===== */
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const text = input.value.trim();
+        if (!text) return;
+        items.unshift({ id: uid(), text: text, done: false });
+        input.value = '';
+        save();
+        render();
+        sound('add');
+    });
+
+    list.addEventListener('click', function (e) {
+        const li = e.target.closest('li');
+        if (!li) return;
+        const item = find(li.dataset.id);
+        if (!item) return;
+
+        if (e.target.closest('.check')) {
+            item.done = !item.done;
+            li.classList.toggle('done', item.done);
+            save();
+            paintFooter();
+            sound(item.done ? 'complete' : 'highlight');
+        } else if (e.target.closest('.remove')) {
+            remove([item.id]);
+        }
+    });
+
+    /* Remove rows with a short exit animation, then drop them from the model. */
+    function remove(ids) {
+        const rows = ids.map(id => list.querySelector('li[data-id="' + id + '"]')).filter(Boolean);
+        rows.forEach(r => r.classList.add('leaving'));
+        items = items.filter(i => ids.indexOf(i.id) === -1);
+        save();
+        paintFooter();
+        sound('delete');
+        setTimeout(render, 220);
+    }
+
+    clearBtn.addEventListener('click', function () {
+        const ids = items.filter(i => i.done).map(i => i.id);
+        if (ids.length) remove(ids);
+    });
+
+    /* =====  INLINE EDIT  ===== */
+    list.addEventListener('dblclick', function (e) {
+        const text = e.target.closest('.text');
+        if (!text) return;
+        const li = text.closest('li');
+        li.draggable = false;
+        text.contentEditable = 'true';
+        text.focus();
+        document.getSelection().selectAllChildren(text);
+    });
+
+    list.addEventListener('keydown', function (e) {
+        const text = e.target.closest('.text[contenteditable="true"]');
+        if (!text) return;
+        if (e.key === 'Enter') { e.preventDefault(); text.blur(); }
+        if (e.key === 'Escape') {
+            const item = find(text.closest('li').dataset.id);
+            text.textContent = item ? item.text : '';
+            text.blur();
+        }
+    });
+
+    list.addEventListener('focusout', function (e) {
+        const text = e.target.closest('.text[contenteditable="true"]');
+        if (!text) return;
+        const li = text.closest('li');
+        const item = find(li.dataset.id);
+        text.contentEditable = 'false';
+        li.draggable = true;
+        if (!item) return;
+        const next = text.textContent.trim();
+        if (!next) { remove([item.id]); return; }
+        if (next !== item.text) { item.text = next; save(); }
+        text.textContent = item.text;
+    });
+
+    /* =====  DRAG TO REORDER  ===== */
+    let dragId = null;
+
+    list.addEventListener('dragstart', function (e) {
+        const li = e.target.closest('li');
+        if (!li) return;
+        dragId = li.dataset.id;
+        li.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', dragId);
+    });
+
+    list.addEventListener('dragover', function (e) {
+        if (!dragId) return;
+        e.preventDefault();
+        const dragged = list.querySelector('.dragging');
+        const over = [...list.querySelectorAll('li:not(.dragging)')].find(function (li) {
+            const box = li.getBoundingClientRect();
+            return e.clientY < box.top + box.height / 2;
+        });
+        list.insertBefore(dragged, over || null);
+    });
+
+    list.addEventListener('dragend', function () {
+        const li = list.querySelector('.dragging');
+        if (li) li.classList.remove('dragging');
+        if (!dragId) return;
+        dragId = null;
+        /* Reorder the model to match the DOM. */
+        const order = [...list.querySelectorAll('li')].map(l => l.dataset.id);
+        items.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+        save();
+        sound('highlight');
+    });
+
+    paintSwatches();
+    render();
+})();
+</script>
+</body>
+</html>

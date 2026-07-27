@@ -230,6 +230,18 @@ document.addEventListener('DOMContentLoaded', function() {
             type: "iframe"
         },
 
+        {
+            id: "todo",
+            title: "Todo",
+            description: "A quiet, minimal to-do list. Add, check off, rename by double-click and drag to reorder, with soft sounds and three color modes — light, dark and navy. Everything lives in your browser's local storage, so clearing your browsing data clears the list.",
+            thumbnail: "../vibe-code/utilities/todo/thumbnail.jpg",
+            category: "utilities",
+            tags: ["to-do", "to do", "todo list", "tasks", "productivity", "local storage", "minimal", "javascript"],
+            date: "2026-07-27",
+            path: "utilities/todo/index.html",
+            type: "iframe"
+        },
+
 
 
     ];
