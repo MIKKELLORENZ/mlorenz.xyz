@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
             tags: ["photons","physics","javascript","planets"],
             date: "2025-04-26",
             path: "simulations/cosmo_lab/index.html",
-            type: "iframe" 
+            type: "iframe"
         },
 
         {
@@ -239,21 +239,75 @@ document.addEventListener('DOMContentLoaded', function() {
             tags: ["to-do", "to do", "todo list", "tasks", "productivity", "local storage", "minimal", "javascript"],
             date: "2026-07-27",
             path: "utilities/todo/index.html",
-            type: "iframe"
+            type: "iframe",
+            featured: false // thumbnail doesn't carry a full-bleed hero slide
         },
 
 
 
     ];
 
+    /* ═══════════════════════════════════════════════════════════
+       Config & derived data
+       ═══════════════════════════════════════════════════════════ */
+
+    const FEATURED_COUNT = 5;      // slides in the showcase carousel
+    const NEW_WINDOW_DAYS = 21;    // "NEW" badge window, measured from the latest project
+    const SLIDE_DURATION = 7000;   // ms per carousel slide
+
+    const CATEGORY_LABELS = {
+        all: 'Everything',
+        simulations: 'Simulations',
+        games: 'Games',
+        utilities: 'Utilities'
+    };
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Parse "YYYY-MM-DD" as a local date — new Date(str) treats it as UTC,
+    // which can render as the previous day in western time zones.
+    function parseDate(str) {
+        const [y, m, d] = String(str).split('-').map(Number);
+        return new Date(y, (m || 1) - 1, d || 1);
+    }
+
+    function formatDate(str) {
+        return parseDate(str).toLocaleDateString('en-US', {
+            month: 'short', day: 'numeric', year: 'numeric'
+        });
+    }
+
+    function esc(str) {
+        return String(str).replace(/[&<>"']/g, c => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ));
+    }
+
+    const byNewest = [...projects].sort((a, b) => parseDate(b.date) - parseDate(a.date));
+    const latestTime = byNewest.length ? parseDate(byNewest[0].date).getTime() : 0;
+    const newCutoff = latestTime - NEW_WINDOW_DAYS * 86400000;
+
+    const isNew = project => parseDate(project.date).getTime() >= newCutoff;
+
+    // Opt a project out of the showcase with `featured: false` when its
+    // thumbnail doesn't hold up at hero size. It still appears in the grid.
+    const featured = byNewest
+        .filter(project => project.featured !== false)
+        .slice(0, FEATURED_COUNT);
+
+    /* ═══════════════════════════════════════════════════════════
+       DOM references & view state
+       ═══════════════════════════════════════════════════════════ */
+
     const projectsContainer = document.getElementById('projects-container');
+    const showcaseEl = document.getElementById('showcase');
     const searchInput = document.getElementById('search-input');
-    const categoryFilter = document.getElementById('category-filter');
+    const searchClear = document.getElementById('search-clear');
+    const searchField = searchInput ? searchInput.closest('.vc-search') : null;
+    const pillsEl = document.getElementById('category-pills');
     const sortOptions = document.getElementById('sort-options');
-    const applyFiltersBtn = document.getElementById('apply-filters');
-    const activeFilters = document.getElementById('active-filters');
     const searchContainer = document.querySelector('.search-container');
-    
+
     // Store the original navbar content to restore it later
     const navbar = document.querySelector('.navbar');
     let originalNavbarHTML = null;
@@ -261,16 +315,227 @@ document.addEventListener('DOMContentLoaded', function() {
     // Flag to track if a game/simulation is active
     let isInteractiveContentActive = false;
 
-    // Function to toggle interactive mode
+    let activeCategory = 'all';
+    let carousel = null;   // teardown handle for the showcase
+    let cardObserver = null;
+
+    /* ═══════════════════════════════════════════════════════════
+       Featured showcase carousel
+       ═══════════════════════════════════════════════════════════ */
+
+    function buildShowcase(items) {
+        if (!showcaseEl || !items.length) return;
+
+        const slides = items.map((project, i) => `
+            <a class="vc-slide${i === 0 ? ' is-active' : ''}" href="?project=${encodeURIComponent(project.id)}"
+               role="group" aria-roledescription="slide" aria-label="${i + 1} of ${items.length}: ${esc(project.title)}"
+               ${i === 0 ? '' : 'tabindex="-1" aria-hidden="true"'}>
+                <div class="vc-slide-media">
+                    <img src="${esc(project.thumbnail)}" alt="" ${i === 0 ? '' : 'loading="lazy"'} decoding="async">
+                </div>
+                <div class="vc-slide-scrim"></div>
+                <div class="vc-slide-body">
+                    <div class="vc-eyebrow">
+                        ${isNew(project) ? '<span class="vc-chip-new">New</span>' : ''}
+                        <span>${esc(CATEGORY_LABELS[project.category] || project.category)}</span>
+                        <span class="vc-sep"></span>
+                        <span>${formatDate(project.date)}</span>
+                    </div>
+                    <h2 class="vc-slide-title">${esc(project.title)}</h2>
+                    <p class="vc-slide-desc">${esc(project.description)}</p>
+                    <span class="vc-slide-cta">Open project <i class="fas fa-arrow-right" aria-hidden="true"></i></span>
+                </div>
+            </a>
+        `).join('');
+
+        const dots = items.map((project, i) => `
+            <button type="button" class="vc-dot${i === 0 ? ' is-active' : ''}" data-index="${i}"
+                    aria-label="Show ${esc(project.title)}"${i === 0 ? ' aria-current="true"' : ''}>
+                <span class="vc-dot-fill"></span>
+            </button>
+        `).join('');
+
+        showcaseEl.innerHTML = `
+            <div class="vc-showcase${prefersReducedMotion || items.length < 2 ? ' no-autoplay' : ''}"
+                 style="--vc-duration:${SLIDE_DURATION}ms">
+                <div class="vc-showcase-viewport">${slides}</div>
+                <button type="button" class="vc-showcase-arrow prev" aria-label="Previous project">
+                    <i class="fas fa-chevron-left" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="vc-showcase-arrow next" aria-label="Next project">
+                    <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                </button>
+                <div class="vc-dots">${dots}</div>
+            </div>
+        `;
+
+        const root = showcaseEl.querySelector('.vc-showcase');
+        const slideEls = Array.from(root.querySelectorAll('.vc-slide'));
+        const dotEls = Array.from(root.querySelectorAll('.vc-dot'));
+        const autoplay = !prefersReducedMotion && items.length > 1;
+        let index = 0;
+
+        function show(next) {
+            index = (next + slideEls.length) % slideEls.length;
+
+            slideEls.forEach((slide, i) => {
+                const active = i === index;
+                slide.classList.toggle('is-active', active);
+                slide.setAttribute('aria-hidden', String(!active));
+                slide.tabIndex = active ? 0 : -1;
+            });
+
+            dotEls.forEach((dot, i) => {
+                const active = i === index;
+                dot.classList.toggle('is-active', active);
+                if (active) dot.setAttribute('aria-current', 'true');
+                else dot.removeAttribute('aria-current');
+            });
+
+            // Restart the progress animation on the newly active dot
+            if (autoplay) {
+                const fill = dotEls[index].querySelector('.vc-dot-fill');
+                fill.style.animation = 'none';
+                void fill.offsetWidth; // force reflow so the animation replays
+                fill.style.animation = '';
+            }
+        }
+
+        // Autoplay is driven by the progress bar finishing, so pausing the CSS
+        // animation (hover, focus, hidden tab) pauses advancement for free.
+        function onProgressEnd(e) {
+            if (e.animationName === 'vc-progress' && e.target.closest('.vc-dot.is-active')) {
+                show(index + 1);
+            }
+        }
+
+        const setPaused = paused => root.classList.toggle('is-paused', paused);
+        const onVisibility = () => setPaused(document.hidden);
+
+        if (autoplay) {
+            root.addEventListener('animationend', onProgressEnd);
+            root.addEventListener('pointerenter', () => setPaused(true));
+            root.addEventListener('pointerleave', () => setPaused(false));
+            root.addEventListener('focusin', () => setPaused(true));
+            root.addEventListener('focusout', () => setPaused(false));
+            document.addEventListener('visibilitychange', onVisibility);
+        }
+
+        root.querySelector('.prev').addEventListener('click', () => show(index - 1));
+        root.querySelector('.next').addEventListener('click', () => show(index + 1));
+        dotEls.forEach(dot => dot.addEventListener('click', () => show(Number(dot.dataset.index))));
+
+        root.addEventListener('keydown', e => {
+            if (e.key === 'ArrowLeft') { e.preventDefault(); show(index - 1); }
+            if (e.key === 'ArrowRight') { e.preventDefault(); show(index + 1); }
+        });
+
+        // Swipe — and swallow the click that a swipe would otherwise trigger
+        let startX = null;
+        let swiped = false;
+        root.addEventListener('pointerdown', e => { startX = e.clientX; swiped = false; });
+        root.addEventListener('pointerup', e => {
+            if (startX === null) return;
+            const dx = e.clientX - startX;
+            startX = null;
+            if (Math.abs(dx) > 45) {
+                swiped = true;
+                show(dx < 0 ? index + 1 : index - 1);
+            }
+        });
+        root.addEventListener('click', e => {
+            if (swiped) { e.preventDefault(); swiped = false; }
+        }, true);
+
+        show(0);
+
+        carousel = {
+            destroy() {
+                document.removeEventListener('visibilitychange', onVisibility);
+                showcaseEl.innerHTML = '';
+                carousel = null;
+            }
+        };
+    }
+
+    function destroyShowcase() {
+        if (carousel) carousel.destroy();
+        else if (showcaseEl) showcaseEl.innerHTML = '';
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       Toolbar — segmented category control
+       ═══════════════════════════════════════════════════════════ */
+
+    function buildPills() {
+        if (!pillsEl) return;
+
+        const counts = projects.reduce((acc, p) => {
+            acc[p.category] = (acc[p.category] || 0) + 1;
+            return acc;
+        }, {});
+
+        // Order categories by how recently each was added to, newest first
+        const order = Object.keys(counts).sort((a, b) => newestIn(b) - newestIn(a));
+
+        const buttons = ['all', ...order].map(key => `
+            <button type="button" class="vc-pill${key === activeCategory ? ' is-active' : ''}"
+                    data-category="${key}" role="tab" aria-selected="${key === activeCategory}">
+                ${esc(CATEGORY_LABELS[key] || key)}<span class="vc-pill-count">${key === 'all' ? projects.length : counts[key]}</span>
+            </button>
+        `).join('');
+
+        pillsEl.innerHTML = `<span class="vc-pill-thumb" aria-hidden="true"></span>${buttons}`;
+
+        pillsEl.querySelectorAll('.vc-pill').forEach(pill => {
+            pill.addEventListener('click', () => {
+                activeCategory = pill.dataset.category;
+                pillsEl.querySelectorAll('.vc-pill').forEach(p => {
+                    const on = p === pill;
+                    p.classList.toggle('is-active', on);
+                    p.setAttribute('aria-selected', String(on));
+                });
+                moveThumb();
+                applyFilters();
+            });
+        });
+
+        moveThumb();
+        window.addEventListener('resize', moveThumb);
+        // Pill widths change once the web font swaps in
+        if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(moveThumb);
+        }
+    }
+
+    function newestIn(category) {
+        return projects
+            .filter(p => p.category === category)
+            .reduce((max, p) => Math.max(max, parseDate(p.date).getTime()), 0);
+    }
+
+    function moveThumb() {
+        if (!pillsEl) return;
+        const thumb = pillsEl.querySelector('.vc-pill-thumb');
+        const active = pillsEl.querySelector('.vc-pill.is-active');
+        if (!thumb || !active) return;
+        thumb.style.width = `${active.offsetWidth}px`;
+        thumb.style.transform = `translateX(${active.offsetLeft}px)`;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       Grid rendering
+       ═══════════════════════════════════════════════════════════ */
+
     function setInteractiveMode(enabled, projectTitle = null) {
         const mainContent = document.getElementById('main-content');
-        
+
         if (enabled) {
             // Save original navbar HTML if we haven't already
             if (originalNavbarHTML === null) {
                 originalNavbarHTML = navbar.innerHTML;
             }
-            
+
             // Replace navbar content with title and back button
             const navbarContainer = navbar.querySelector('.container');
             navbarContainer.innerHTML = `
@@ -278,93 +543,139 @@ document.addEventListener('DOMContentLoaded', function() {
                     <i class="fas fa-arrow-left"></i> Back
                 </button>
                 <div class="project-title-container">
-                    <span class="project-title">${projectTitle || 'Interactive Project'}</span>
+                    <span class="project-title">${esc(projectTitle || 'Interactive Project')}</span>
                 </div>
                 <button id="theme-toggle" aria-label="Toggle dark mode"></button>
             `;
-            
+
             // Add event listener to the new back button
             document.getElementById('nav-back-button').addEventListener('click', () => {
                 window.location.href = 'index.html';
             });
-            
+
             // Re-initialize dark mode toggle
             if (typeof initDarkModeToggle === 'function') {
                 initDarkModeToggle();
             }
-            
+
             mainContent.classList.add('interactive-mode');
             document.body.classList.add('interactive-mode');
         } else {
             // Restore original navbar
             if (originalNavbarHTML !== null) {
                 navbar.innerHTML = originalNavbarHTML;
-                
+
                 // Re-initialize dark mode toggle
                 if (typeof initDarkModeToggle === 'function') {
                     initDarkModeToggle();
                 }
             }
-            
+
             mainContent.classList.remove('interactive-mode');
             document.body.classList.remove('interactive-mode');
         }
-        
+
         isInteractiveContentActive = enabled;
     }
 
-    // Check if we need to load a specific project
-    const urlParams = new URLSearchParams(window.location.search);
-    const projectId = urlParams.get('project');
+    // Reveal cards as they scroll in, staggered per grid row
+    function observeCards(cards) {
+        if (prefersReducedMotion) {
+            cards.forEach(card => card.classList.add('is-in'));
+            return;
+        }
 
-    if (projectId) {
-        loadProject(projectId);
-    } else {
-        displayProjects(projects);
+        if (!cardObserver) {
+            cardObserver = new IntersectionObserver((entries, obs) => {
+                entries.forEach(entry => {
+                    if (!entry.isIntersecting) return;
+                    const card = entry.target;
+                    card.classList.add('is-in');
+                    obs.unobserve(card);
+                    // Drop the stagger once the entrance has played, otherwise it
+                    // would also delay the hover lift for the rest of the session.
+                    setTimeout(() => { card.style.transitionDelay = ''; }, 1200);
+                });
+            }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+        }
+
+        cards.forEach((card, i) => {
+            card.style.transitionDelay = `${Math.min(i, 7) * 0.055}s`;
+            cardObserver.observe(card);
+        });
     }
 
-    // Event listeners - Auto-trigger search and filters
-    searchInput.addEventListener('input', applyFilters);
-    categoryFilter.addEventListener('change', applyFilters);
-    sortOptions.addEventListener('change', applyFilters);
-    
-    // Keep the manual apply button as well for explicit filtering
-    applyFiltersBtn.addEventListener('click', applyFilters);
-    
+    function sectionHeader(title, count) {
+        const head = document.createElement('div');
+        head.className = 'vc-section-head';
+        head.innerHTML = `
+            <h2 class="vc-section-title">${esc(title)}</h2>
+            <span class="vc-section-count">${count}</span>
+            <span class="vc-section-rule"></span>
+        `;
+        return head;
+    }
+
+    function renderGrid(items) {
+        const grid = document.createElement('div');
+        grid.className = 'grid';
+        items.forEach(project => grid.appendChild(createProjectCard(project)));
+        return grid;
+    }
+
     // Function to display projects as cards
-    function displayProjects(projectsArray) {
-        // Show search container when viewing project list
-        searchContainer.style.display = 'block';
-        
+    function displayProjects(projectsArray, options = {}) {
+        const { grouped = true, heading = null } = options;
+
+        // Show the toolbar when viewing the project list. The showcase's own
+        // visibility is decided by applyFilters(), so it is deliberately untouched.
+        if (searchContainer) searchContainer.style.display = '';
+
         // Reset interactive mode when viewing projects list
         setInteractiveMode(false);
-        
+
         projectsContainer.innerHTML = '';
-        
-        // Group projects by category
-        const groupedProjects = groupByCategory(projectsArray);
-        
-        // Render each category
-        for (const category in groupedProjects) {
-            // Add category header
-            const categoryHeader = document.createElement('h2');
-            categoryHeader.classList.add('category-header');
-            categoryHeader.textContent = category.charAt(0).toUpperCase() + category.slice(1);
-            projectsContainer.appendChild(categoryHeader);
-            
-            // Create grid for this category
-            const categoryGrid = document.createElement('div');
-            categoryGrid.classList.add('grid');
-            projectsContainer.appendChild(categoryGrid);
-            
-            // Add projects in this category
-            groupedProjects[category].forEach(project => {
-                const card = createProjectCard(project);
-                categoryGrid.appendChild(card);
-            });
+
+        if (!projectsArray.length) {
+            projectsContainer.innerHTML = `
+                <div class="vc-empty">
+                    <i class="fas fa-ghost" aria-hidden="true"></i>
+                    <strong>Nothing here yet</strong>
+                    <span>No project matches that search.</span>
+                    <div><button type="button" id="vc-reset">Clear filters</button></div>
+                </div>
+            `;
+            const reset = document.getElementById('vc-reset');
+            if (reset) reset.addEventListener('click', resetFilters);
+            return;
         }
+
+        const cards = [];
+
+        if (grouped) {
+            // Categories ordered by their most recent project, so a brand new
+            // project pulls its whole section to the top of the page.
+            const groups = groupByCategory(projectsArray);
+            Object.keys(groups)
+                .sort((a, b) => newestIn(b) - newestIn(a))
+                .forEach(category => {
+                    projectsContainer.appendChild(
+                        sectionHeader(CATEGORY_LABELS[category] || category, groups[category].length)
+                    );
+                    const grid = renderGrid(groups[category]);
+                    projectsContainer.appendChild(grid);
+                    cards.push(...grid.children);
+                });
+        } else {
+            projectsContainer.appendChild(sectionHeader(heading || 'Results', projectsArray.length));
+            const grid = renderGrid(projectsArray);
+            projectsContainer.appendChild(grid);
+            cards.push(...grid.children);
+        }
+
+        observeCards(cards);
     }
-    
+
     // Function to group projects by category
     function groupByCategory(projects) {
         return projects.reduce((acc, project) => {
@@ -376,43 +687,66 @@ document.addEventListener('DOMContentLoaded', function() {
             return acc;
         }, {});
     }
-    
+
     // Function to create a project card
     function createProjectCard(project) {
         // A real anchor gives keyboard access, middle-click, and link previews for free
         const card = document.createElement('a');
         card.classList.add('card');
-        card.href = `?project=${project.id}`;
+        card.href = `?project=${encodeURIComponent(project.id)}`;
         card.innerHTML = `
             <div class="card-image">
-                <img src="${project.thumbnail}" alt="${project.title}" loading="lazy" onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
+                ${isNew(project) ? '<span class="card-badge">New</span>' : ''}
+                <img src="${esc(project.thumbnail)}" alt="${esc(project.title)}" loading="lazy" decoding="async" onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
                 <div class="card-image-fallback" hidden>
-                    <span>${project.title}</span>
+                    <span>${esc(project.title)}</span>
                 </div>
             </div>
             <div class="card-content">
-                <h3 class="card-title">${project.title}</h3>
-                <p class="card-description">${project.description}</p>
+                <div class="card-meta">
+                    <span>${esc(CATEGORY_LABELS[project.category] || project.category)}</span>
+                    <span class="vc-sep"></span>
+                    <span>${formatDate(project.date)}</span>
+                </div>
+                <h3 class="card-title">${esc(project.title)}</h3>
+                <p class="card-description">${esc(project.description)}</p>
                 <div class="card-tags">
-                    ${project.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+                    ${project.tags.slice(0, 4).map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}
                 </div>
             </div>
         `;
 
         return card;
     }
-    
+
+    // Spotlight follows the cursor across whichever card it is over
+    if (window.matchMedia('(hover: hover)').matches) {
+        let frame = null;
+        projectsContainer.addEventListener('pointermove', e => {
+            const card = e.target.closest('.card');
+            if (!card || frame) return;
+            frame = requestAnimationFrame(() => {
+                frame = null;
+                const rect = card.getBoundingClientRect();
+                card.style.setProperty('--mx', `${e.clientX - rect.left}px`);
+                card.style.setProperty('--my', `${e.clientY - rect.top}px`);
+            });
+        });
+    }
+
     // Function to load a specific project
     function loadProject(projectId) {
         const project = projects.find(p => p.id === projectId);
-        
+
         if (project) {
-            // Hide search container when viewing a project
-            searchContainer.style.display = 'none';
-            
+            // Hide the gallery chrome while a project is open
+            if (searchContainer) searchContainer.style.display = 'none';
+            destroyShowcase();
+            if (showcaseEl) showcaseEl.style.display = 'none';
+
             // Clear the main content
             projectsContainer.innerHTML = '';
-            
+
             // Create project container with maximum height
             const projectFrame = document.createElement('div');
             projectFrame.style.width = '100%';
@@ -422,13 +756,13 @@ document.addEventListener('DOMContentLoaded', function() {
             projectFrame.style.flexDirection = 'column';
             projectFrame.style.position = 'relative'; // For absolute positioning of overlay elements
             projectFrame.style.marginTop = '0'; // Remove margin to push it up
-            
+
             // Determine project type if not explicitly set
             const projectType = project.type || getProjectTypeFromPath(project.path);
-            
+
             // Set interactive mode based on project type with project title
             setInteractiveMode(projectType === 'iframe' || projectType === 'canvas', project.title);
-            
+
             // Load project based on type
             switch(projectType) {
                 case 'iframe':
@@ -442,14 +776,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     setInteractiveMode(false);
                     projectFrame.innerHTML += `
                         <div style="padding: 20px; background-color: var(--bg-secondary); border-radius: 8px; min-height: calc(100vh - 250px);">
-                            <p>Project content would load here. This is a placeholder for ${project.title}.</p>
-                            <p>In a real implementation, this would load the project's content from: ${project.path}</p>
+                            <p>Project content would load here. This is a placeholder for ${esc(project.title)}.</p>
+                            <p>In a real implementation, this would load the project's content from: ${esc(project.path)}</p>
                         </div>
                     `;
             }
-            
+
             projectsContainer.appendChild(projectFrame);
-            
+
             // Update title and history state. replaceState (not pushState): this runs
             // on initial load of ?project=… pages, and pushing would duplicate the
             // entry so the back button needs two presses to leave.
@@ -460,11 +794,11 @@ document.addEventListener('DOMContentLoaded', function() {
             window.location.href = 'index.html';
         }
     }
-    
+
     // Function to determine project type from file path
     function getProjectTypeFromPath(path) {
         const extension = path.split('.').pop().toLowerCase();
-        
+
         switch(extension) {
             case 'html':
                 return 'iframe';
@@ -474,7 +808,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return 'unknown';
         }
     }
-    
+
     // Function to load iframe-based projects
     function loadIframeProject(project, container) {
         const iframeContainer = document.createElement('div');
@@ -486,7 +820,7 @@ document.addEventListener('DOMContentLoaded', function() {
         iframeContainer.style.borderRadius = '0'; // Remove border radius to maximize space
         iframeContainer.style.flex = '1'; // Take remaining space
         iframeContainer.classList.add('interactive-container');
-        
+
         // Create iframe
         const iframe = document.createElement('iframe');
         iframe.src = `../vibe-code/${project.path}`;
@@ -495,16 +829,16 @@ document.addEventListener('DOMContentLoaded', function() {
         iframe.style.border = 'none';
         iframe.style.overflow = 'hidden';
         iframe.id = 'interactive-iframe';
-        
+
         iframeContainer.appendChild(iframe);
         container.appendChild(iframeContainer);
-        
+
         // Focus handling for keyboard events
         iframe.addEventListener('load', () => {
             setupKeyboardControl(iframe, iframeContainer);
         });
     }
-    
+
     // Function to load canvas-based projects
     function loadCanvasProject(project, container) {
         // Create game container
@@ -519,7 +853,7 @@ document.addEventListener('DOMContentLoaded', function() {
         gameContainer.style.borderRadius = '0'; // Remove border radius to maximize space
         gameContainer.style.flex = '1'; // Take remaining space
         gameContainer.classList.add('interactive-container');
-        
+
         // Create canvas for the game
         const canvas = document.createElement('canvas');
         canvas.id = project.canvasId || 'game-canvas'; // Use project's canvas ID or default
@@ -529,10 +863,10 @@ document.addEventListener('DOMContentLoaded', function() {
         canvas.style.display = 'block';
         canvas.style.width = '100%';
         canvas.style.height = '100%';
-        
+
         gameContainer.appendChild(canvas);
         container.appendChild(gameContainer);
-        
+
         // Add instructions if available
         if (project.instructions) {
             const instructions = document.createElement('div');
@@ -542,12 +876,12 @@ document.addEventListener('DOMContentLoaded', function() {
             instructions.innerHTML = project.instructions;
             container.appendChild(instructions);
         }
-        
+
         // Load the project's JavaScript
         const script = document.createElement('script');
         script.src = `../vibe-code/${project.path}`;
         document.body.appendChild(script);
-        
+
         // Set a small timeout to ensure the DOM is fully ready
         setTimeout(() => {
             // Force resize canvas to fill container
@@ -558,11 +892,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 gameCanvas.width = containerWidth;
                 gameCanvas.height = containerHeight;
             }
-            
+
             // Setup keyboard control for canvas games
             setupKeyboardControl(canvas, gameContainer);
         }, 100);
-        
+
         // Add event listener for window resize to keep canvas sized correctly
         window.addEventListener('resize', () => {
             const gameCanvas = document.getElementById(canvas.id);
@@ -574,20 +908,20 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
+
     // Function to setup keyboard control and prevent default scrolling
     function setupKeyboardControl(element, container) {
         // Track focus state
         let hasFocus = false;
-        
+
         // Add focus indicator
         container.style.position = 'relative';
-        
+
         // When user clicks on the interactive element
         container.addEventListener('click', function() {
             hasFocus = true;
             container.style.boxShadow = '0 0 0 2px rgba(66, 153, 225, 0.5)';
-            
+
             // Try to focus the element
             if (element.contentWindow) {
                 // For iframes
@@ -597,7 +931,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 element.focus();
             }
         });
-        
+
         // When user clicks elsewhere
         document.addEventListener('click', function(e) {
             if (!container.contains(e.target)) {
@@ -605,7 +939,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 container.style.boxShadow = 'none';
             }
         });
-        
+
         // Prevent default scrolling behavior when arrows are used and container has focus
         document.addEventListener('keydown', function(e) {
             // Check if the interactive content has focus
@@ -616,41 +950,42 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         }, { passive: false });
-        
+
         // Add touch support for mobile
         container.addEventListener('touchstart', function() {
             hasFocus = true;
             container.style.boxShadow = '0 0 0 2px rgba(66, 153, 225, 0.5)';
         });
     }
-    
-    // Function to apply filters and sort
+
+    /* ═══════════════════════════════════════════════════════════
+       Filtering
+       ═══════════════════════════════════════════════════════════ */
+
     function applyFilters() {
-        const searchTerm = searchInput.value.toLowerCase().trim();
-        const categoryValue = categoryFilter.value;
-        const sortValue = sortOptions.value;
-        
-        // Filter projects
+        const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+        const sortValue = sortOptions ? sortOptions.value : 'newest';
+
+        if (searchField) searchField.classList.toggle('has-value', !!searchTerm);
+
         let filteredProjects = projects.filter(project => {
-            // Search filter
-            const matchesSearch = !searchTerm || 
+            const matchesSearch = !searchTerm ||
                 project.title.toLowerCase().includes(searchTerm) ||
                 project.description.toLowerCase().includes(searchTerm) ||
+                project.category.toLowerCase().includes(searchTerm) ||
                 project.tags.some(tag => tag.toLowerCase().includes(searchTerm));
-                
-            // Category filter
-            const matchesCategory = categoryValue === 'all' || project.category === categoryValue;
-            
+
+            const matchesCategory = activeCategory === 'all' || project.category === activeCategory;
+
             return matchesSearch && matchesCategory;
         });
-        
-        // Sort projects
+
         switch(sortValue) {
             case 'newest':
-                filteredProjects.sort((a, b) => new Date(b.date) - new Date(a.date));
+                filteredProjects.sort((a, b) => parseDate(b.date) - parseDate(a.date));
                 break;
             case 'oldest':
-                filteredProjects.sort((a, b) => new Date(a.date) - new Date(b.date));
+                filteredProjects.sort((a, b) => parseDate(a.date) - parseDate(b.date));
                 break;
             case 'az':
                 filteredProjects.sort((a, b) => a.title.localeCompare(b.title));
@@ -659,60 +994,84 @@ document.addEventListener('DOMContentLoaded', function() {
                 filteredProjects.sort((a, b) => b.title.localeCompare(a.title));
                 break;
         }
-        
-        // Display active filters
-        updateActiveFilters(searchTerm, categoryValue, sortValue);
-        
-        // Update display
-        displayProjects(filteredProjects);
+
+        // The showcase is a "start here" surface — it only belongs on the
+        // unfiltered view, where it isn't competing with the user's own query.
+        const isDefaultView = !searchTerm && activeCategory === 'all';
+        if (showcaseEl) showcaseEl.style.display = isDefaultView ? '' : 'none';
+
+        const heading = searchTerm
+            ? `Results for “${searchTerm}”`
+            : (CATEGORY_LABELS[activeCategory] || activeCategory);
+
+        displayProjects(filteredProjects, {
+            grouped: isDefaultView,
+            heading
+        });
     }
-    
-    // Function to update active filters display
-    function updateActiveFilters(search, category, sort) {
-        activeFilters.innerHTML = '';
-        
-        if (search) {
-            const searchTag = document.createElement('div');
-            searchTag.classList.add('filter-tag');
-            searchTag.innerHTML = `Search: ${search} <span class="remove">&times;</span>`;
-            searchTag.querySelector('.remove').addEventListener('click', () => {
-                searchInput.value = '';
-                applyFilters();
+
+    function resetFilters() {
+        if (searchInput) searchInput.value = '';
+        activeCategory = 'all';
+        if (pillsEl) {
+            pillsEl.querySelectorAll('.vc-pill').forEach(p => {
+                const on = p.dataset.category === 'all';
+                p.classList.toggle('is-active', on);
+                p.setAttribute('aria-selected', String(on));
             });
-            activeFilters.appendChild(searchTag);
+            moveThumb();
         }
-        
-        if (category !== 'all') {
-            const categoryTag = document.createElement('div');
-            categoryTag.classList.add('filter-tag');
-            categoryTag.innerHTML = `Category: ${category} <span class="remove">&times;</span>`;
-            categoryTag.querySelector('.remove').addEventListener('click', () => {
-                categoryFilter.value = 'all';
-                applyFilters();
-            });
-            activeFilters.appendChild(categoryTag);
-        }
-        
-        const sortNames = {
-            'newest': 'Newest First',
-            'oldest': 'Oldest First',
-            'az': 'A-Z',
-            'za': 'Z-A'
-        };
-        
-        const sortTag = document.createElement('div');
-        sortTag.classList.add('filter-tag');
-        sortTag.innerHTML = `Sort: ${sortNames[sort]}`;
-        activeFilters.appendChild(sortTag);
+        applyFilters();
     }
-    
+
+    /* ═══════════════════════════════════════════════════════════
+       Boot
+       ═══════════════════════════════════════════════════════════ */
+
+    if (searchInput) searchInput.addEventListener('input', applyFilters);
+    if (sortOptions) sortOptions.addEventListener('change', applyFilters);
+    if (searchClear) {
+        searchClear.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            applyFilters();
+            if (searchInput) searchInput.focus();
+        });
+    }
+
+    // "/" focuses search, Escape clears it — the way a gallery should behave
+    document.addEventListener('keydown', e => {
+        if (isInteractiveContentActive || !searchInput) return;
+        if (e.key === '/' && document.activeElement !== searchInput) {
+            e.preventDefault();
+            searchInput.focus();
+            searchInput.select();
+        } else if (e.key === 'Escape' && document.activeElement === searchInput) {
+            searchInput.value = '';
+            applyFilters();
+        }
+    });
+
+    buildPills();
+
+    // Check if we need to load a specific project
+    const urlParams = new URLSearchParams(window.location.search);
+    const projectId = urlParams.get('project');
+
+    if (projectId) {
+        loadProject(projectId);
+    } else {
+        buildShowcase(featured);
+        applyFilters();
+    }
+
     // Handle browser back/forward navigation
     window.addEventListener('popstate', (event) => {
         if (event.state && event.state.projectId) {
             loadProject(event.state.projectId);
         } else {
             isInteractiveContentActive = false; // Reset flag when returning to project list
-            displayProjects(projects);
+            if (!carousel) buildShowcase(featured);
+            applyFilters();
             document.title = 'Vibe Code - Projects Gallery';
         }
     });

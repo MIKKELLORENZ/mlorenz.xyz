@@ -31,6 +31,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/gallery.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
@@ -53,28 +54,29 @@
         </div>
     </nav>
 
-    <main class="container" id="main-content">
+    <main class="container vc-gallery" id="main-content">
         <h1 class="sr-only">Vibe Code — Projects Gallery</h1>
-        <div class="search-container">
-            <div class="search-row">
-                <input type="text" id="search-input" placeholder="Search projects..." class="search-input" aria-label="Search projects">
-                <select id="category-filter" class="filter-select" aria-label="Filter by category">
-                    <option value="all">All Categories</option>
-                    <option value="games">Games</option>
-                    <option value="simulations">Simulations</option>
-                    <option value="utilities">Utilities</option>
-                </select>
-                <select id="sort-options" class="filter-select" aria-label="Sort projects">
-                    <option value="newest">Newest First</option>
-                    <option value="oldest">Oldest First</option>
-                    <option value="az">A-Z</option>
-                    <option value="za">Z-A</option>
-                </select>
-                <button id="apply-filters" class="filter-button">Apply</button>
+
+        <!-- Featured showcase carousel, built by JS from the newest projects -->
+        <section id="showcase" aria-label="Featured projects"></section>
+
+        <div class="search-container vc-toolbar" role="search">
+            <div class="vc-search">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input type="text" id="search-input" placeholder="Search projects, tags, ideas…" class="search-input" aria-label="Search projects" autocomplete="off">
+                <button type="button" id="search-clear" class="vc-search-clear" aria-label="Clear search">
+                    <i class="fas fa-xmark" aria-hidden="true"></i>
+                </button>
             </div>
-            <div class="filter-tags" id="active-filters">
-                <!-- Active filters will be added here by JS -->
+            <div class="vc-pills" id="category-pills" role="tablist" aria-label="Filter by category">
+                <!-- Category pills injected by JS -->
             </div>
+            <select id="sort-options" class="filter-select" aria-label="Sort projects">
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="az">A – Z</option>
+                <option value="za">Z – A</option>
+            </select>
         </div>
 
         <div class="projects-container" id="projects-container">

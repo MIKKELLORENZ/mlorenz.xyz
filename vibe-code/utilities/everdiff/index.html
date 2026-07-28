@@ -38,6 +38,9 @@
                 </div>
             </div>
             <div class="toolbar-right">
+                <button class="tool-btn" id="sync-scroll-btn" data-action="toggle-sync" title="Synchronised scrolling">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5.5 8.5L3 11M3 11l2.5 2.5M3 11h8M8.5 5.5L11 3M11 3L8.5 0.5M11 3H3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
                 <button class="tool-btn" data-action="toggle-sequence" title="Sequence panel">
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="5" height="3" rx="0.5" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="5.5" width="5" height="3" rx="0.5" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="10" width="5" height="3" rx="0.5" stroke="currentColor" stroke-width="1.2"/><path d="M8 2.5h5M8 7h5M8 11.5h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
                 </button>
@@ -52,6 +55,10 @@
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="3" cy="7" r="1.2" fill="currentColor"/><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="11" cy="7" r="1.2" fill="currentColor"/></svg>
                 </button>
                 <div id="menu-dropdown" class="menu-dropdown hidden">
+                    <button data-action="toggle-wrap"><span class="menu-check" id="check-wrap">✓</span>Word Wrap</button>
+                    <button data-action="toggle-line-numbers"><span class="menu-check" id="check-linenums">✓</span>Line Numbers</button>
+                    <button data-action="toggle-sync"><span class="menu-check" id="check-sync"></span>Sync Scrolling</button>
+                    <hr>
                     <button data-action="export-doc">Export Active Document</button>
                     <button data-action="export-all">Export All as ZIP</button>
                     <button data-action="import-json">Import JSON</button>

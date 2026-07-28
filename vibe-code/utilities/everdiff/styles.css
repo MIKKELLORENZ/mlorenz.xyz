@@ -25,6 +25,12 @@
     --shadow-lg:       0 12px 48px rgba(0,0,0,0.5);
     --font-mono:       'SF Mono','Cascadia Code','Fira Code','Monaco','Menlo',monospace;
     --font-sans:       -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+
+    /* Editor metrics — the gutter, the textarea and the wrap-measuring mirror
+       must share these exactly, or line numbers drift out of alignment. */
+    --editor-font-size:   13px;
+    --editor-line-height: 21px;
+    --editor-padding:     12px;
 }
 
 [data-theme="light"] {
@@ -148,6 +154,12 @@ body, html {
 
 .tool-btn.small { padding: 3px 8px; font-size: 11px; }
 
+.tool-btn.active {
+    background: var(--accent-subtle);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
 /* Diff mode toggle group */
 .diff-mode-group {
     display: flex;
@@ -210,6 +222,13 @@ body, html {
 }
 
 .menu-dropdown button:hover { background: var(--accent-subtle); color: var(--accent); }
+
+/* Fixed-width check column so labels line up whether ticked or not. */
+.menu-check {
+    display: inline-block;
+    width: 16px;
+    color: var(--accent);
+}
 
 .menu-dropdown hr {
     border: none;
@@ -375,36 +394,73 @@ body, html {
 }
 
 .line-numbers {
-    padding: 12px 0;
+    /* `flex: 0 0 auto` + an explicit JS-set width keeps the gutter exactly as
+       wide as its widest number. `white-space: pre` is what makes the numbers
+       stack vertically — without it the newlines collapse to spaces and the
+       whole column prints on one horizontal line. */
+    flex: 0 0 auto;
+    box-sizing: content-box;
+    width: 2ch;
+    padding: var(--editor-padding) 8px;
     background: var(--bg-surface);
     color: var(--text-faint);
     font-family: var(--font-mono);
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: var(--editor-font-size);
+    line-height: var(--editor-line-height);
     text-align: right;
+    white-space: pre;
     user-select: none;
     overflow: hidden;
-    min-width: 36px;
-    padding-right: 8px;
-    padding-left: 8px;
     border-right: 1px solid var(--border);
 }
+
+.line-numbers.hidden { display: none; }
+
+/* Continuation rows of a soft-wrapped line get a dot instead of a number. */
+.line-numbers .wrap-marker { opacity: 0.35; }
 
 .doc-editor {
     flex: 1;
     background: var(--bg-elevated);
     border: none;
     color: var(--text);
-    padding: 12px;
+    padding: var(--editor-padding);
     font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: var(--editor-font-size);
+    line-height: var(--editor-line-height);
     resize: none;
     outline: none;
     overflow: auto;
     tab-size: 4;
     white-space: pre-wrap;
     word-wrap: break-word;
+    min-width: 0;
+}
+
+/* Word-wrap off — for code / tabular text. */
+.doc-editor.nowrap {
+    white-space: pre;
+    overflow-x: auto;
+}
+
+/* Off-screen clone of the textarea used to measure how many visual rows each
+   logical line occupies once soft-wrapped. Zero-height + hidden so it never
+   affects layout, but its children still lay out and report offsetHeight. */
+.wrap-mirror {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: -1;
+    font-family: var(--font-mono);
+    font-size: var(--editor-font-size);
+    line-height: var(--editor-line-height);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    tab-size: 4;
 }
 
 .doc-editor::placeholder {
@@ -481,9 +537,12 @@ body, html {
 .find-bar .find-count {
     font-size: 11px;
     color: var(--text-muted);
-    min-width: 50px;
+    min-width: 56px;
     text-align: center;
+    font-variant-numeric: tabular-nums;
 }
+
+.find-bar .find-count.no-results { color: var(--danger); }
 
 .find-bar button {
     background: none;
@@ -913,16 +972,22 @@ body, html {
 /* ── Welcome state ──────────────────────────────────────────────── */
 .welcome-hint {
     position: absolute;
-    bottom: 16px;
+    bottom: 34px;           /* clear the pane status bar */
     left: 50%;
     transform: translateX(-50%);
     display: flex;
-    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 16px;
+    max-width: 90%;
     font-size: 11px;
     color: var(--text-faint);
     user-select: none;
+    pointer-events: none;   /* never intercept clicks meant for the editor */
     z-index: 2;
 }
+
+.welcome-hint span { white-space: nowrap; }
 
 .welcome-hint kbd {
     display: inline-block;

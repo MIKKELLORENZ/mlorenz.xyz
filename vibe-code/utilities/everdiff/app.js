@@ -9,6 +9,9 @@
     nextId: 1,
     sequenceSelection: new Set(),
     diffMode: "words",   // words | chars | lines | sentences
+    syncScroll: false,
+    wrap: true,
+    showLineNumbers: true,
   };
 
   const STORAGE_KEY = "everdiff_session";
@@ -70,7 +73,10 @@
         panes: state.panes.map(p => ({ id: p.id, title: p.title, content: p.content })),
         nextId: state.nextId,
         diffMode: state.diffMode,
-        theme: document.body.parentElement.dataset.theme || "dark",
+        syncScroll: state.syncScroll,
+        wrap: state.wrap,
+        showLineNumbers: state.showLineNumbers,
+        theme: document.documentElement.dataset.theme || "dark",
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (e) { /* quota exceeded, ignore */ }
@@ -85,6 +91,9 @@
       state.panes = data.panes.map(p => ({ id: p.id, title: p.title, content: p.content, element: null }));
       state.nextId = data.nextId || state.panes.length + 1;
       state.diffMode = data.diffMode || "words";
+      state.syncScroll = !!data.syncScroll;
+      state.wrap = data.wrap !== false;
+      state.showLineNumbers = data.showLineNumbers !== false;
       if (data.theme) document.documentElement.dataset.theme = data.theme;
       // sync diff mode buttons
       $$(".diff-mode-btn").forEach(btn => {
@@ -137,16 +146,18 @@
           <div class="editor-wrapper">
             <div class="line-numbers" aria-hidden="true">${generateLineNumbers(lineCount)}</div>
             <textarea class="doc-editor" spellcheck="false" placeholder="Paste or type text here...">${escapeHtml(pane.content)}</textarea>
+            <div class="wrap-mirror" aria-hidden="true"></div>
           </div>
         </div>
       </div>
       <div class="pane-status">
         <div class="pane-status-left">
-          <span class="stat-lines">Ln ${lineCount}</span>
+          <span class="stat-lines">${lineCount} lines</span>
           <span class="stat-words">${wordCount} words</span>
           <span class="stat-chars">${charCount} chars</span>
         </div>
         <div class="pane-status-right">
+          <span class="stat-caret">Ln 1, Col 1</span>
           <span class="stat-encoding">UTF-8</span>
         </div>
       </div>`;
@@ -155,6 +166,7 @@
     const titleInput = $(".pane-title", el);
     const editor     = $(".doc-editor", el);
     const lineNums   = $(".line-numbers", el);
+    const mirror     = $(".wrap-mirror", el);
     const splitBtn   = $(".split-btn", el);
     const diffBtn    = $(".diff-btn", el);
     const closeBtn   = $(".close-pane-btn", el);
@@ -169,28 +181,49 @@
 
     editor.addEventListener("input", () => {
       pane.content = editor.value;
-      updateLineNumbers(editor, lineNums);
-      updateStatusBar(el, pane);
-      updateInlineDiff(pane);
+      scheduleLineNumbers(editor, lineNums, mirror);
+      updateStatusBar(el, pane, editor);
+      addWelcomeHint();
+      debouncedInlineDiff(pane);
       debouncedSave();
     });
 
     editor.addEventListener("scroll", () => {
       lineNums.scrollTop = editor.scrollTop;
+      syncScrollFrom(pane.id, editor);
     });
 
     editor.addEventListener("focus", () => setActivePane(pane.id));
+
+    // Cursor position readout
+    const trackCaret = () => updateStatusBar(el, pane, editor);
+    editor.addEventListener("keyup", trackCaret);
+    editor.addEventListener("click", trackCaret);
+    editor.addEventListener("select", trackCaret);
+
+    // Re-measure wrapping whenever the editor's width changes (pane resize,
+    // window resize, sequence panel opening). Without this the gutter keeps
+    // stale continuation rows and drifts.
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => scheduleLineNumbers(editor, lineNums, mirror));
+      ro.observe(editor);
+    }
 
     // Tab support
     editor.addEventListener("keydown", (e) => {
       if (e.key === "Tab") {
         e.preventDefault();
-        const start = editor.selectionStart;
-        const end = editor.selectionEnd;
-        editor.value = editor.value.substring(0, start) + "\t" + editor.value.substring(end);
-        editor.selectionStart = editor.selectionEnd = start + 1;
+        // insertText goes through the browser's own edit pipeline, so native
+        // undo/redo keeps working. Assigning to .value would wipe the stack.
+        if (!document.execCommand("insertText", false, "\t")) {
+          const start = editor.selectionStart;
+          const end = editor.selectionEnd;
+          editor.value = editor.value.substring(0, start) + "\t" + editor.value.substring(end);
+          editor.selectionStart = editor.selectionEnd = start + 1;
+        }
         pane.content = editor.value;
-        updateLineNumbers(editor, lineNums);
+        scheduleLineNumbers(editor, lineNums, mirror);
+        updateStatusBar(el, pane, editor);
         debouncedSave();
       }
       // Ctrl+F → find
@@ -213,45 +246,64 @@
     let findMatches = [];
     let findIdx = -1;
 
-    findInput.addEventListener("input", () => {
+    function renderFindCount() {
+      if (!findInput.value) { findCount.textContent = ""; return; }
+      findCount.textContent = findMatches.length
+        ? `${findIdx + 1} / ${findMatches.length}`
+        : "No results";
+      findCount.classList.toggle("no-results", !findMatches.length);
+    }
+
+    function runFind(keepPosition) {
       const q = findInput.value;
-      if (!q) { findCount.textContent = ""; findMatches = []; return; }
-      const text = editor.value;
+      const previous = findMatches[findIdx];
       findMatches = [];
-      let pos = 0;
+      if (!q) { findIdx = -1; renderFindCount(); return; }
+
       const lq = q.toLowerCase();
-      const lt = text.toLowerCase();
+      const lt = editor.value.toLowerCase();
+      let pos = 0;
       while (true) {
         const idx = lt.indexOf(lq, pos);
         if (idx === -1) break;
         findMatches.push(idx);
-        pos = idx + 1;
+        pos = idx + q.length;   // non-overlapping, so "aa" in "aaaa" is 2 hits
       }
-      findCount.textContent = findMatches.length ? `${findMatches.length} found` : "No results";
-      if (findMatches.length) { findIdx = 0; highlightFind(editor, findMatches[0], q.length); }
-    });
 
-    $(".find-next", findBar).addEventListener("click", () => {
-      if (!findMatches.length) return;
-      findIdx = (findIdx + 1) % findMatches.length;
-      highlightFind(editor, findMatches[findIdx], findInput.value.length);
-    });
+      if (!findMatches.length) { findIdx = -1; renderFindCount(); return; }
+      // Stay on the nearest match when re-running after an edit.
+      findIdx = keepPosition && previous != null
+        ? Math.max(0, findMatches.findIndex(m => m >= previous))
+        : 0;
+      renderFindCount();
+      highlightFind(editor, findMatches[findIdx], q.length, mirror);
+    }
 
-    $(".find-prev", findBar).addEventListener("click", () => {
+    function stepFind(delta) {
       if (!findMatches.length) return;
-      findIdx = (findIdx - 1 + findMatches.length) % findMatches.length;
-      highlightFind(editor, findMatches[findIdx], findInput.value.length);
-    });
+      findIdx = (findIdx + delta + findMatches.length) % findMatches.length;
+      renderFindCount();
+      highlightFind(editor, findMatches[findIdx], findInput.value.length, mirror);
+    }
+
+    findInput.addEventListener("input", () => runFind(false));
+    $(".find-next", findBar).addEventListener("click", () => stepFind(1));
+    $(".find-prev", findBar).addEventListener("click", () => stepFind(-1));
 
     findInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        $(".find-next", findBar).click();
+        stepFind(e.shiftKey ? -1 : 1);
       }
       if (e.key === "Escape") {
         findBar.classList.add("hidden");
         editor.focus();
       }
+    });
+
+    // Keep the match list valid while the document is being edited.
+    editor.addEventListener("input", () => {
+      if (!findBar.classList.contains("hidden") && findInput.value) runFind(true);
     });
 
     $(".find-close", findBar).addEventListener("click", () => {
@@ -273,8 +325,9 @@
           pane.content = reader.result;
           pane.title = files[0].name.replace(/\.[^.]+$/, "");
           titleInput.value = pane.title;
-          updateLineNumbers(editor, lineNums);
-          updateStatusBar(el, pane);
+          scheduleLineNumbers(editor, lineNums, mirror);
+          updateStatusBar(el, pane, editor);
+          updateInlineDiff(pane);
           debouncedSave();
           toast(`Loaded "${files[0].name}"`, "success");
         };
@@ -282,38 +335,193 @@
       }
     });
 
+    // Apply persisted view options
+    editor.classList.toggle("nowrap", !state.wrap);
+    lineNums.classList.toggle("hidden", !state.showLineNumbers);
+
     pane.element = el;
     return el;
   }
 
-  function highlightFind(editor, pos, len) {
+  // Wrap measurement needs real layout, so the gutter can only be built
+  // accurately once the panes are attached to the document.
+  function eachGutter(fn) {
+    state.panes.forEach(p => {
+      if (!p.element) return;
+      const editor   = $(".doc-editor", p.element);
+      const lineNums = $(".line-numbers", p.element);
+      const mirror   = $(".wrap-mirror", p.element);
+      if (editor && lineNums) fn(editor, lineNums, mirror);
+    });
+  }
+
+  function refreshAllGutters() {
+    eachGutter((editor, lineNums, mirror) => updateLineNumbers(editor, lineNums, mirror));
+  }
+
+  // Coalesced variant for continuous gestures like dragging the split bar.
+  function scheduleAllGutters() {
+    eachGutter((editor, lineNums, mirror) => scheduleLineNumbers(editor, lineNums, mirror));
+  }
+
+  function highlightFind(editor, pos, len, mirror) {
     editor.focus();
     editor.setSelectionRange(pos, pos + len);
-    // Scroll into view — crude but works
-    const linesBefore = editor.value.substring(0, pos).split("\n").length;
-    const lineH = editor.scrollHeight / editor.value.split("\n").length;
-    editor.scrollTop = Math.max(0, linesBefore * lineH - editor.clientHeight / 2);
+
+    // Dividing scrollHeight by the logical line count assumes every line is
+    // one row tall, which is wrong the moment anything wraps. Measure the real
+    // vertical offset of the match in the mirror instead.
+    const top = caretOffsetTop(editor, mirror, pos);
+    if (top == null) return;
+    editor.scrollTop = Math.max(0, top - editor.clientHeight / 2);
   }
+
+  // Vertical pixel offset of a character index, wrapping included.
+  function caretOffsetTop(editor, mirror, pos) {
+    if (!mirror) return null;
+    const cs = getComputedStyle(editor);
+    const contentWidth =
+      editor.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    if (!(contentWidth > 0)) return null;
+
+    mirror.style.width       = contentWidth + "px";
+    mirror.style.whiteSpace  = cs.whiteSpace;
+    mirror.style.overflowWrap = cs.overflowWrap;
+    mirror.style.wordBreak   = cs.wordBreak;
+    mirror.style.letterSpacing = cs.letterSpacing;
+    mirror.style.tabSize     = cs.tabSize;
+
+    mirror.textContent = "";
+    mirror.appendChild(document.createTextNode(editor.value.slice(0, pos)));
+    const marker = document.createElement("span");
+    marker.textContent = "​";
+    mirror.appendChild(marker);
+    const top = marker.offsetTop;
+    mirror.textContent = "";
+    return top;
+  }
+
+  // ── Line-number gutter ────────────────────────────────────────────
+  // The editor soft-wraps, so one logical line can span several visual rows.
+  // A naive 1..N column desynchronises from the text as soon as anything
+  // wraps, so we measure each line's wrapped height in an off-screen mirror
+  // and pad the gutter with blank continuation rows to match.
+
+  // Above this many lines, per-line measurement costs more than it's worth;
+  // fall back to unmeasured numbering to keep typing responsive.
+  const WRAP_MEASURE_LIMIT = 3000;
 
   function generateLineNumbers(count) {
-    let html = "";
-    for (let i = 1; i <= count; i++) html += i + "\n";
-    return html;
+    const out = [];
+    for (let i = 1; i <= count; i++) out.push(i);
+    return escapeHtml(out.join("\n"));
   }
 
-  function updateLineNumbers(editor, lineNums) {
-    const count = editor.value.split("\n").length;
-    lineNums.textContent = "";
-    for (let i = 1; i <= count; i++) lineNums.textContent += i + "\n";
+  // Measure how many visual rows each logical line occupies.
+  function measureWrappedRows(editor, mirror, lines) {
+    const cs = getComputedStyle(editor);
+    const lineHeight = parseFloat(cs.lineHeight);
+    const contentWidth =
+      editor.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+
+    if (!(contentWidth > 0) || !(lineHeight > 0)) return lines.map(() => 1);
+
+    // Mirror the textarea's text-layout properties exactly.
+    mirror.style.width       = contentWidth + "px";
+    mirror.style.whiteSpace  = cs.whiteSpace;
+    mirror.style.overflowWrap = cs.overflowWrap;
+    mirror.style.wordBreak   = cs.wordBreak;
+    mirror.style.letterSpacing = cs.letterSpacing;
+    mirror.style.tabSize     = cs.tabSize;
+
+    const frag = document.createDocumentFragment();
+    for (const line of lines) {
+      const row = document.createElement("div");
+      // Zero-width space keeps empty lines one row tall instead of collapsing.
+      row.textContent = line === "" ? "​" : line;
+      frag.appendChild(row);
+    }
+    mirror.textContent = "";
+    mirror.appendChild(frag);
+
+    // One layout flush, then all reads come from cache.
+    const rows = [];
+    for (const child of mirror.children) {
+      rows.push(Math.max(1, Math.round(child.offsetHeight / lineHeight)));
+    }
+    mirror.textContent = "";
+    return rows;
   }
 
-  function updateStatusBar(el, pane) {
+  function updateLineNumbers(editor, lineNums, mirror, isRetry) {
+    if (lineNums.classList.contains("hidden")) return;
+
+    const lines = editor.value.split("\n");
+    const count = lines.length;
+    const wraps = !editor.classList.contains("nowrap");
+    const measured = wraps && mirror && count <= WRAP_MEASURE_LIMIT;
+
+    // Width the text actually wraps at, as it stands before this update.
+    const widthBefore = editor.clientWidth;
+
+    let text;
+    if (measured) {
+      const rows = measureWrappedRows(editor, mirror, lines);
+      const parts = [];
+      for (let i = 0; i < count; i++) {
+        parts.push(String(i + 1));
+        // Blank rows keep subsequent numbers aligned with their source line.
+        for (let r = 1; r < rows[i]; r++) parts.push("");
+      }
+      text = parts.join("\n");
+    } else {
+      const parts = [];
+      for (let i = 1; i <= count; i++) parts.push(i);
+      text = parts.join("\n");
+    }
+
+    lineNums.textContent = text;
+    // Size the gutter to its widest number so it never sprawls.
+    lineNums.style.width = Math.max(2, String(count).length) + "ch";
+    lineNums.scrollTop = editor.scrollTop;
+
+    // Writing the gutter can itself change the width the text wraps at: the
+    // gutter is a flex sibling, and a vertical scrollbar may appear once the
+    // new content overflows. Either invalidates the measurement we just took,
+    // so re-measure once at the settled width.
+    if (measured && !isRetry && editor.clientWidth !== widthBefore) {
+      updateLineNumbers(editor, lineNums, mirror, true);
+    }
+  }
+
+  // Coalesce gutter refreshes to one per frame — typing fires input events far
+  // faster than the layout measurement can usefully keep up with.
+  function scheduleLineNumbers(editor, lineNums, mirror) {
+    if (editor._gutterPending) return;
+    editor._gutterPending = true;
+    requestAnimationFrame(() => {
+      editor._gutterPending = false;
+      updateLineNumbers(editor, lineNums, mirror);
+    });
+  }
+
+  function updateStatusBar(el, pane, editor) {
     const lines = pane.content.split("\n").length;
     const words = pane.content.trim() ? pane.content.trim().split(/\s+/).length : 0;
     const chars = pane.content.length;
-    $(".stat-lines", el).textContent = `Ln ${lines}`;
+    $(".stat-lines", el).textContent = `${lines} lines`;
     $(".stat-words", el).textContent = `${words} words`;
     $(".stat-chars", el).textContent = `${chars} chars`;
+
+    const caret = $(".stat-caret", el);
+    if (caret && editor) {
+      const upto = editor.value.slice(0, editor.selectionStart);
+      const row = upto.split("\n");
+      const sel = editor.selectionEnd - editor.selectionStart;
+      caret.textContent = sel
+        ? `Ln ${row.length}, Col ${row[row.length - 1].length + 1}  (${sel} selected)`
+        : `Ln ${row.length}, Col ${row[row.length - 1].length + 1}`;
+    }
   }
 
   function setActivePane(id) {
@@ -336,6 +544,7 @@
       layoutRoot.appendChild(buildPaneElement(state.panes[0]));
       setActivePane(state.panes[0].id);
       addWelcomeHint();
+      requestAnimationFrame(refreshAllGutters);
       return;
     }
 
@@ -362,14 +571,16 @@
     }
 
     addWelcomeHint();
-    requestAnimationFrame(drawArrows);
+    requestAnimationFrame(() => { drawArrows(); refreshAllGutters(); });
   }
 
   function addWelcomeHint() {
-    // Only show if all panes are empty
-    const allEmpty = state.panes.every(p => !p.content);
-    if (!allEmpty) return;
+    // Only show while every pane is still empty. Crucially this also has to
+    // run as you type — otherwise the hint stays floating over your text for
+    // the rest of the session.
     const existing = $(".welcome-hint", layoutRoot);
+    const allEmpty = state.panes.every(p => !p.content);
+    if (!allEmpty) { if (existing) existing.remove(); return; }
     if (existing) existing.remove();
     const hint = document.createElement("div");
     hint.className = "welcome-hint";
@@ -437,6 +648,9 @@
       const dx = ev.clientX - startX;
       leftPane.style.flex  = `0 0 ${Math.max(220, leftW + dx)}px`;
       rightPane.style.flex = `0 0 ${Math.max(220, rightW - dx)}px`;
+      // Narrower panes rewrap the text, so the gutter has to be re-measured
+      // as the drag happens, not just when it ends.
+      scheduleAllGutters();
       requestAnimationFrame(drawArrows);
     }
 
@@ -452,6 +666,14 @@
   }
 
   // ── Diff engine ───────────────────────────────────────────────────
+  // Diff and JSZip come from a CDN; offline they are simply absent, so fail
+  // with a message instead of an uncaught TypeError.
+  function requireLib(name, obj) {
+    if (obj) return true;
+    toast(`${name} failed to load — check your connection`, "error");
+    return false;
+  }
+
   function computeDiff(textA, textB) {
     switch (state.diffMode) {
       case "chars":     return Diff.diffChars(textA, textB);
@@ -475,6 +697,10 @@
   }
 
   function renderDiffHtml(textA, textB, container, title) {
+    if (!requireLib("Diff library", typeof Diff !== "undefined" && Diff)) {
+      container.innerHTML = `<div class="diff-text">Diff library unavailable.</div>`;
+      return { added: 0, removed: 0, unchanged: 0, similarity: 100 };
+    }
     const diff = computeDiff(textA, textB);
     const stats = computeStats(diff);
 
@@ -560,6 +786,33 @@
 
     renderDiffHtml(pane.content, neighbor.content, diffDiv,
       `${pane.title} → ${neighbor.title}`);
+  }
+
+  // Diffing both documents in full on every keystroke stalls typing on large
+  // texts; a short debounce keeps the live view without the lag.
+  const debouncedInlineDiff = debounce(updateInlineDiff, 180);
+
+  // ── Synchronised scrolling ────────────────────────────────────────
+  // Scroll one pane, the others follow proportionally — the point of having
+  // versions side by side is reading them at the same place.
+  let syncingScroll = false;
+
+  function syncScrollFrom(sourceId, sourceEditor) {
+    if (!state.syncScroll || syncingScroll) return;
+    const range = sourceEditor.scrollHeight - sourceEditor.clientHeight;
+    const ratio = range > 0 ? sourceEditor.scrollTop / range : 0;
+
+    syncingScroll = true;
+    state.panes.forEach(p => {
+      if (p.id === sourceId || !p.element) return;
+      const other = $(".doc-editor", p.element);
+      const gutter = $(".line-numbers", p.element);
+      if (!other) return;
+      const otherRange = other.scrollHeight - other.clientHeight;
+      other.scrollTop = otherRange > 0 ? ratio * otherRange : 0;
+      if (gutter) gutter.scrollTop = other.scrollTop;
+    });
+    requestAnimationFrame(() => { syncingScroll = false; });
   }
 
   // ── Diff all adjacent panes ───────────────────────────────────────
@@ -654,6 +907,9 @@
     { name: "Diff Panes",            shortcut: "Ctrl+D", action: diffAdjacentPanes },
     { name: "Swap Panes",            shortcut: "",       action: swapPanes },
     { name: "Toggle Sequence Panel", shortcut: "",       action: toggleSequencePanel },
+    { name: "Toggle Sync Scrolling", shortcut: "Ctrl+L", action: toggleSyncScroll },
+    { name: "Toggle Word Wrap",      shortcut: "",       action: toggleWrap },
+    { name: "Toggle Line Numbers",   shortcut: "",       action: toggleLineNumbers },
     { name: "Toggle Theme",          shortcut: "",       action: toggleTheme },
     { name: "Export Active Document", shortcut: "",      action: exportDocument },
     { name: "Export All as ZIP",     shortcut: "",       action: exportAllZip },
@@ -725,6 +981,45 @@
     $("input", findBar).focus();
   }
 
+  // ── View options ──────────────────────────────────────────────────
+  function toggleSyncScroll() {
+    state.syncScroll = !state.syncScroll;
+    syncUiToggles();
+    debouncedSave();
+    toast(state.syncScroll ? "Sync scrolling on" : "Sync scrolling off", "info");
+  }
+
+  function toggleWrap() {
+    state.wrap = !state.wrap;
+    state.panes.forEach(p => {
+      if (!p.element) return;
+      $(".doc-editor", p.element).classList.toggle("nowrap", !state.wrap);
+    });
+    refreshAllGutters();
+    syncUiToggles();
+    debouncedSave();
+    toast(state.wrap ? "Word wrap on" : "Word wrap off", "info");
+  }
+
+  function toggleLineNumbers() {
+    state.showLineNumbers = !state.showLineNumbers;
+    state.panes.forEach(p => {
+      if (!p.element) return;
+      $(".line-numbers", p.element).classList.toggle("hidden", !state.showLineNumbers);
+    });
+    refreshAllGutters();
+    syncUiToggles();
+    debouncedSave();
+  }
+
+  function syncUiToggles() {
+    $("#sync-scroll-btn")?.classList.toggle("active", state.syncScroll);
+    const mark = (id, on) => { const el = $(id); if (el) el.textContent = on ? "✓" : ""; };
+    mark("#check-wrap", state.wrap);
+    mark("#check-linenums", state.showLineNumbers);
+    mark("#check-sync", state.syncScroll);
+  }
+
   // ── Theme ─────────────────────────────────────────────────────────
   function toggleTheme() {
     const current = document.documentElement.dataset.theme;
@@ -741,6 +1036,7 @@
   }
 
   function exportAllZip() {
+    if (!requireLib("JSZip", typeof JSZip !== "undefined" && JSZip)) return;
     const zip = new JSZip();
     state.panes.forEach(pane => {
       zip.file(`${pane.title}.json`, JSON.stringify({ title: pane.title, content: pane.content }, null, 2));
@@ -876,6 +1172,9 @@
   document.querySelector(".toolbar").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-action]");
     if (!btn) return;
+    // The overflow menu is nested inside the toolbar and has its own handler;
+    // without this guard shared actions would fire twice and cancel out.
+    if (btn.closest(".menu-dropdown")) return;
     const action = btn.dataset.action;
 
     switch (action) {
@@ -885,6 +1184,7 @@
       case "toggle-sequence":  toggleSequencePanel(); break;
       case "show-palette":     togglePalette(); break;
       case "toggle-theme":     toggleTheme(); break;
+      case "toggle-sync":      toggleSyncScroll(); break;
     }
   });
 
@@ -918,6 +1218,9 @@
     if (!btn) return;
     menuDropdown.classList.add("hidden");
     switch (btn.dataset.action) {
+      case "toggle-wrap":         toggleWrap(); break;
+      case "toggle-line-numbers": toggleLineNumbers(); break;
+      case "toggle-sync":         toggleSyncScroll(); break;
       case "export-doc":  exportDocument(); break;
       case "export-all":  exportAllZip(); break;
       case "import-json": importJsonInput.click(); break;
@@ -951,6 +1254,15 @@
     } else if (ctrl && e.key === "d") {
       e.preventDefault();
       diffAdjacentPanes();
+    } else if (ctrl && e.key === "l") {
+      e.preventDefault();
+      toggleSyncScroll();
+    } else if (ctrl && e.key === "f") {
+      // Ctrl+F outside a textarea should still open find on the active pane.
+      if (!e.target.closest(".doc-editor") && !e.target.closest(".find-bar")) {
+        e.preventDefault();
+        openFindInActivePane();
+      }
     } else if (e.key === "Escape") {
       commandPalette.classList.add("hidden");
       diffViewer.classList.add("hidden");
@@ -958,7 +1270,10 @@
   });
 
   // ── Window events ─────────────────────────────────────────────────
-  window.addEventListener("resize", () => requestAnimationFrame(drawArrows));
+  window.addEventListener("resize", () => {
+    scheduleAllGutters();
+    requestAnimationFrame(drawArrows);
+  });
   window.addEventListener("beforeunload", saveSession);
 
   // ── Init ──────────────────────────────────────────────────────────
@@ -968,4 +1283,5 @@
     state.panes.push(createPaneData("Right", ""));
   }
   renderLayout();
+  syncUiToggles();
 })();

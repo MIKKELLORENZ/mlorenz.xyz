@@ -1,0 +1,656 @@
+/* ═══════════════════════════════════════════════════════════════
+   VIBE CODE GALLERY — showcase carousel, toolbar, project cards
+   Layered on top of style.css; every rule is scoped to the gallery
+   page so the shared card/grid styles stay untouched elsewhere.
+   ═══════════════════════════════════════════════════════════════ */
+
+.vc-gallery {
+    --vc-radius: 26px;
+    --vc-ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ── Featured showcase (carousel) ── */
+
+.vc-showcase {
+    position: relative;
+    border-radius: var(--vc-radius);
+    overflow: hidden;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    box-shadow: var(--card-shadow-hover);
+    margin-bottom: 34px;
+    isolation: isolate;
+    opacity: 0;
+    transform: translateY(14px);
+    animation: vc-rise 0.9s var(--vc-ease) 0.05s forwards;
+}
+
+@keyframes vc-rise {
+    to { opacity: 1; transform: none; }
+}
+
+.vc-showcase-viewport {
+    position: relative;
+    height: clamp(400px, 46vw, 540px);
+}
+
+.vc-slide {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.85s var(--vc-ease), visibility 0.85s;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+}
+
+.vc-slide.is-active {
+    opacity: 1;
+    visibility: visible;
+    z-index: 2;
+}
+
+.vc-slide-media {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    background: var(--bg-secondary);
+}
+
+.vc-slide-media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scale(1.04);
+}
+
+.vc-slide.is-active .vc-slide-media img {
+    animation: vc-kenburns 16s ease-out forwards;
+}
+
+@keyframes vc-kenburns {
+    from { transform: scale(1.04); }
+    to   { transform: scale(1.14); }
+}
+
+/* Two-stop scrim: dark under the text, clear over the artwork */
+.vc-slide-scrim {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(100deg,
+            rgba(6, 8, 12, 0.95) 0%,
+            rgba(6, 8, 12, 0.90) 34%,
+            rgba(6, 8, 12, 0.62) 58%,
+            rgba(6, 8, 12, 0.18) 84%),
+        linear-gradient(to top, rgba(6, 8, 12, 0.65) 0%, rgba(6, 8, 12, 0) 48%);
+}
+
+.vc-slide-body {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 14px;
+    padding: clamp(26px, 4vw, 52px);
+    padding-bottom: clamp(58px, 6vw, 74px);
+    max-width: min(640px, 74%);
+}
+
+.vc-slide.is-active .vc-slide-body > * {
+    animation: vc-slide-in 0.8s var(--vc-ease) backwards;
+}
+
+.vc-slide.is-active .vc-slide-body > *:nth-child(1) { animation-delay: 0.12s; }
+.vc-slide.is-active .vc-slide-body > *:nth-child(2) { animation-delay: 0.19s; }
+.vc-slide.is-active .vc-slide-body > *:nth-child(3) { animation-delay: 0.26s; }
+.vc-slide.is-active .vc-slide-body > *:nth-child(4) { animation-delay: 0.33s; }
+
+@keyframes vc-slide-in {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: none; }
+}
+
+.vc-eyebrow {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+.vc-sep {
+    flex: 0 0 auto;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.5;
+}
+
+.vc-eyebrow .vc-sep {
+    background: rgba(255, 255, 255, 0.4);
+    opacity: 1;
+}
+
+.vc-chip-new {
+    background: linear-gradient(120deg, var(--accent), var(--accent-secondary));
+    color: #fff;
+    padding: 3px 9px;
+    border-radius: 999px;
+    letter-spacing: 1.2px;
+    font-weight: 700;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.vc-slide-title {
+    font-size: clamp(1.9rem, 4.4vw, 3.1rem);
+    font-weight: 800;
+    line-height: 1.04;
+    letter-spacing: -1.6px;
+    color: #fff;
+    text-shadow: 0 2px 24px rgba(0, 0, 0, 0.45);
+}
+
+.vc-slide-desc {
+    font-size: clamp(0.92rem, 1.2vw, 1.02rem);
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.76);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.vc-slide-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    align-self: flex-start;
+    background: #fff;
+    color: #10131a;
+    padding: 11px 22px;
+    border-radius: 999px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+    transition: transform 0.35s var(--vc-ease), box-shadow 0.35s var(--vc-ease);
+}
+
+.vc-slide-cta i {
+    font-size: 0.78rem;
+    transition: transform 0.35s var(--vc-ease);
+}
+
+.vc-slide:hover .vc-slide-cta,
+.vc-slide:focus-visible .vc-slide-cta {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.42);
+}
+
+.vc-slide:hover .vc-slide-cta i {
+    transform: translateX(4px);
+}
+
+.vc-slide:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: -6px;
+}
+
+/* Controls */
+.vc-showcase-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 5;
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    background: rgba(20, 22, 28, 0.42);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    color: #fff;
+    font-size: 0.85rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.4s var(--vc-ease), background 0.3s, transform 0.3s var(--vc-ease);
+}
+
+.vc-showcase:hover .vc-showcase-arrow,
+.vc-showcase:focus-within .vc-showcase-arrow { opacity: 1; }
+
+.vc-showcase-arrow:hover { background: rgba(20, 22, 28, 0.78); }
+.vc-showcase-arrow:focus-visible { opacity: 1; outline: 2px solid #fff; outline-offset: 2px; }
+.vc-showcase-arrow.prev { left: 16px; }
+.vc-showcase-arrow.next { right: 16px; }
+.vc-showcase-arrow.prev:hover { transform: translateY(-50%) translateX(-2px); }
+.vc-showcase-arrow.next:hover { transform: translateY(-50%) translateX(2px); }
+
+.vc-dots {
+    position: absolute;
+    left: clamp(26px, 4vw, 52px);
+    bottom: clamp(22px, 3vw, 32px);
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.vc-dot {
+    position: relative;
+    height: 4px;
+    width: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.28);
+    overflow: hidden;
+    cursor: pointer;
+    transition: width 0.6s var(--vc-ease), background 0.4s;
+}
+
+.vc-dot:hover { background: rgba(255, 255, 255, 0.5); }
+.vc-dot.is-active { width: 56px; background: rgba(255, 255, 255, 0.3); }
+.vc-dot:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+.vc-dot-fill {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    transform-origin: left center;
+    transform: scaleX(0);
+}
+
+.vc-dot.is-active .vc-dot-fill {
+    animation: vc-progress var(--vc-duration, 7s) linear forwards;
+}
+
+.vc-showcase.is-paused .vc-dot.is-active .vc-dot-fill {
+    animation-play-state: paused;
+}
+
+/* No autoplay (reduced motion / single slide): show a static full bar */
+.vc-showcase.no-autoplay .vc-dot.is-active .vc-dot-fill {
+    animation: none;
+    transform: scaleX(1);
+}
+
+@keyframes vc-progress {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(1); }
+}
+
+/* ── Toolbar ── */
+
+.vc-toolbar {
+    position: sticky;
+    top: 57px;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px;
+    margin-bottom: 8px;
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    backdrop-filter: blur(18px) saturate(1.6);
+    -webkit-backdrop-filter: blur(18px) saturate(1.6);
+    box-shadow: var(--card-shadow);
+}
+
+@supports (background: color-mix(in srgb, red 50%, transparent)) {
+    .vc-toolbar {
+        background: color-mix(in srgb, var(--bg-elevated) 76%, transparent);
+    }
+}
+
+.vc-search {
+    position: relative;
+    flex: 1 1 220px;
+    display: flex;
+    align-items: center;
+}
+
+.vc-search > i {
+    position: absolute;
+    left: 14px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    pointer-events: none;
+}
+
+.vc-toolbar .search-input {
+    width: 100%;
+    padding: 10px 38px 10px 36px;
+    border-radius: 12px;
+    background: var(--bg-primary);
+}
+
+.vc-search-clear {
+    position: absolute;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    display: none;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    cursor: pointer;
+}
+
+.vc-search.has-value .vc-search-clear { display: grid; }
+.vc-search-clear:hover { color: var(--text-primary); }
+
+/* Segmented control */
+.vc-pills {
+    position: relative;
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+}
+
+.vc-pill {
+    position: relative;
+    z-index: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: -0.1px;
+    padding: 7px 14px;
+    border-radius: 9px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.3s var(--vc-ease);
+}
+
+.vc-pill:hover { color: var(--text-primary); }
+.vc-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.vc-pill.is-active { color: var(--text-primary); }
+
+.vc-pill .vc-pill-count {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    opacity: 0.55;
+    margin-left: 6px;
+}
+
+/* Sliding indicator behind the active pill */
+.vc-pill-thumb {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 0;
+    width: 0;
+    border-radius: 9px;
+    background: var(--bg-elevated);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    border: 1px solid var(--border-subtle);
+    transition: transform 0.5s var(--vc-ease), width 0.5s var(--vc-ease);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.vc-toolbar .filter-select {
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+/* ── Section headers ── */
+
+.vc-section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin: 44px 0 18px;
+}
+
+.vc-section-head:first-child { margin-top: 26px; }
+
+.vc-section-title {
+    font-size: 1.45rem;
+    font-weight: 800;
+    letter-spacing: -0.8px;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.vc-section-count {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+}
+
+.vc-section-rule {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border), transparent);
+}
+
+/* ── Cards ── */
+
+.vc-gallery .grid {
+    grid-template-columns: repeat(auto-fill, minmax(288px, 1fr));
+    gap: 22px;
+    margin: 0;
+}
+
+.vc-gallery .card {
+    position: relative;
+    border-radius: 18px;
+    opacity: 0;
+    transform: translateY(18px);
+    transition:
+        opacity 0.7s var(--vc-ease),
+        transform 0.7s var(--vc-ease),
+        box-shadow 0.5s var(--vc-ease),
+        border-color 0.5s var(--vc-ease);
+}
+
+.vc-gallery .card.is-in {
+    opacity: 1;
+    transform: none;
+}
+
+.vc-gallery .card.is-in:hover {
+    transform: translateY(-6px);
+    border-color: var(--accent);
+}
+
+/* Cursor-tracked spotlight */
+.vc-gallery .card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.45s var(--vc-ease);
+    background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 0%),
+        var(--glow-color), transparent 60%);
+}
+
+.vc-gallery .card:hover::after { opacity: 1; }
+
+.vc-gallery .card-image {
+    position: relative;
+    height: auto;
+    aspect-ratio: 8 / 5;
+    background: var(--bg-secondary);
+}
+
+.vc-gallery .card-image img {
+    transition: transform 0.7s var(--vc-ease);
+}
+
+.vc-gallery .card:hover .card-image img {
+    transform: scale(1.06);
+}
+
+.card-badge {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 2;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 1.3px;
+    text-transform: uppercase;
+    color: #fff;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: linear-gradient(120deg, var(--accent), var(--accent-secondary));
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.3);
+}
+
+.vc-gallery .card-content {
+    padding: 20px;
+    gap: 8px;
+}
+
+.card-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    opacity: 0.75;
+}
+
+.vc-gallery .card-title {
+    font-size: 1.08rem;
+    margin-bottom: 0;
+    transition: color 0.35s var(--vc-ease);
+}
+
+.vc-gallery .card:hover .card-title { color: var(--accent); }
+
+/* flex-grow from the shared .card-description would stretch the -webkit-box
+   past its clamp and cut the 4th line in half — pin it to exactly 3 lines
+   and let .card-tags' margin-top:auto do the bottom alignment instead. */
+.vc-gallery .card-description {
+    margin-bottom: 14px;
+    font-size: 0.88rem;
+    flex-grow: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* ── Empty state ── */
+
+.vc-empty {
+    text-align: center;
+    padding: 70px 20px;
+    color: var(--text-secondary);
+}
+
+.vc-empty i {
+    font-size: 1.8rem;
+    opacity: 0.35;
+    margin-bottom: 14px;
+    display: block;
+}
+
+.vc-empty strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    margin-bottom: 6px;
+    letter-spacing: -0.3px;
+}
+
+.vc-empty button {
+    margin-top: 18px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 9px 18px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.vc-empty button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Interactive (project open) mode hides all gallery chrome */
+.interactive-mode .vc-showcase,
+.interactive-mode .vc-toolbar { display: none; }
+
+/* ── Responsive ── */
+
+@media (max-width: 860px) {
+    .vc-showcase-viewport { height: clamp(360px, 62vw, 460px); }
+    .vc-slide-body { max-width: 100%; }
+    .vc-slide-scrim {
+        background:
+            linear-gradient(to top,
+                rgba(6, 8, 12, 0.95) 0%,
+                rgba(6, 8, 12, 0.82) 34%,
+                rgba(6, 8, 12, 0.35) 66%,
+                rgba(6, 8, 12, 0.15) 100%);
+    }
+    .vc-showcase-arrow { display: none; }
+}
+
+@media (max-width: 768px) {
+    .vc-toolbar {
+        position: static;
+        gap: 10px;
+    }
+    .vc-pills { width: 100%; overflow-x: auto; }
+    .vc-toolbar .filter-select { flex: 1; }
+    .vc-slide-desc { -webkit-line-clamp: 2; }
+    .vc-gallery .grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
+    .vc-section-head { margin: 34px 0 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vc-showcase,
+    .vc-gallery .card {
+        opacity: 1 !important;
+        transform: none !important;
+        animation: none !important;
+    }
+    .vc-slide.is-active .vc-slide-media img,
+    .vc-slide.is-active .vc-slide-body > * {
+        animation: none !important;
+    }
+    .vc-gallery .card.is-in:hover { transform: none; }
+}
