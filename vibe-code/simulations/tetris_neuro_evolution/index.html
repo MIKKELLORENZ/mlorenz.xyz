@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tetris Neuroevolution — brains that learn the keyboard</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Tetris Neuroevolution</h2>
+        <p>Neural networks that taught <b>themselves</b> Tetris — by pressing the
+           arrow keys. No gradients, no backprop, no move planner: just a population
+           of brains, elitism, mutation and a lot of generations.</p>
+        <div class="intro-choices">
+            <button id="intro-watch" class="intro-choice primary">
+                <b>▶&nbsp; Watch the evolved champion</b>
+                <small>The best brain plays a full game at human speed</small>
+            </button>
+            <button id="intro-scratch" class="intro-choice">
+                <b>🧬&nbsp; Evolve from scratch</b>
+                <small>Random brains — watch a whole generation learn together</small>
+            </button>
+            <button id="intro-compare" class="intro-choice">
+                <b>⚖️&nbsp; Evolved vs untrained</b>
+                <small>The champion and a random brain, same pieces, side by side</small>
+            </button>
+            <button id="intro-play" class="intro-choice">
+                <b>🎮&nbsp; Play it yourself</b>
+                <small>Same engine, same keys — see what the brain is up against</small>
+            </button>
+        </div>
+        <button id="intro-explore" class="intro-dismiss">or just explore the controls →</button>
+    </div>
+</div>
+
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Tetris Neuroevolution</h1>
+            <span class="brand-sub">evolved keystrokes · no gradients</span>
+        </div>
+        <div id="top-stats">
+            <span class="tstat">gen <b id="stat-gen">1</b></span>
+            <span class="tstat badge" id="stat-mode">evolving</span>
+            <span class="tstat" title="best fitness this generation">best <b id="stat-best">–</b></span>
+            <span class="tstat" title="best / mean lines cleared">lines <b id="stat-lines">–</b></span>
+            <span class="tstat" title="effective mutation strength after annealing">σ <b id="stat-sigma">–</b></span>
+            <span class="tstat" title="brains still alive in this generation">alive <b id="stat-alive">–</b></span>
+        </div>
+        <div id="top-actions">
+            <div id="speed-group" aria-label="Simulation speed"></div>
+            <button id="btn-pause" class="btn primary">Pause</button>
+        </div>
+    </header>
+
+    <main id="layout">
+        <aside id="panel-left">
+            <section class="card">
+                <h2>Evolution</h2>
+                <label class="slider-row">
+                    <span>Population <b id="lb-pop">48</b> <i class="hint">on restart</i></span>
+                    <input type="range" id="sl-pop" min="12" max="120" value="48" step="4">
+                </label>
+                <label class="slider-row" title="Each brain plays this many games with different piece sequences; its score is 60% mean, 40% worst. One game rewards bag luck, not skill.">
+                    <span>Games per brain <b id="lb-trials">2</b></span>
+                    <input type="range" id="sl-trials" min="1" max="4" value="2" step="1">
+                </label>
+                <label class="slider-row" title="A game ends here even if the brain is still alive — stops one good brain stalling the whole generation.">
+                    <span>Piece limit <b id="lb-cap">200</b></span>
+                    <input type="range" id="sl-cap" min="40" max="500" value="200" step="20">
+                </label>
+                <label class="slider-row" title="The reigning champion keeps an untouched seat for this many generations even after being beaten, so one unlucky bag of pieces can't breed it out. 0 = off.">
+                    <span>Champion grace <b id="lb-grace">3 gens</b></span>
+                    <input type="range" id="sl-grace" min="0" max="20" value="3" step="1">
+                </label>
+                <label class="slider-row" title="Split the population into semi-isolated sub-populations, each with its own elites. One big pool converges on whichever lineage is ahead early and then only ever explores that one idea; islands keep several independent attempts alive at once. 1 = one pool.">
+                    <span>Islands <b id="lb-islands">1 (one pool)</b> <i class="hint">on restart</i></span>
+                    <input type="range" id="sl-islands" min="1" max="8" value="1" step="1">
+                </label>
+                <label class="slider-row" title="How often each island sends a copy of its best brain to the next island. Rare enough that the receiving island tests the migrant against its own lineage instead of being overwritten by it. 0 = fully isolated.">
+                    <span>Migrate every <b id="lb-migrate">10 gens</b></span>
+                    <input type="range" id="sl-migrate" min="0" max="40" value="10" step="1">
+                </label>
+                <label class="slider-row" title="Discount each brain's breeding score by how many others already play the same way — measured on behaviour (key-press mix, stack profile, cells buried, survival), not on weights. Stops the pool collapsing into a family of near-copies. The champion is still picked on raw fitness. 0 = off.">
+                    <span>Diversity pressure <b id="lb-share">off</b></span>
+                    <input type="range" id="sl-share" min="0" max="40" value="0" step="1">
+                </label>
+                <label class="check-row" title="Every brain carries its own mutation step size, which is itself mutated and inherited. Lineages whose step size suits where they are on the landscape out-breed the ones whose does not, so the population discovers its own annealing schedule — and different lineages can run at different step sizes at the same time.">
+                    <input type="checkbox" id="chk-selfadapt" checked><span><b>Self-adaptive step size</b> — each brain evolves its own σ</span>
+                </label>
+                <label class="slider-row" title="Fraction of weights touched by each mutation.">
+                    <span>Mutation rate <b id="lb-mutrate">12%</b></span>
+                    <input type="range" id="sl-mutrate" min="1" max="40" value="12" step="1">
+                </label>
+                <label class="slider-row" title="Size of each weight nudge, before annealing.">
+                    <span>Mutation strength <b id="lb-mutsig">0.25</b></span>
+                    <input type="range" id="sl-mutsig" min="2" max="80" value="25" step="1">
+                </label>
+                <label class="slider-row" title="Mutation rate and strength fade toward the floor as the champion improves — big swings while the brain is bad, fine tuning once it is good. This is the fitness at which they are halfway there; the curve keeps approaching the floor after that, so it works wherever the run ends up.">
+                    <span>Mutation half-annealed at fitness <b id="lb-anneal">2.0k</b></span>
+                    <input type="range" id="sl-anneal" min="0" max="20000" value="2000" step="250">
+                </label>
+                <label class="slider-row" title="How small annealing is allowed to make mutation, as a fraction of the sliders above.">
+                    <span>Annealing floor <b id="lb-floor">22%</b></span>
+                    <input type="range" id="sl-floor" min="5" max="100" value="22" step="1">
+                </label>
+                <label class="slider-row" title="If the champion has not improved for this many generations, mutation is temporarily boosted 1.8× — a stalled hill-climb needs a bigger step, not a smaller one. 0 = off.">
+                    <span>Shake up after <b id="lb-shake">8 flat gens</b></span>
+                    <input type="range" id="sl-shake" min="0" max="40" value="8" step="1">
+                </label>
+                <label class="slider-row" title="Once the champion passes this, fresh random brains stop being injected — the population is refined only by children and elite mutations.">
+                    <span>Stop immigrants past <b id="lb-imm">3.6k</b></span>
+                    <input type="range" id="sl-imm" min="0" max="40000" value="3600" step="200">
+                </label>
+                <label class="slider-row" title="Once the champion passes this, crossover stops too and the run becomes pure hill-climbing: untouched elites plus mutated copies.">
+                    <span>Stop crossover past <b id="lb-child">48k</b></span>
+                    <input type="range" id="sl-child" min="0" max="240000" value="48000" step="4000">
+                </label>
+                <button id="btn-restart" class="btn danger wide">Restart evolution</button>
+            </section>
+
+            <section class="card">
+                <h2>View</h2>
+                <label class="check-row" title="Stop drawing entirely and pour every millisecond into evolution. The fastest way to train — the board is replaced by a status card.">
+                    <input type="checkbox" id="chk-headless"><span><b>Turbo</b> — no visuals, max generations/sec</span>
+                </label>
+                <label class="check-row"><input type="checkbox" id="chk-fleet" checked><span>Show the rest of the generation</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-ghost" checked><span>Ghost piece</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-keys" checked><span>Keyboard readout</span></label>
+            </section>
+
+            <section class="card">
+                <h2>Champion brain</h2>
+                <div class="btn-row">
+                    <button id="btn-save" class="btn">Save</button>
+                    <button id="btn-load" class="btn">Load</button>
+                    <button id="btn-export" class="btn">Export .json</button>
+                </div>
+                <input type="file" id="file-import" accept=".json" style="display:none">
+                <button id="btn-import" class="btn wide">Import .json</button>
+                <button id="btn-default" class="btn wide primary">Load built-in champion</button>
+                <button id="btn-showcase" class="btn wide">Showcase — champion solo</button>
+                <button id="btn-compare" class="btn wide" title="Run the evolved champion and a brain that never evolved side by side on the identical piece sequence.">Evolved vs untrained — same pieces</button>
+                <button id="btn-inject" class="btn wide" title="Drop the built-in champion into the evolving pool and shelter it for 10 generations so it can't be bred out before it proves itself.">Inject built-in — 10-gen grace</button>
+                <p class="hint">Export gives you the raw weight matrices — the same
+                   189-in / 7-out contract any keyboard-driven player would use.</p>
+            </section>
+        </aside>
+
+        <div id="stage">
+            <div id="boards"></div>
+            <div id="headless-card" class="hidden">
+                <h3>Turbo training</h3>
+                <div class="kv"><span>generation</span><b id="hl-gen">–</b></div>
+                <div class="kv"><span>gens / sec</span><b id="hl-rate">–</b></div>
+                <div class="kv"><span>champion fitness</span><b id="hl-fit">–</b></div>
+                <div class="kv"><span>champion lines</span><b id="hl-lines">–</b></div>
+                <div class="kv"><span>mutation σ</span><b id="hl-sigma">–</b></div>
+                <p class="hint">Nothing is being drawn. Untick <b>Turbo</b> to watch again.</p>
+            </div>
+        </div>
+
+        <aside id="panel-right">
+            <section class="card">
+                <h2>Keyboard</h2>
+                <div id="keyboard"></div>
+                <p class="hint" id="key-hint">The brain's seven outputs, thresholded at
+                   0.5, held down as real keys. Rotation and hard drop only fire on the
+                   press edge — it has to let go to press again.</p>
+            </section>
+            <section class="card">
+                <h2>Fitness</h2>
+                <canvas id="chart" width="280" height="120"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-best"></i>best</span>
+                    <span><i class="sw sw-avg"></i>mean</span>
+                    <span><i class="sw sw-lines"></i>lines</span>
+                </div>
+            </section>
+            <section class="card">
+                <h2>Leader</h2>
+                <div class="kv"><span>fitness</span><b id="ld-fit">0</b></div>
+                <div class="kv"><span>lines</span><b id="ld-lines">0</b></div>
+                <div class="kv"><span>pieces</span><b id="ld-pieces">0</b></div>
+                <div class="kv"><span>score</span><b id="ld-score">0</b></div>
+                <div class="kv"><span>holes</span><b id="ld-holes">0</b></div>
+                <div class="kv"><span>stack height</span><b id="ld-height">0</b></div>
+                <div class="kv"><span>last piece paid</span><b id="ld-reward">–</b></div>
+            </section>
+            <section class="card">
+                <h2>Log</h2>
+                <div id="log"></div>
+            </section>
+        </aside>
+    </main>
+</div>
+
+<script src="nn.js"></script>
+<script src="tetris.js"></script>
+<script src="sensors.js"></script>
+<script src="world.js"></script>
+<script src="evolution.js"></script>
+<script src="configs.js"></script>
+<script src="default_brain.js"></script>
+<script src="render.js"></script>
+<script src="ui.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

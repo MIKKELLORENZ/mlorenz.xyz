@@ -62,6 +62,18 @@ document.addEventListener('DOMContentLoaded', function() {
         },
 
         {
+            id: "smart_writer",
+            title: "Smart Writer",
+            description: "A composer for messages worth getting right: answer a few questions to get a first draft, keep up to four variations of every paragraph, lock the ones you have settled, reroll the rest, and compare whole versions side by side. An optional writing model runs entirely in the browser.",
+            thumbnail: "../vibe-code/utilities/smart_writer/thumbnail.jpg",
+            category: "utilities",
+            tags: ["writing", "drafting", "variations", "comparison", "webllm", "local ai", "javascript"],
+            date: "2026-07-29",
+            path: "utilities/smart_writer/index.html",
+            type: "iframe"
+        },
+
+        {
             id: "everdiff",
             title: "EverDiff",
             description: "A browser-based document diff tool with multi-pane comparison, exports, and granular word, character, line, or sentence diffs.",
@@ -183,9 +195,33 @@ document.addEventListener('DOMContentLoaded', function() {
         },
 
         {
+            id: "robot_arm_language_neuro_evolution",
+            title: "Told What To Do",
+            description: "A five-joint robot arm learns to sort coloured balls into buckets by being told what to do in English. The instruction is embedded by Qwen3-Embedding-8B and fed to the network alongside what its cameras see — then the whole thing is evolved by mutation and selection, with no gradient descent anywhere. 49 goals in 539 phrasings, three of every eleven held back so you can check it obeys wording it has never seen. Type your own instruction and watch it try.",
+            thumbnail: "../vibe-code/simulations/robot_arm_language_neuro_evolution/thumbnail.png",
+            category: "simulations",
+            tags: ["robot arm", "robotics", "language", "embeddings", "qwen", "llm", "neuroevolution", "neural network", "evolution", "genetic algorithm", "machine learning", "3d", "javascript"],
+            date: "2026-07-31",
+            path: "simulations/robot_arm_language_neuro_evolution/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "traffic_light_neuro_evolution",
+            title: "Traffic Light Neuroevolution",
+            description: "A genetic algorithm learns to run the traffic signals of a whole city. One evolved brain drives every junction at once — reading its own detectors, the road map, and what its neighbours were showing at twelve points over the last thirty seconds — and is scored on how many drivers and pedestrians actually reached their destination. Drivers obey the law, so every collision is the signal plan's fault: cut the amber and cars are stranded in the dilemma zone, cut the all‑red and the cross street is released on top of them. Eight cities, from a single crossroads to a winding downtown with roundabouts, one‑ways and a ring road, and a fixed‑time and a vehicle‑actuated controller re‑measured every generation on the identical traffic so you can see whether it is really any good.",
+            thumbnail: "../vibe-code/simulations/traffic_light_neuro_evolution/thumbnail.png",
+            category: "simulations",
+            tags: ["traffic", "traffic lights", "city", "neuroevolution", "neural network", "genetic algorithm", "evolution", "simulation", "roundabout", "pedestrians", "machine learning", "javascript"],
+            date: "2026-08-01",
+            path: "simulations/traffic_light_neuro_evolution/index.html",
+            type: "iframe"
+        },
+
+        {
             id: "chess_neuro_evolution",
             title: "Chess Neuroevolution",
-            description: "A population of neural-network chess players evolves through elitism, crossover and mutation — no backpropagation. Watch the champion play live while fitness, game outcomes and brain activations update each generation.",
+            description: "A population of neural-network chess players evolves through elitism, crossover and mutation — no backpropagation anywhere. Each brain remembers the last five whole board positions and splits its decision in two: one head picks which piece to move, another picks the square to move it to. Watch both heads light up the board live while the champion climbs a fixed ladder of opponents.",
             thumbnail: "../vibe-code/simulations/chess_neuro_evolution/thumbnail.png",
             category: "simulations",
             tags: ["chess", "neuroevolution", "neural network", "evolution", "genetic algorithm", "machine learning", "javascript"],
@@ -227,6 +263,78 @@ document.addEventListener('DOMContentLoaded', function() {
             tags: ["boats", "hydrofoil", "neuroevolution", "neural network", "genetic algorithm", "gps navigation", "ocean currents", "machine learning", "javascript"],
             date: "2026-07-21",
             path: "simulations/smart_ocean_boats/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "tetris_neuro_evolution",
+            title: "Tetris Neuroevolution",
+            description: "Neural networks evolve to play Tetris by pressing the arrow keys — not by picking placements. The population's only actuator is a keyboard, with DAS auto-repeat and press-edge rotation, so a brain has to learn to let go of a key before it can use it again. Elitism, row-wise crossover, champion grace and mutation that anneals as it improves, no backpropagation. Play the same engine yourself.",
+            thumbnail: "../vibe-code/simulations/tetris_neuro_evolution/thumbnail.png",
+            category: "simulations",
+            tags: ["tetris", "neuroevolution", "neural network", "genetic algorithm", "evolution", "keyboard", "machine learning", "javascript"],
+            date: "2026-07-29",
+            path: "simulations/tetris_neuro_evolution/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "tokamak_plasma_neuro_evolution",
+            title: "Holding the Plasma",
+            description: "Magnetic control of a tokamak plasma, learned by evolution. A 150 kA current ring is held in mid-air by nineteen coils and is violently unstable — elongate it and it falls out of the machine in six milliseconds, slowed to a catchable ten only by eddy currents in the conducting wall. The controller sees what a real machine sees: 34 flux loops, 38 field probes and coil currents, noisy and one step stale, and it commands voltages, not currents. Coupled L/R circuits, elliptic-integral Green's functions, a magnetic observer, and a hand-tuned PID cascade running the same shot beside it for comparison. The published observation vector turned out to be memoryless — it cannot tell a plasma sitting high from one falling fast — so seventy temporal neurons were added, including the whole probe array differenced against 0.8 ms ago, which is where the invisible vessel eddy currents live. The controller is cloned from the PID by imitation learning and then evolved past it, on a difficulty ladder that makes the machine nastier whenever the champion gets comfortable and never lets it forget the machine it started on. It now completes two thirds of the 1.2 s discharge the baseline disrupts every single time, and where the baseline's error grows fourfold as the wall thins, its own grows by a third.",
+            thumbnail: "../vibe-code/simulations/tokamak_plasma_neuro_evolution/thumbnail.png",
+            category: "simulations",
+            tags: ["tokamak", "fusion", "plasma", "physics", "control", "neuroevolution", "neural network", "genetic algorithm", "magnetics", "pid", "machine learning", "javascript"],
+            date: "2026-07-31",
+            path: "simulations/tokamak_plasma_neuro_evolution/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "orbital_docking_neuro_evolution",
+            title: "Learning to Dock",
+            description: "A 6.3 tonne capsule teaches itself to rendezvous with a space station and dock, from up to 150 km away, by evolution alone. Both vessels are in a real 413 km orbit with J2 oblateness, and the chaser is propagated as a relative state in Battin's form so that a metre-scale docking inside a 6,791 km orbit stays numerically honest. Sixteen 400 N thrusters pulsed on a 20 ms minimum impulse bit, no attitude controller underneath, and a laser that returns five raw retroreflector points inside 250 metres — recovering the port's position and attitude from those five points is the network's problem. The brain is two-rate and two-headed: a guidance head every four seconds that can request a COAST, and a thruster head at 4 Hz that is fed its held command, bred as one genome with no supervision between them. Coasting as an action is what makes the far stages trainable at all — episode cost becomes the number of manoeuvres rather than the mission duration — and it is the skill the task actually requires, because from 100 km out you are already closing at 18 m/s for free and the correct move for most of an hour is to do nothing. Fitness is an advantage between a do-nothing policy and a scripted Clohessy-Wiltshire autopilot on the identical scenario, so a 40 m final approach and a 130 km out-of-plane rendezvous contribute equally to one number; brains are raced against each other with successive halving and the worse half eliminated between scenarios, which costs a third of the episodes. Five bugs in this project produced the same flat fitness curve, and four of them were in the environment rather than the search — including a sign error that had every long-range plan flying the wrong way round the orbit, and an output scale that left 241 of 300 random brains physically unable to fire a thruster.",
+            thumbnail: "../vibe-code/simulations/orbital_docking_neuro_evolution/thumbnail.png",
+            category: "simulations",
+            tags: ["orbital mechanics", "rendezvous", "docking", "spacecraft", "iss", "physics", "control", "neuroevolution", "neural network", "genetic algorithm", "clohessy-wiltshire", "three.js", "machine learning", "javascript"],
+            date: "2026-08-01",
+            path: "simulations/orbital_docking_neuro_evolution/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "2d_planetary_neuronal_prediction",
+            title: "Predicting Planets",
+            description: "Networks that taught themselves gravity. A genetic algorithm searches for a force law that can predict where every body in a star system will be hundreds of ticks ahead — and its opponent is not just Newton but Adams–Bashforth, the classical multistep scheme, given exactly the same single force evaluation per tick. The ground truth is a 4th-order Yoshida symplectic integrator that conserves energy to one part in 10¹¹, so the errors being scored are the model's own. Because the architecture is an interaction network — one shared edge network per pair of bodies, one shared node network per body — a genome evolved on four planets runs unmodified on eleven. Rotation equivariance and permutation invariance are exact by construction. Each body also remembers its own last few force calculations, which is how an integrator buys accuracy without computing the forces again; the network evolves the coefficients that weigh them.",
+            thumbnail: "../vibe-code/simulations/2d_planetary_neuronal_prediction/thumbnail.png",
+            category: "simulations",
+            tags: ["planets", "orbits", "gravity", "n-body", "physics", "neuroevolution", "neural network", "genetic algorithm", "graph network", "interaction network", "symplectic", "forward model", "machine learning", "javascript"],
+            date: "2026-07-31",
+            path: "simulations/2d_planetary_neuronal_prediction/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "power_grid_neuro_evolution",
+            title: "Keeping the Lights On",
+            description: "A genetic algorithm evolves the operator of a transmission network. Every five simulated minutes it solves a full AC power flow — Newton-Raphson with a cached fast-decoupled fast path, enforced reactive limits, per-island balancing — screens every single branch outage with line-outage distribution factors, and decides: which generators to redispatch, which wind farms to curtail, and which one line or busbar to switch. The brain is a graph network with shared weights, so a genome evolved on the IEEE 14-bus case runs unchanged on a thirty-bus network it has never seen; permutation and size invariance are exact by construction and verified to 1e-12. Nothing is recorded data: solar comes from orbital geometry times a beta-distributed clearness index, wind from an autocorrelated Weibull pushed through a manufacturer power curve with cut-out hysteresis, demand from diurnal shapes plus an Ornstein-Uhlenbeck deviation. Thermal ratings are not guessed either — every network is sized from an eleven-case planning sweep with a full N-1 screen in each. Fitness is the control room’s operating margin in euros, and it is graded against three classical controllers running the identical day, including one that verifies its switching with a real power flow. N-1 security is measured every interval and deliberately never paid for, so the chart can answer whether an operator paid only to deliver energy cheaply ends up running the system securely. The evolved operator that ships is an insurance policy, and the numbers say both halves of that: on forty-eight held-out days it pays about five thousand euros a day and beats doing nothing outright on only three of them, but it is worth 686 thousand a day on the days that actually cost money, serves two and a half points more demand through them, and is the only controller in the set with a positive mean margin. On one held-out day it was nine million ahead. What it never learned is N-1 security — it was never paid for it and it never bought any — and the README is blunt about that, and about the two earlier champions that looked excellent from inside the run and were a lucky gambler and a topology thrasher.",
+            thumbnail: "../vibe-code/simulations/power_grid_neuro_evolution/thumbnail.png",
+            category: "simulations",
+            tags: ["power grid", "power flow", "transmission", "ieee 14-bus", "redispatch", "topology", "n-1 security", "neuroevolution", "neural network", "genetic algorithm", "graph network", "renewables", "machine learning", "javascript"],
+            date: "2026-08-01",
+            path: "simulations/power_grid_neuro_evolution/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "3d_walk_neuro_evolution",
+            title: "Learning to Walk",
+            description: "A genetic algorithm teaches a 22-joint humanoid to walk in three dimensions. No gradient descent anywhere: brains are mutated, scored and bred. The physics is not a toy — Featherstone articulated-body dynamics, Hunt–Crossley penalty contact, torque-limited PD servos with a finite slew rate and a 55 ms lag, and per-episode randomisation of friction, torque and gains, so a gait that only works in ideal conditions is bred out. Every walker in a generation meets the same terrain, the same waypoints, the same gusts and the same shoves at the same instants; the only difference between two of them is the weights in their heads. The brain reads 365 inputs — joint angles and loads, a swept LiDAR cone, a 36-point ground ring, foot patches — and, because a feedforward network has no memory, it also reads differenced trailing windows of every channel reaching 1.2 seconds into the past. It writes 22 joint setpoints plus a small rhythm layer: one cadence, and an amplitude and phase for each of five limb groups. A five-stage curriculum ramps from standing still to gusting crosswind over rolling ground and stairs, and the only score trusted is a held-out exam of twelve missions no generation ever trains on. The champion that ships reaches about ten waypoints and thirty-five metres on unseen ground, confirmed across three disjoint mission banks. What it never learned is to get up off the floor. That is not for want of trying: a dedicated search found an open-loop trajectory that does stand up from face-down, and training against it got the fleet reliably onto its hands and knees and no further. The reason appears to be the reward rather than the search — commanding the standing posture from the floor drives the centre of mass downward first, so the correct move is punished for its entire first half-second.",
+            thumbnail: "../vibe-code/simulations/3d_walk_neuro_evolution/thumbnail.jpg",
+            category: "simulations",
+            tags: ["walking", "humanoid", "biped", "locomotion", "robotics", "physics", "featherstone", "terrain", "lidar", "neuroevolution", "neural network", "genetic algorithm", "evolution", "machine learning", "3d", "javascript"],
+            date: "2026-08-03",
+            path: "simulations/3d_walk_neuro_evolution/index.html",
             type: "iframe"
         },
 

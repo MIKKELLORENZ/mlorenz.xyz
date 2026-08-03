@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Holding the Plasma — Tokamak Control Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Holding the Plasma</h2>
+        <p>A ring of ionised gas at two hundred thousand amps, held in mid-air by
+           magnets, and <b>violently unstable</b> — squash it into an oval and it falls
+           out of the machine in about six milliseconds. Nineteen coils fight it. The
+           controller sees only what a real machine sees: seventy-two noisy magnetic
+           probes, one step stale. No gradients here either — brains are mutated,
+           scored, and bred.</p>
+        <div class="intro-choices">
+            <button id="intro-watch" class="intro-choice primary">
+                <b>▶&nbsp; Watch the trained champion</b>
+                <small>Head to head against the PID on the same shot — no training, just the result</small>
+            </button>
+            <button id="intro-pid" class="intro-choice">
+                <b>🎛&nbsp; Watch the conventional controller</b>
+                <small>The hand-tuned PID cascade — the number to beat</small>
+            </button>
+            <button id="intro-scratch" class="intro-choice">
+                <b>🧬&nbsp; Evolve from scratch</b>
+                <small>Random brains — watch them learn, generation by generation</small>
+            </button>
+        </div>
+        <label class="intro-eval" title="Keeps a byte-for-byte copy of the best brain in the fleet every generation, so it re-spawns unchanged instead of drifting under mutation.">
+            <input type="checkbox" id="intro-eval">
+            <span><b>Eval mode</b> — freeze the best brain so it spawns unchanged every generation</span>
+        </label>
+        <button id="intro-explore" class="intro-dismiss">← back to what was on screen</button>
+    </div>
+</div>
+
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Holding the Plasma</h1>
+            <span class="brand-sub">tokamak magnetic control · neuroevolution · no gradients</span>
+        </div>
+        <div id="top-stats" data-lab>
+            <span class="tstat">gen <b id="stat-gen">1</b></span>
+            <span class="tstat" title="Best normalised training fitness last generation">best <b id="stat-best">—</b></span>
+            <span class="tstat" title="Mean fraction of the discharge survived">survived <b id="stat-surv">—</b></span>
+            <span class="tstat">alive <b id="stat-alive">0/0</b></span>
+            <span class="tstat badge" id="stat-stage">stage</span>
+        </div>
+        <!-- exhibition: the head-to-head, live, in the place the training stats sat -->
+        <div id="top-versus" data-exhibit>
+            <span class="vs-side vs-learned">
+                <i></i><span class="vs-name">network</span><b id="vs-learn">— cm</b>
+            </span>
+            <span class="vs-mid" id="vs-verdict">—</span>
+            <span class="vs-side vs-pid">
+                <b id="vs-pid">— cm</b><span class="vs-name">classic</span><i></i>
+            </span>
+        </div>
+        <div id="top-actions">
+            <div id="diff-group" data-exhibit aria-label="Machine difficulty"></div>
+            <div id="speed-group" aria-label="Simulation speed"></div>
+            <button class="btn primary" id="btn-pause">Pause</button>
+            <button class="btn" id="btn-menu">Menu</button>
+        </div>
+    </header>
+
+    <div id="layout">
+        <!-- ------------------------------------------------ left: the run -->
+        <aside id="panel-left">
+            <div class="card" data-lab>
+                <h2>Task</h2>
+                <div id="task-buttons"></div>
+                <p class="hint" id="task-desc"></p>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>Interface</h2>
+                <div id="mode-buttons"></div>
+                <p class="hint">The full contract is the published TCV one: 34 flux loops,
+                   38 field probes, 19 coil currents, the ohmic difference, I<sub>p</sub>,
+                   the previous action, the target boundary and the discharge phase —
+                   <b>149 inputs, 19 voltages</b> — plus <b>70 temporal neurons</b>: the
+                   magnetic observer's estimate, multi-lag differences from 0.1 to 6.4 ms,
+                   leaky integrals, and the probe array differenced against 0.8 ms ago.
+                   The published vector is memoryless, and a controller that cannot tell a
+                   plasma sitting high from one falling fast cannot stabilise either.
+                   The trimmed one keeps eight probes and five coils: enough to learn
+                   vertical stabilisation, nowhere near enough to control a shape.</p>
+                <p class="hint" id="brain-shape"></p>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>Curriculum</h2>
+                <label class="slider-row">
+                    <span>Stage lock <b id="lb-stagelock">auto</b></span>
+                    <input type="range" id="sl-stagelock" min="-1" max="2" step="1" value="-1">
+                </label>
+                <p class="hint">Stage 0 is a circular plasma — nearly neutral, and the only
+                   rung on which a random brain survives long enough to be told apart from
+                   another random brain. Stage 1 adds elongation and with it the
+                   instability. Stage 2 opens the whole registry. The ratchet promotes on the survival of the
+                   <i>better half</i> of the population in the newest task — the roster is
+                   half deliberate wreckage, so a whole-population mean never gets there —
+                   and it never demotes.</p>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>Population</h2>
+                <label class="slider-row">
+                    <span>Plasmas <b id="lb-pop">24</b></span>
+                    <input type="range" id="sl-pop" min="8" max="96" step="4" value="24">
+                </label>
+                <label class="slider-row">
+                    <span>Episodes / generation <b id="lb-eps">2</b></span>
+                    <input type="range" id="sl-eps" min="1" max="5" step="1" value="2">
+                </label>
+                <label class="slider-row">
+                    <span>Champion grace <b id="lb-grace">3 gens</b></span>
+                    <input type="range" id="sl-grace" min="0" max="10" step="1" value="3">
+                </label>
+                <p class="hint">Real training happens in <code>train.js</code> on as many
+                   cores as you have. In here, turn the population down to watch and up to
+                   believe.</p>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>Mutation</h2>
+                <label class="slider-row">
+                    <span>Rate <b id="lb-mutrate">10%</b></span>
+                    <input type="range" id="sl-mutrate" min="1" max="40" step="1" value="10">
+                </label>
+                <label class="slider-row">
+                    <span>Sigma <b id="lb-mutsig">0.35×</b></span>
+                    <input type="range" id="sl-mutsig" min="2" max="150" step="1" value="35">
+                </label>
+                <p class="hint">Sigma is a multiple of each layer's <i>own</i> initial
+                   spread, not an absolute step. It has to be: the output layer starts near
+                   zero so a fresh controller commands nothing, and an absolute mutation
+                   large enough to matter in the input layer saturates a 1.4 kV supply and
+                   disrupts the plasma in one millisecond.</p>
+                <label class="slider-row">
+                    <span>Stop immigrants past <b id="lb-imm-zero">1.0</b></span>
+                    <input type="range" id="sl-imm-zero" min="0" max="40" step="1" value="10">
+                </label>
+                <label class="slider-row">
+                    <span>Stop crossover past <b id="lb-child-zero">1.8</b></span>
+                    <input type="range" id="sl-child-zero" min="0" max="60" step="1" value="18">
+                </label>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>Machine</h2>
+                <label class="check-row"><input type="checkbox" id="chk-noise" checked><span>Sensor noise &amp; one-step delay</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-random" checked><span>Domain randomisation</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-pid" checked><span>Run the PID baseline alongside</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-headless"><span>Headless (hide the view, train fast)</span></label>
+                <button class="btn danger wide" id="btn-restart">Restart from random brains</button>
+            </div>
+        </aside>
+
+        <!-- --------------------- exhibition: the head-to-head over time ----- -->
+        <!-- Sits where the training panel does, which is free in exhibition, so
+             the trend line is immediately beside the animation it describes. -->
+        <aside id="panel-chart" data-exhibit>
+            <div class="card chart-card">
+                <h2>Mikkel's AI vs Generic PID</h2>
+                <p class="hint">How far each one is from the shape it was asked to
+                   hold, as the shot runs. <b>Lower is better.</b> The gap between
+                   the two lines is shaded in the colour of whichever is winning
+                   at that moment.</p>
+                <canvas id="vschart" width="300" height="230"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-ai"></i>Mikkel's AI</span>
+                    <span><i class="sw sw-pid2"></i>Generic PID</span>
+                </div>
+                <div class="lead-wrap">
+                    <div class="lead-bar"><span id="lead-fill"></span></div>
+                    <p class="lead-text" id="lead-text">—</p>
+                </div>
+                <p class="hint">The vertical marks are where one task ends and the
+                   next begins. A line that stops is a plasma that was lost.</p>
+            </div>
+        </aside>
+
+        <!-- ------------------------------------------------ centre: the view -->
+        <main id="canvas-wrap">
+            <canvas id="view"></canvas>
+            <div id="hud"></div>
+        </main>
+
+        <!-- ------------------------------------------------ right: telemetry -->
+        <aside id="panel-right">
+            <!-- exhibition scoreboard: the whole point of the display mode -->
+            <div class="card score-card" data-exhibit>
+                <h2>Scoreboard</h2>
+                <p class="hint score-intro">Both controllers get <b>exactly the same test</b>:
+                   the same shape to hold, the same mistake to correct at the start, the same
+                   noisy sensors, the same machine. The only thing that is different is which
+                   one is choosing how much power to send to each magnet.</p>
+                <table id="score-table"></table>
+                <div class="score-totals">
+                    <div class="kv" title="Whoever held the shape closest. Losing the plasma loses the task outright."><span>tasks won</span><b id="sc-won">— · —</b></div>
+                    <div class="kv" title="Average distance between the shape it held and the shape it was asked for."><span>average miss (smaller is better)</span><b id="sc-err">— · —</b></div>
+                    <div class="kv" title="The plasma touched the wall or lost its current. The shot is over."><span>plasmas lost</span><b id="sc-dis">— · —</b></div>
+                </div>
+                <p class="verdict" id="score-verdict">—</p>
+                <p class="hint" id="score-note">Running the registry once through. The 1.2 s
+                   discharge at the end is the hard one.</p>
+                <p class="hint">Use <b>L0–L5</b> at the top to make the machine harder: a metal
+                   wall that helps less, a more stretched plasma, a bigger mistake to correct
+                   at the start, and noisier sensors.</p>
+                <p class="hint">The older controller is built from fixed numbers that someone
+                   chose for one particular machine, so it gets worse as the machine changes.
+                   The network is given how fast the magnetic field is changing, and that tells
+                   it what the metal wall is doing — which no sensor measures directly.</p>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>Fitness</h2>
+                <canvas id="chart" width="280" height="90"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-best"></i>best</span>
+                    <span><i class="sw sw-avg"></i>mean</span>
+                </div>
+                <p class="hint">Normalised, and negative until a controller is better than
+                   doing nothing. The grey line is zero.</p>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>Survival &amp; shape error</h2>
+                <canvas id="chart2" width="280" height="80"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-surv"></i>survived</span>
+                    <span><i class="sw sw-err"></i>boundary error</span>
+                </div>
+                <p class="hint">Survival rises long before the shape error falls. Staying
+                   alive is the first thing anything learns here.</p>
+            </div>
+
+            <div class="card">
+                <h2>Plasma</h2>
+                <div class="kv"><span>who is steering</span><b id="ep-state">—</b></div>
+                <div class="kv"><span>time into the shot</span><b id="ep-time">—</b></div>
+                <div class="kv" title="Distance from the middle of the machine out to the centre of the plasma ring."><span>how far out <i>(R)</i></span><b id="ep-R">—</b></div>
+                <div class="kv" title="Height above or below the middle. This is the one that runs away if the controller stops working."><span>height <i>(Z)</i></span><b id="ep-Z">—</b></div>
+                <div class="kv" title="How much electric current is flowing round the ring of gas."><span>current in the gas <i>(I<sub>p</sub>)</i></span><b id="ep-Ip">—</b></div>
+                <div class="kv" title="1.0 is a circle. Bigger means taller than it is wide."><span>how stretched <i>(κ)</i></span><b id="ep-kappa">—</b></div>
+                <div class="kv" title="0 is a plain oval. Positive pushes it towards a D shape; negative points the other way."><span>how D-shaped <i>(δ)</i></span><b id="ep-delta">—</b></div>
+                <div class="kv" title="Half the width of the ring itself."><span>how thick the ring is <i>(a)</i></span><b id="ep-a">—</b></div>
+                <div class="kv" title="Average distance between the edge it has and the edge it was asked for. Smaller is better; this is the number everything is scored on."><span>distance from the wanted shape</span><b id="ep-err">—</b></div>
+                <div class="kv" title="Describes the shape of the magnetic field holding the plasma. When it goes negative the field is squashing the plasma into an oval, and the same field also pulls it further away as soon as it starts to drift. That is what makes it unstable."><span>field shape number <i>(n)</i></span><b id="ep-n">—</b></div>
+                <div class="kv" title="The voltage that keeps the current in the gas going round."><span>voltage driving the current</span><b id="ep-vloop">—</b></div>
+                <div class="kv" title="The small magnet inside the vessel. It is the only one quick enough to catch the plasma falling."><span>fast magnet</span><b id="ep-fast">—</b></div>
+                <div class="kv" title="How hard the magnets are being pushed against what they can physically do."><span>magnets maxed out</span><b id="ep-limit">—</b></div>
+            </div>
+
+            <div class="card">
+                <h2>Coil currents</h2>
+                <canvas id="coilbars" width="260" height="200"></canvas>
+                <p class="hint">How much current is in each magnet right now. <b>F1-F8</b> are
+                   the outer magnets and <b>E1-E8</b> the inner ones, which together set the
+                   shape. <b>OH1</b> and <b>OH2</b> drive the current in the gas. <b>G</b> is
+                   the small fast one inside the vessel that catches the plasma when it starts
+                   to fall.</p>
+                <p class="hint">Every magnet changes every sensor reading, so there is no
+                   single knob for any one job. That is the part that is hard.</p>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>Learned vs conventional</h2>
+                <div class="kv"><span>learned · boundary</span><b id="learn-err">—</b></div>
+                <div class="kv"><span>learned · disruptions</span><b id="learn-disrupt">—</b></div>
+                <div class="kv"><span>PID · boundary</span><b id="pid-err">—</b></div>
+                <div class="kv"><span>PID · last episode</span><b id="pid-state">—</b></div>
+                <div class="kv"><span>PID · fitness</span><b id="pid-fit">—</b></div>
+                <div class="kv"><span>PID · disruption rate</span><b id="pid-disrupt">—</b></div>
+                <p class="hint">Same task, same seed, same noise, same randomised machine.
+                   The PID is a real cascade with a magnetic observer fitted from the
+                   machine geometry, and its gains were swept, not guessed.</p>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>View</h2>
+                <label class="check-row"><input type="checkbox" id="chk-flux" checked><span>Flux contours</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-target" checked><span>Target boundary</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-ghosts" checked><span>Rest of the population</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-sensors"><span>Sensor positions</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-filaments"><span>Current filaments</span></label>
+                <label class="slider-row">
+                    <span>Ghosts <b id="lb-ghosts">10</b></span>
+                    <input type="range" id="sl-ghosts" min="0" max="40" step="1" value="10">
+                </label>
+                <p class="hint">The dots on the wall are the passive vessel loops, shaded by
+                   the eddy current running in them. Watch them light up when the plasma
+                   starts to fall — that is the wall buying the controller the ten
+                   milliseconds it needs.</p>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>Brain</h2>
+                <div class="btn-row">
+                    <button class="btn" id="btn-save">Save</button>
+                    <button class="btn" id="btn-load">Load</button>
+                </div>
+                <div class="btn-row" style="margin-top:6px">
+                    <button class="btn" id="btn-export">Export</button>
+                    <button class="btn" id="btn-import">Import</button>
+                </div>
+                <button class="btn wide" id="btn-default">Load built-in champion</button>
+                <button class="btn wide primary" id="btn-showcase">Exhibition — champion vs PID</button>
+                <button class="btn wide" id="btn-inject">Inject champion into the pool</button>
+                <label class="check-row"><input type="checkbox" id="chk-eval"><span><b>Eval mode</b> — elite frozen, spawns unchanged</span></label>
+                <input type="file" id="file-import" accept="application/json" hidden>
+            </div>
+
+            <div class="card" data-lab>
+                <h2>Log</h2>
+                <div id="log"></div>
+            </div>
+        </aside>
+    </div>
+</div>
+
+<script src="nn.js"></script>
+<script src="greens.js"></script>
+<script src="machine.js"></script>
+<script src="obs_norm.js"></script>
+<script src="tokamak.js"></script>
+<script src="tasks.js"></script>
+<script src="pid.js"></script>
+<script src="evolution.js"></script>
+<script src="world.js"></script>
+<script src="default_brain.js"></script>
+<script src="render.js"></script>
+<script src="ui.js"></script>
+<script src="main.js"></script>
+<!-- Last, and only does anything when the URL says ?train — it drives main.js's
+     own generation loop rather than reimplementing one. -->
+<script src="browser_train.js"></script>
+</body>
+</html>

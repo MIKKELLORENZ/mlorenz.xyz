@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Learning to Dock — Orbital Rendezvous Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="loader" role="status" aria-live="polite">
+    <div class="load-card">
+        <span class="load-dot"></span>
+        <h2>Learning to Dock</h2>
+        <p id="load-what">Generating the planet…</p>
+        <div class="load-bar"><i id="load-fill"></i></div>
+        <p class="load-note">Building the Earth's surface, cloud and night-lights maps from
+           fractal noise, then flying the first rendezvous end to end. Nothing is
+           downloaded — the page works with no network at all.</p>
+    </div>
+</div>
+
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title" hidden>
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Learning to Dock</h2>
+        <p>A 6.3&nbsp;tonne capsule and a space station, both in a real 413&nbsp;km orbit.
+           The capsule has sixteen thrusters, a laser that only works inside 250&nbsp;m,
+           and <b>no idea that orbits are counter-intuitive</b> — that burning toward
+           the station makes you miss it, and that most of a rendezvous is spent
+           deliberately doing nothing. Nothing is scripted and there is
+           <b>no gradient descent</b>: brains are mutated, raced against each other on
+           identical scenarios, and bred.</p>
+        <div class="intro-choices">
+            <button id="intro-go" class="intro-choice primary">
+                <b>▶&nbsp; Watch it fly</b>
+                <small>Six scenarios, from a hold point on the corridor to a 73&nbsp;km rendezvous</small>
+            </button>
+            <button id="intro-train" class="intro-choice">
+                <b>🧬&nbsp; Evolve some brains yourself</b>
+                <small>The real algorithm, in one tab, far too slowly to finish</small>
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Learning to Dock</h1>
+            <span class="brand-sub">orbital rendezvous · neuroevolution · no gradients</span>
+        </div>
+        <div id="hud-strip">
+            <span class="tstat">T+ <b id="hud-clock">0:00</b></span>
+            <span class="tstat">range <b id="hud-range">—</b></span>
+            <span class="tstat">closing <b id="hud-closing">—</b></span>
+            <span class="tstat">Δv <b id="hud-dv">—</b></span>
+            <span class="tstat">prop <b id="hud-fuel">—</b></span>
+            <span class="badge burn" id="badge-burn" hidden>BURN</span>
+            <span class="badge coast" id="badge-coast" hidden>COASTING · time compressed</span>
+        </div>
+    </header>
+
+    <div id="layout">
+        <main id="canvas-wrap">
+            <canvas id="view"></canvas>
+            <div id="view-tabs">
+                <button data-view="orbit" class="on">Orbit the capsule</button>
+                <button data-view="cockpit">From the capsule</button>
+                <button data-view="station">From the station</button>
+            </div>
+            <div id="corner-hud">
+                <div class="kv"><span>laser</span><b id="hud-lidar">—</b></div>
+                <div class="kv"><span>misalignment</span><b id="hud-align">—</b></div>
+                <div class="kv"><span>off corridor axis</span><b id="hud-lateral">—</b></div>
+                <div class="kv wide"><span id="lb-lvlh">—</span></div>
+            </div>
+            <p id="drag-hint">drag to orbit · wheel to zoom · double-click to reset</p>
+        </main>
+
+        <aside id="panel">
+            <!-- Two modes, and they do not share controls. Watching a finished
+                 brain and evolving new ones want completely different things on
+                 screen, and interleaving them left a column of sliders where
+                 half applied to the flight you were looking at and half applied
+                 to a population that was not running. -->
+            <div class="mode-tabs" role="tablist">
+                <button data-mode="watch" class="on" role="tab">▶ Watch</button>
+                <button data-mode="train" role="tab">🧬 Evolve</button>
+            </div>
+
+            <div id="pane-watch">
+            <div class="card">
+                <h2>Scenario</h2>
+                <select id="sel-scenario"></select>
+                <p class="hint" id="sc-blurb"></p>
+                <p class="hint" style="margin-top:12px">Flown by</p>
+                <div class="seg" role="group" aria-label="Who is flying">
+                    <button data-flyer="brain" class="on">Evolved brain</button>
+                    <button data-flyer="pilot">Scripted autopilot</button>
+                </div>
+                <p class="hint" id="brain-info"></p>
+            </div>
+
+            <div class="card">
+                <h2>Playback</h2>
+                <div class="btn-row">
+                    <button class="btn" id="btn-play">Pause</button>
+                    <button class="btn" id="btn-restart">Restart</button>
+                </div>
+                <label class="slider-row">
+                    <span>Speed <b id="lb-speed">×60</b></span>
+                    <input type="range" id="sl-speed" min="0" max="4" step="1" value="2">
+                </label>
+                <input type="range" id="sl-scrub" min="0" max="1000" step="1" value="0" aria-label="Scrub the flight">
+                <p class="hint">Coasts are already compressed inside the simulation —
+                   the vehicle really does spend forty minutes doing nothing, and the
+                   integrator steps twenty seconds at a time through it.</p>
+            </div>
+
+            <div class="card">
+                <h2>Flight</h2>
+                <div class="kv"><span>outcome</span><b id="sum-outcome">—</b></div>
+                <div class="kv"><span>time to dock</span><b id="sum-time">—</b></div>
+                <div class="kv"><span>propellant used</span><b id="sum-dv">—</b></div>
+                <div class="kv"><span>propellant left</span><b id="sum-fuel">—</b></div>
+                <div class="kv"><span>started at</span><b id="sum-r0">—</b></div>
+                <div class="kv"><span>manoeuvring</span><b id="sum-burns">—</b></div>
+                <div class="kv"><span>vs. the autopilot</span><b id="sum-adv">—</b></div>
+                <p class="hint">Score is reported as an <b>advantage</b>: 0 is no better
+                   than coasting, 1.0 is as good as the scripted autopilot flying the
+                   same scenario. On this one it <b id="sum-pilot">—</b>.</p>
+            </div>
+
+            </div><!-- /pane-watch -->
+
+            <div id="pane-train" hidden>
+            <div class="card" id="card-train">
+                <h2>Evolve it here</h2>
+                <div class="btn-row">
+                    <button class="btn primary" id="btn-train">Start evolving</button>
+                    <button class="btn" id="btn-train-fly" disabled>Watch the best</button>
+                </div>
+                <div class="kv"><span>generation</span><b id="tr-gen">—</b></div>
+                <div class="kv"><span>best advantage</span><b id="tr-best">—</b></div>
+                <div class="kv"><span>population mean</span><b id="tr-avg">—</b></div>
+                <div class="kv"><span>reached the ring</span><b id="tr-touch">—</b></div>
+                <div class="kv"><span>race saved</span><b id="tr-saved">—</b></div>
+                <canvas id="tr-chart" width="280" height="76"></canvas>
+                <p class="hint" id="tr-status">idle</p>
+                <label class="slider-row">
+                    <span>Population <b id="lb-pop">24</b></span>
+                    <input type="range" id="sl-pop" min="8" max="64" step="4" value="24">
+                </label>
+                <label class="slider-row">
+                    <span>Scenarios per generation <b id="lb-bank">2</b></span>
+                    <input type="range" id="sl-bank" min="1" max="4" step="1" value="2">
+                </label>
+                <label class="slider-row">
+                    <span>Stage <b id="lb-stage">0 · Terminal</b></span>
+                    <input type="range" id="sl-stage" min="0" max="5" step="1" value="0">
+                </label>
+                <p class="hint"><b>This will not produce a docking.</b> One browser thread at
+                   a population of twenty-four is three orders of magnitude short of what
+                   the champion took — the headless trainer runs hundreds of brains across
+                   many cores for hours. What it is for is watching the machinery: scenarios
+                   being auditioned, the field being cut in half between scenarios, and the
+                   advantage figure moving. 0 is no better than coasting, 1.0 is as good as
+                   the scripted autopilot.</p>
+            </div>
+
+            </div><!-- /pane-train -->
+
+            <div id="pane-watch2">
+            <div class="card">
+                <h2>Capture envelope</h2>
+                <div id="capture-table"></div>
+                <p class="hint">All six have to hold at the instant the probe crosses the
+                   port plane. Arriving beautifully aligned 30% too fast is not a docking,
+                   it is damage to two vehicles.</p>
+            </div>
+
+            <div class="card">
+                <h2>What you are looking at</h2>
+                <p class="hint">The view is the <b>LVLH frame</b>, station-centred:
+                   <b>V-bar</b> is along the direction of travel, <b>R-bar</b> points
+                   down at the Earth, <b>H-bar</b> is out of the orbit plane. The blue
+                   track is the path flown; the faint one is the whole flight. The green
+                   cone is the approach corridor, the red lines are laser returns off the
+                   five retroreflectors on the docking ring — the only thing the network
+                   can see well enough to dock with.</p>
+                <p class="hint">The Sun is fixed in inertial space, so it swings all the
+                   way round the sky once every 93 minutes and the station spends part of
+                   every lap in the Earth's shadow.</p>
+            </div>
+            </div><!-- /pane-watch2 -->
+        </aside>
+    </div>
+</div>
+
+<script src="three.min.js"></script>
+<script src="nn.js"></script>
+<script src="orbit.js"></script>
+<script src="craft.js"></script>
+<script src="station.js"></script>
+<script src="sensors.js"></script>
+<script src="scenarios.js"></script>
+<script src="pilot.js"></script>
+<script src="world.js"></script>
+<script src="evolution.js"></script>
+<script src="default_brain.js"></script>
+<script src="browser_train.js"></script>
+<script src="earth.js"></script>
+<script src="render.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

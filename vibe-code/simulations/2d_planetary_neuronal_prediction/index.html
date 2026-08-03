@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planetary Prediction — Neuroevolution of a Force Law</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Planetary Prediction</h2>
+        <p>A neural network that taught <b>itself</b> gravity. No gradients — a genetic
+           algorithm searched for a force law that predicts where every body in a
+           star system will be, hundreds of steps ahead. Its opponent is
+           <b>Newton</b>, given exactly the same one force calculation per step.</p>
+        <div class="intro-choices">
+            <button id="intro-watch" class="intro-choice primary">
+                <b>▶&nbsp; Watch the evolved network</b>
+                <small>Its prediction runs beside the real orbits — the red lines are its error</small>
+            </button>
+            <button id="intro-scratch" class="intro-choice">
+                <b>🧬&nbsp; Evolve one from scratch</b>
+                <small>Start from random brains and watch a force law appear</small>
+            </button>
+        </div>
+        <button id="intro-explore" class="intro-dismiss">or just look around →</button>
+    </div>
+</div>
+
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Planetary Prediction</h1>
+            <span class="brand-sub">learned n-body forward model · no gradients</span>
+        </div>
+        <div id="top-stats">
+            <span class="tstat">generation <b id="stat-gen">1</b></span>
+            <span class="tstat badge" id="stat-level">L0 · calm</span>
+            <span class="tstat" title="Correct decimal places of relative position error, averaged in log space over the rollout. Higher is better: 2.0 means 1% error, 3.0 means 0.1%.">accuracy <b id="stat-best">–</b> digits</span>
+            <span class="tstat" id="stat-vs-wrap" title="The network's accuracy minus Adams-Bashforth 3's, on the same systems and with the same single force calculation per step. AB3 — not plain Newton — is the honest bar: it uses exact Newtonian forces combined across the last three steps, which is what a competent numerical implementation would do under this same one-evaluation budget, and it is worth about +0.8 digits over one-step Newton for free. Positive here means the evolved model found something beyond the textbook scheme.">vs Adams&#8209;Bashforth <b id="stat-vs">–</b></span>
+            <span class="tstat">bodies <b id="stat-bodies">–</b></span>
+        </div>
+        <div id="top-actions">
+            <div id="speed-group" aria-label="Playback speed"></div>
+            <button id="btn-pause" class="btn primary">Pause</button>
+        </div>
+    </header>
+
+    <main id="layout">
+        <aside id="panel-left">
+            <section class="card">
+                <h2>Reading the picture</h2>
+                <div class="key">
+                    <span class="key-mark key-real"></span>
+                    <div><b>Real orbit</b><small>Lit, solid worlds on a solid trail — the true physics</small></div>
+                </div>
+                <div class="key">
+                    <span class="key-mark key-pred"></span>
+                    <div><b>Network's prediction</b><small>Hollow dashed rings on a dashed trail — where the AI thinks they are</small></div>
+                </div>
+                <div class="key">
+                    <span class="key-mark key-err"></span>
+                    <div><b>Error</b><small>The red line joining each pair. Its length is exactly what is being scored.</small></div>
+                </div>
+                <p class="hint">A perfect prediction hides its ring inside the real
+                   planet and shows no red at all.</p>
+            </section>
+
+            <section class="card">
+                <h2>Scenario</h2>
+                <div id="level-buttons"></div>
+                <p class="hint" id="level-desc"></p>
+            </section>
+
+            <section class="card">
+                <h2>View</h2>
+                <label class="check-row"><input type="checkbox" id="chk-trails" checked><span>Orbit trails</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-err" checked><span>Error lines</span></label>
+                <label class="check-row" title="Hide the network's rollout to see only the true orbits."><input type="checkbox" id="chk-pred" checked><span>Show the prediction</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-labels" checked><span>Body labels</span></label>
+                <label class="check-row" title="Turn off all rendering and pour every millisecond into evolution."><input type="checkbox" id="chk-headless"><span><b>Headless</b> — no visuals, max speed</span></label>
+                <div class="btn-row" style="margin-top:8px">
+                    <button id="btn-newsys" class="btn">New system</button>
+                    <button id="btn-replay" class="btn">Replay</button>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>The network</h2>
+                <div class="kv"><span>architecture</span><b id="md-arch">–</b></div>
+                <div class="kv"><span>evolved weights</span><b id="md-params">–</b></div>
+                <div class="kv"><span>step size</span><b id="md-tick">–</b></div>
+                <div class="kv"><span>remembers</span><b id="md-lags">–</b></div>
+                <div class="kv"><span>trained through</span><b id="md-trained">–</b></div>
+                <p class="hint" id="md-note">An interaction network: one small
+                   network reads a single <i>pair</i> of bodies, another reads a single body,
+                   and both are shared across every body in the system — which is why one
+                   evolved brain runs on any number of planets.</p>
+                <p class="hint" id="md-memnote"></p>
+            </section>
+
+            <section class="card">
+                <h2>Brain file</h2>
+                <button id="btn-default" class="btn wide primary">Load the evolved champion</button>
+                <div class="btn-row">
+                    <button id="btn-export" class="btn">Export .json</button>
+                    <button id="btn-import" class="btn">Import</button>
+                </div>
+                <input type="file" id="file-import" accept=".json" style="display:none">
+                <button id="btn-restart" class="btn wide danger">Restart from random brains</button>
+            </section>
+        </aside>
+
+        <div id="canvas-wrap">
+            <canvas id="scene"></canvas>
+            <div id="hud"></div>
+            <div id="headless-card">
+                <h3>Headless</h3>
+                <div class="kv"><span>generation</span><b id="hl-gen">–</b></div>
+                <div class="kv"><span>accuracy</span><b id="hl-best">–</b></div>
+                <div class="kv"><span>vs AB3</span><b id="hl-vs">–</b></div>
+                <div class="kv"><span>gen / s</span><b id="hl-rate">–</b></div>
+            </div>
+        </div>
+
+        <aside id="panel-right">
+            <section class="card">
+                <h2>Drift — error vs steps ahead</h2>
+                <canvas id="chart-drift" width="290" height="150"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-brain"></i>network</span>
+                    <span><i class="sw sw-newton"></i>Newton</span>
+                    <span><i class="sw sw-adams"></i>Adams&#8209;Bashforth 3</span>
+                    <span><i class="sw sw-sub"></i>Newton×8</span>
+                    <span><i class="sw sw-drift"></i>no forces</span>
+                </div>
+                <p class="hint">Relative position error, log axes. <b>Newton×8</b> takes eight
+                   sub-steps per tick — about sixteen force calculations, where everyone
+                   else gets one. It is a ruler, not a competitor: the gap between it and plain
+                   Newton is the room a smarter force law has to work in.</p>
+            </section>
+
+            <section class="card">
+                <h2>Evolution progress</h2>
+                <canvas id="chart-fit" width="290" height="110"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-best"></i>best of generation</span>
+                    <span><i class="sw sw-avg"></i>population mean</span>
+                </div>
+            </section>
+
+            <section class="card" id="card-raster">
+                <h2>What the network sees</h2>
+                <canvas id="chart-raster" width="130" height="130"></canvas>
+                <p class="hint" id="raster-hint">An 8×8 log-mass map of the system.
+                   Tested and <b>not</b> used by the shipped brain — for pure gravity it is
+                   redundant with the pairwise inputs. See the README.</p>
+            </section>
+
+            <section class="card">
+                <h2>This rollout</h2>
+                <div class="kv"><span>step</span><b id="ep-tick">0</b></div>
+                <div class="kv"><span>bodies</span><b id="ep-bodies">–</b></div>
+                <div class="kv"><span>step length</span><b id="ep-dt">–</b></div>
+                <div class="kv"><span>prediction error now</span><b id="ep-err">–</b></div>
+                <div class="kv"><span>worst body</span><b id="ep-worst">–</b></div>
+                <div class="kv"><span>truth energy drift</span><b id="ep-edrift">–</b></div>
+            </section>
+
+            <section class="card">
+                <h2>Log</h2>
+                <div id="log"></div>
+            </section>
+        </aside>
+    </main>
+</div>
+
+<script src="nn.js"></script>
+<script src="physics.js"></script>
+<script src="model.js"></script>
+<script src="world.js"></script>
+<script src="evolution.js"></script>
+<script src="render.js"></script>
+<script src="default_brain.js"></script>
+<script src="ui.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

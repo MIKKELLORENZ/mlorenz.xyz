@@ -4,15 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mikkel Lorenz — Biology × Code</title>
-    <meta name="description" content="Mikkel Lorenz — biologist turned founder building BioPilot, lab software for cell therapy research. Plus interactive simulations, games, and tools built for fun.">
+    <meta name="description" content="Mikkel Lorenz — solutions architect building BioPilot, lab software for cell therapy research. Plus interactive simulations, games, and tools built for fun.">
+    <meta name="author" content="Mikkel Lorenz">
     <link rel="canonical" href="https://mlorenz.xyz/">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://mlorenz.xyz/">
     <meta property="og:title" content="Mikkel Lorenz — Biology × Code">
-    <meta property="og:description" content="Biologist turned founder building BioPilot, lab software for cell therapy research. Plus interactive simulations, games, and tools built for fun.">
+    <meta property="og:description" content="Solutions architect building BioPilot, lab software for cell therapy research. Plus interactive simulations, games, and tools built for fun.">
     <meta property="og:image" content="https://mlorenz.xyz/assets/profile.jpg">
+    <meta property="og:image:alt" content="Portrait of Mikkel Lorenz">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="theme-color" content="#0a0a0a">
+    <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0c0c0c" media="(prefers-color-scheme: dark)">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -27,20 +30,60 @@
             document.documentElement.classList.add(t === 'dark' ? 'dark-mode' : 'light-mode');
         })();
     </script>
+
+    <!-- Own stylesheet first (render-blocking, small); webfonts load async so they
+         never hold up first paint. Only the weights this page actually uses. -->
+    <link rel="stylesheet" href="css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" media="print" onload="this.media='all'">
+    <noscript>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
+    </noscript>
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Person",
+        "name": "Mikkel Lorenz",
+        "url": "https://mlorenz.xyz/",
+        "image": "https://mlorenz.xyz/assets/profile.jpg",
+        "jobTitle": "Solutions Architect",
+        "email": "mailto:mikkelvind@gmail.com",
+        "address": { "@type": "PostalAddress", "addressLocality": "Copenhagen", "addressCountry": "DK" },
+        "sameAs": [
+            "https://github.com/MIKKELLORENZ",
+            "https://www.linkedin.com/in/mikkel-lorenz-67b0a636/",
+            "https://biopilot.net"
+        ]
+    }
+    </script>
 </head>
 <body>
+
+    <!-- Inline icon sprite — replaces the Font Awesome CDN (~2 KB vs ~100 KB + webfonts) -->
+    <svg class="icon-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+        <symbol id="i-helix" viewBox="0 0 24 24"><path d="M7 3c0 4.5 10 6 10 9s-10 4.5-10 9"/><path d="M17 3c0 4.5-10 6-10 9s10 4.5 10 9"/><path d="M8.6 6h6.8M7 12h10M8.6 18h6.8"/></symbol>
+        <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9.5 3h5M10.5 3v6.2L5.2 18.8A2 2 0 0 0 7 21.8h10a2 2 0 0 0 1.8-3L13.5 9.2V3"/><path d="M7.6 15.5h8.8"/></symbol>
+        <symbol id="i-mail" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 6.5L21 6"/></symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></symbol>
+        <symbol id="i-cube" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></symbol>
+        <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 9 5-9 5-9-5 9-5z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></symbol>
+        <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></symbol>
+        <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10.2c0 5.8-8 11.8-8 11.8s-8-6-8-11.8a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="2.8"/></symbol>
+        <symbol id="i-github" viewBox="0 0 24 24"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3z"/></symbol>
+        <symbol id="i-linkedin" viewBox="0 0 24 24"><path d="M20.4 20.5h-3.6v-5.6c0-1.3 0-3-1.8-3s-2.2 1.4-2.2 2.9v5.7H9.4V9h3.4v1.6h.1c.5-.9 1.6-1.9 3.4-1.9 3.6 0 4.3 2.4 4.3 5.5v6.3zM5.3 7.4a2.1 2.1 0 1 1 0-4.1 2.1 2.1 0 0 1 0 4.1zm1.8 13.1H3.6V9h3.5v11.5zM22.2 0H1.8C.8 0 0 .8 0 1.7v20.6C0 23.2.8 24 1.8 24h20.4c1 0 1.8-.8 1.8-1.7V1.7C24 .8 23.2 0 22.2 0z"/></symbol>
+    </svg>
+
+    <a class="skip-link" href="#main">Skip to content</a>
 
     <!-- Grain overlay -->
     <div class="grain-overlay" aria-hidden="true"></div>
 
     <nav class="navbar">
         <div class="container">
-            <div class="logo">MLORENZ<span class="logo-dot">.</span>XYZ</div>
+            <a class="logo" href="index.html">MLORENZ<span class="logo-dot">.</span>XYZ</a>
             <div class="nav-items">
                 <a href="index.html" class="active" aria-current="page">Home</a>
                 <a href="vibe-code/index.html">Vibe Code</a>
@@ -56,32 +99,38 @@
     <!-- ═══════════════ HERO ═══════════════ -->
     <section class="hero-split">
         <div class="hero-content">
-            <p class="hero-kicker"><span class="status-dot"></span> Building BioPilot</p>
+            <p class="hero-kicker"><span class="status-dot"></span> Currently building BioPilot</p>
             <h1 class="hero-headline">
                 Biotech labs deserve<br>
                 <span class="gradient-text">better&nbsp;software</span>.
                 <span class="hero-period">So I'm building it.</span>
             </h1>
             <p class="hero-sub">
-                I'm Mikkel — trained in biology and bioinformatics, former solutions architect,
-                now founder. I got tired of watching brilliant scientists fight spreadsheets,
-                so I started building the tools they actually need. Currently that means
-                <strong>BioPilot</strong>: a single system replacing the mess of ELNs, LIMS,
-                and disconnected platforms that slow down cell therapy research.
+                I'm Mikkel — solutions architect and innovator, working at the seam between
+                biology and code. Right now that means <strong>BioPilot</strong>.
             </p>
             <div class="hero-cta-group">
-                <a href="https://biopilot.net" target="_blank" rel="noopener" class="cta-button"><i class="fas fa-dna"></i> See BioPilot</a>
-                <a href="consultancy/index.html" class="cta-button cta-outline"><i class="fas fa-flask"></i> Work with Me</a>
+                <a href="https://biopilot.net" target="_blank" rel="noopener" class="cta-button">
+                    <svg class="icon" aria-hidden="true"><use href="#i-helix"></use></svg> See BioPilot
+                </a>
+                <a href="consultancy/index.html" class="cta-button cta-outline">
+                    <svg class="icon" aria-hidden="true"><use href="#i-flask"></use></svg> Work with me
+                </a>
             </div>
+            <ul class="hero-meta">
+                <li><svg class="icon" aria-hidden="true"><use href="#i-pin"></use></svg> Copenhagen, DK</li>
+                <li><svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg> Biology × Code</li>
+                <li><a href="vibe-code/index.html"><svg class="icon" aria-hidden="true"><use href="#i-grid"></use></svg> 20+ side projects</a></li>
+            </ul>
         </div>
         <div class="hero-portrait">
             <div class="portrait-frame">
-                <video autoplay loop muted playsinline poster="assets/profile.jpg">
-                    <source src="assets/profile-video.mp4" type="video/mp4">
-                    <img src="assets/profile.jpg" alt="Mikkel Lorenz">
-                </video>
+                <img class="portrait-still" src="assets/profile.jpg" width="300" height="300"
+                     alt="Mikkel Lorenz" fetchpriority="high" decoding="async">
+                <video class="portrait-video" data-src="assets/profile-video.mp4"
+                       preload="none" loop muted playsinline aria-hidden="true" tabindex="-1"></video>
             </div>
-            <div class="portrait-glow"></div>
+            <div class="portrait-glow" aria-hidden="true"></div>
         </div>
     </section>
 
@@ -116,7 +165,38 @@
         </div>
     </div>
 
-    <main class="container">
+    <main class="container" id="main">
+
+        <!-- ═══════════════ BIOPILOT ═══════════════ -->
+        <section class="section">
+            <h2 class="section-title">What I'm Building</h2>
+            <div class="flagship-card" style="margin-top: 32px;">
+                <span class="flagship-badge">
+                    <svg class="icon" aria-hidden="true"><use href="#i-flask"></use></svg> In development
+                </span>
+                <h3 class="flagship-title">BioPilot</h3>
+                <p class="flagship-tagline">The operating system for cell therapy research.</p>
+                <p class="flagship-body">
+                    Cell therapy labs run on a patchwork: an ELN for notes, a separate LIMS for
+                    inventory, FlowJo for FACS, spreadsheets for DOE. Nothing connects a protocol
+                    to its results. BioPilot is one platform with cell-therapy-native ontologies —
+                    built around how researchers actually work, from exploratory R&amp;D through GMP.
+                </p>
+                <div class="flagship-domains">
+                    <span class="domain-pill">Protocol scheduler</span>
+                    <span class="domain-pill">Native FACS gating</span>
+                    <span class="domain-pill">DOE optimization</span>
+                    <span class="domain-pill">Inventory</span>
+                    <span class="domain-pill">Audit trails</span>
+                    <span class="domain-pill">Deep ontology</span>
+                </div>
+                <p style="margin-top: 28px;">
+                    <a href="https://biopilot.net" target="_blank" rel="noopener" class="cta-button">
+                        Visit biopilot.net <svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg>
+                    </a>
+                </p>
+            </div>
+        </section>
 
         <!-- ═══════════════ ABOUT ═══════════════ -->
         <section class="section">
@@ -124,22 +204,21 @@
             <div class="about-grid">
                 <div class="about-text">
                     <p>
-                        I studied biology and bioinformatics. Somewhere along the way
-                        I realized the biggest bottleneck in the lab wasn't the science — it was the
-                        software. Researchers losing hours to copy-paste between five different platforms.
-                        Data locked in silos nobody could query. Compliance checklists on paper in 2025.
+                        Trained in biology, ended up in software once it was obvious the bottleneck
+                        in the lab was never the science. I design and build the systems in between —
+                        data pipelines, AI integrations, and the ontology models that let software
+                        think in cell lines, passages, and CQAs.
                     </p>
-                    <p>
-                        So I crossed over. I design and build the systems that connect the dots —
-                        data pipelines, AI integrations, lab platforms, and the deep ontology models
-                        that make them actually understand biology. Not just "biotech software," but
-                        <em>software that thinks in cell lines, passages, and CQAs</em>.
-                    </p>
-                    <p>
-                        When I'm not doing that, I'm vibe-coding physics simulations at 2 AM,
-                        teaching myself reinforcement learning by making agents balance sticks,
-                        or 3D-printing something that probably won't work on the first try.
-                    </p>
+                    <p>Fields I keep circling back to:</p>
+                    <div class="interest-cloud">
+                        <span class="interest-pill">Solutions architecture</span>
+                        <span class="interest-pill">Universal function approximators</span>
+                        <span class="interest-pill">Cell therapy research</span>
+                        <span class="interest-pill">Ontology</span>
+                        <span class="interest-pill">Automation</span>
+                        <span class="interest-pill">Robotics</span>
+                        <span class="interest-pill">Foundation models</span>
+                    </div>
                 </div>
                 <div class="about-sidebar">
                     <div class="now-card">
@@ -153,15 +232,15 @@
                     </div>
                     <div class="about-links">
                         <a href="mailto:mikkelvind@gmail.com" class="about-link-card">
-                            <i class="fas fa-envelope"></i>
+                            <svg class="icon" aria-hidden="true"><use href="#i-mail"></use></svg>
                             <span>mikkelvind@gmail.com</span>
                         </a>
                         <a href="https://github.com/MIKKELLORENZ" class="about-link-card" target="_blank" rel="noopener">
-                            <i class="fab fa-github"></i>
+                            <svg class="icon icon-brand" aria-hidden="true"><use href="#i-github"></use></svg>
                             <span>GitHub</span>
                         </a>
                         <a href="https://www.linkedin.com/in/mikkel-lorenz-67b0a636/" class="about-link-card" target="_blank" rel="noopener">
-                            <i class="fab fa-linkedin"></i>
+                            <svg class="icon icon-brand" aria-hidden="true"><use href="#i-linkedin"></use></svg>
                             <span>LinkedIn</span>
                         </a>
                     </div>
@@ -169,32 +248,20 @@
             </div>
         </section>
 
-        <!-- ═══════════════ BELIEFS ═══════════════ -->
-        <section class="section beliefs-section">
-            <h2 class="section-title">Things I Believe</h2>
-            <div class="beliefs-grid">
-                <blockquote class="belief-card">
-                    <p>The best tools disappear into the workflow. If you're thinking about the software, the software has failed.</p>
-                </blockquote>
-                <blockquote class="belief-card">
-                    <p>Biology is messy. Your data model shouldn't be. Deep ontologies beat shallow schemas every time.</p>
-                </blockquote>
-                <blockquote class="belief-card">
-                    <p>If you can't run a DOE inside the same tool you track your cells in, you're going to lose data. It's not a question of if.</p>
-                </blockquote>
-                <blockquote class="belief-card">
-                    <p>The gap between "research-grade" and "GMP-ready" is mostly just traceability. Build it in from day one.</p>
-                </blockquote>
-            </div>
-        </section>
-
         <!-- ═══════════════ VIBE CODE PREVIEW ═══════════════ -->
         <section class="section">
-            <h2 class="section-title">Vibe Code</h2>
-            <p class="section-subtitle">
-                The stuff I build for fun. Weekend experiments, interactive simulations,
-                and things that probably didn't need to exist — but I'm glad they do.
-            </p>
+            <div class="section-head">
+                <div>
+                    <h2 class="section-title">Vibe Code</h2>
+                    <p class="section-subtitle">
+                        The stuff I build for fun. Weekend experiments, interactive simulations,
+                        and things that probably didn't need to exist — but I'm glad they do.
+                    </p>
+                </div>
+                <a href="vibe-code/index.html" class="section-link">
+                    All 20 projects <svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg>
+                </a>
+            </div>
             <div class="grid" style="margin-top: 25px;">
                 <a href="vibe-code/index.html?project=bayesian_optimization" class="card vibe-preview-card">
                     <div class="card-content">
@@ -218,30 +285,86 @@
                         </div>
                     </div>
                 </a>
-                <a href="vibe-code/index.html?project=stick_balance" class="card vibe-preview-card">
+                <a href="vibe-code/index.html?project=smart_ocean_boats" class="card vibe-preview-card">
                     <div class="card-content">
-                        <span class="card-emoji">🤖</span>
-                        <h3 class="card-title">Stick Balance</h3>
-                        <p class="card-description">An RL agent learns to balance a stick in real time. Fails hilariously, then figures it out.</p>
+                        <span class="card-emoji">⛵</span>
+                        <h3 class="card-title">Smart Ocean Boats</h3>
+                        <p class="card-description">Neural boats evolve their way through open water. Generation 1 capsizes; generation 200 sails.</p>
                         <div class="card-tags">
-                            <span class="tag">RL</span>
-                            <span class="tag">Physics</span>
+                            <span class="tag">Neuroevolution</span>
+                            <span class="tag">Simulation</span>
                         </div>
                     </div>
                 </a>
             </div>
-            <div style="text-align: center; margin-top: 30px;">
-                <a href="vibe-code/index.html" class="cta-button cta-outline"><i class="fas fa-th"></i> Browse All Projects</a>
+        </section>
+
+        <!-- ═══════════════ ELSEWHERE ═══════════════ -->
+        <section class="section">
+            <h2 class="section-title">Elsewhere</h2>
+            <div class="explore-grid">
+                <a href="consultancy/index.html" class="explore-card">
+                    <svg class="icon explore-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+                    <h3>Consultancy</h3>
+                    <p>System design, data engineering, and AI integration for biotech teams that need the plumbing to work.</p>
+                    <span class="explore-more">How I work <svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg></span>
+                </a>
+                <a href="inventions/index.html" class="explore-card">
+                    <svg class="icon explore-icon" aria-hidden="true"><use href="#i-cube"></use></svg>
+                    <h3>Inventions</h3>
+                    <p>Physical things — 3D-printed hardware, workshop builds, and prototypes that occasionally survive contact with reality.</p>
+                    <span class="explore-more">See the builds <svg class="icon" aria-hidden="true"><use href="#i-arrow"></use></svg></span>
+                </a>
             </div>
         </section>
 
     </main>
 
     <footer>
-        <div class="container">
+        <div class="container footer-inner">
             <p>&copy; 2026 — Mikkel Lorenz · Built with caffeine and questionable time management</p>
+            <div class="footer-links">
+                <a href="mailto:mikkelvind@gmail.com" aria-label="Email">
+                    <svg class="icon" aria-hidden="true"><use href="#i-mail"></use></svg>
+                </a>
+                <a href="https://github.com/MIKKELLORENZ" target="_blank" rel="noopener" aria-label="GitHub">
+                    <svg class="icon icon-brand" aria-hidden="true"><use href="#i-github"></use></svg>
+                </a>
+                <a href="https://www.linkedin.com/in/mikkel-lorenz-67b0a636/" target="_blank" rel="noopener" aria-label="LinkedIn">
+                    <svg class="icon icon-brand" aria-hidden="true"><use href="#i-linkedin"></use></svg>
+                </a>
+            </div>
         </div>
     </footer>
+
+    <script>
+        // The portrait clip is ~1 MB. Keep it off the critical path: show the poster
+        // image immediately, then fetch the video once the page is idle — and never
+        // on reduced-motion, save-data, or slow connections.
+        (function () {
+            var v = document.querySelector('.portrait-video');
+            if (!v || !v.dataset.src) return;
+
+            var conn = navigator.connection || {};
+            if (conn.saveData || /(^|-)2g$/.test(conn.effectiveType || '')) return;
+            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+            function load() {
+                v.muted = true;
+                v.src = v.dataset.src;
+                var p = v.play();
+                if (p && p.then) p.then(function () { v.classList.add('is-playing'); }, function () {});
+                else v.classList.add('is-playing');
+            }
+
+            function schedule() {
+                (window.requestIdleCallback || function (f) { setTimeout(f, 500); })(load, { timeout: 3000 });
+            }
+
+            if (document.readyState === 'complete') schedule();
+            else window.addEventListener('load', schedule, { once: true });
+        })();
+    </script>
 
     <script src="js/darkmode.js" defer></script>
     <script src="js/main.js" defer></script>

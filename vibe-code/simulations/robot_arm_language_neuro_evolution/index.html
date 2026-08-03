@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Told What To Do — Language-Conditioned Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Told What To Do</h2>
+        <p>A five-joint robot arm, a table of coloured balls, and a sentence.
+           <b>“Pick up the green balls and put them in their respective bucket.”</b>
+           The sentence is turned into a vector by <b>Qwen3-Embedding</b> and fed
+           to the arm alongside what its cameras see. Nothing is scripted, and there is
+           <b>no gradient descent anywhere</b> — brains are mutated, scored and bred.</p>
+        <div class="intro-choices">
+            <button id="intro-watch" class="intro-choice primary">
+                <b>▶&nbsp; Watch the trained champion</b>
+                <small>The best evolved brain drives every bench at once</small>
+            </button>
+            <button id="intro-scratch" class="intro-choice">
+                <b>🧬&nbsp; Evolve from scratch</b>
+                <small>Random brains — watch them learn to reach, grip and sort</small>
+            </button>
+            <button id="intro-continue" class="intro-choice">
+                <b>⏩&nbsp; Continue training the champion</b>
+                <small>Seed the whole population from the saved brain</small>
+            </button>
+        </div>
+        <p id="intro-note" class="intro-note"></p>
+        <button id="intro-explore" class="intro-dismiss">or just explore the controls →</button>
+    </div>
+</div>
+
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Told What To Do</h1>
+            <span class="brand-sub">5-DoF arm · language-conditioned · no gradients</span>
+        </div>
+        <div id="top-stats">
+            <span class="tstat">gen <b id="stat-gen">1</b></span>
+            <span class="tstat badge" id="stat-mode">evolving</span>
+            <span class="tstat badge" id="stat-stage">stage 1</span>
+            <span class="tstat">best <b id="stat-best">–</b></span>
+            <span class="tstat" title="best / mean correctly delivered balls last generation">balls <b id="stat-balls">–</b></span>
+            <span class="tstat" title="share of the fleet that fully satisfied the instruction">done <b id="stat-done">–</b></span>
+            <span class="tstat">t <b id="stat-time">0.0s</b></span>
+        </div>
+        <div id="top-actions">
+            <div id="speed-group" aria-label="Simulation speed"></div>
+            <button id="btn-solo" class="btn">Solo view</button>
+            <button id="btn-theme" class="btn">Dark</button>
+            <button id="btn-pause" class="btn primary">Pause</button>
+        </div>
+    </header>
+
+    <main id="layout">
+        <!-- ------------------------------------------------------ left -->
+        <aside id="panel-left">
+            <section class="card accent">
+                <h2>The instruction</h2>
+                <div id="instruction">—</div>
+                <div class="instr-meta">
+                    <span class="pill" id="instr-kind">—</span>
+                    <span class="pill" id="instr-split">—</span>
+                </div>
+                <div id="scene-balls" class="chips"></div>
+            </section>
+
+            <section class="card">
+                <h2>Which sentences</h2>
+                <div class="radio-row">
+                    <label><input type="radio" name="split" value="train" checked> training pool</label>
+                    <label><input type="radio" name="split" value="holdout"> ★ held out</label>
+                </div>
+                <p class="hint" id="split-note">The 392 phrasings evolution is scored on.</p>
+                <label class="field">
+                    <span>Goal type</span>
+                    <select id="sel-kind"></select>
+                </label>
+                <label class="field">
+                    <span>Pin a sentence <i class="hint" id="phrase-count"></i></span>
+                    <select id="sel-phrase"></select>
+                </label>
+            </section>
+
+            <section class="card">
+                <h2>Say something new</h2>
+                <p class="hint">Type an instruction the arm has never seen. It is embedded by your
+                   local Ollama and projected into the same space the brain evolved in.</p>
+                <textarea id="live-text" rows="2" placeholder="Tidy the blue ones away, but leave a red on the bench"></textarea>
+                <button id="btn-live" class="btn wide">Embed &amp; run it</button>
+                <p class="hint" id="live-status"></p>
+            </section>
+
+            <section class="card">
+                <h2>Embedding</h2>
+                <span class="pill" id="emb-badge">—</span>
+                <p class="hint" id="emb-detail"></p>
+            </section>
+        </aside>
+
+        <!-- ---------------------------------------------------- centre -->
+        <section id="stage-wrap">
+            <canvas id="view"></canvas>
+        </section>
+
+        <!-- ----------------------------------------------------- right -->
+        <aside id="panel-right">
+            <section class="card">
+                <h2>What the pointer heads chose</h2>
+                <div class="kv"><span>going for</span><b id="focus-pick">—</b></div>
+                <div class="kv"><span>how decided</span><b id="focus-pick-conf">—</b></div>
+                <div class="kv"><span>bucket head</span><b id="focus-bucket">—</b></div>
+                <div class="kv"><span>the rule says</span><b id="focus-should">—</b></div>
+                <div class="kv"><span></span><b><span class="pill" id="focus-agree">—</span></b></div>
+                <p class="hint">The selector runs once per ball slot with shared weights, so the arm
+                   learns "reach for a ball" once and re-uses it. The sentence only has to move which
+                   slot wins.</p>
+            </section>
+
+            <section class="card">
+                <h2>Focused bench</h2>
+                <div class="kv"><span id="focus-idx">bench 1</span><b id="focus-fit">0</b></div>
+                <div class="kv"><span>clock left</span><b id="focus-clock">—</b></div>
+                <div class="kv"><span>delivered</span><b id="focus-del">—</b></div>
+                <div id="focus-log" data-n="0"></div>
+            </section>
+
+            <section class="card">
+                <h2>Progress <i class="hint">balls per episode, peak <span id="chart-max">–</span></i></h2>
+                <canvas id="chart"></canvas>
+                <p class="hint">
+                    <span class="key" style="--c:#35b6ff"></span>best
+                    <span class="key" style="--c:#4fe0a8"></span>fleet mean
+                    <span class="key" style="--c:#ffc94d"></span>tasks fully satisfied
+                </p>
+            </section>
+
+            <section class="card">
+                <h2>Curriculum</h2>
+                <div id="stage-track"></div>
+                <p class="hint" id="stage-desc"></p>
+                <label class="slider-row" title="0 = let the fleet's own delivery rate decide when to move on.">
+                    <span>Stage <b id="lb-stagelock">auto</b></span>
+                    <input type="range" id="sl-stagelock" min="0" max="5" value="0" step="1">
+                </label>
+            </section>
+
+            <section class="card">
+                <h2>Evolution</h2>
+                <label class="slider-row"><span>Population <b id="lb-pop">24</b> <i class="hint">on restart</i></span>
+                    <input type="range" id="sl-pop" min="8" max="48" value="24" step="4"></label>
+                <label class="slider-row" title="Instructions per generation. One is not enough: it selects for a brain that is good at that one sentence."><span>Instructions / gen <b id="lb-eps">3</b></span>
+                    <input type="range" id="sl-eps" min="1" max="6" value="3" step="1"></label>
+                <label class="slider-row"><span>Mutation rate <b id="lb-mut">0.12</b></span>
+                    <input type="range" id="sl-mut" min="2" max="60" value="12" step="1"></label>
+                <label class="slider-row"><span>Mutation sigma <b id="lb-sig">0.20</b></span>
+                    <input type="range" id="sl-sig" min="2" max="60" value="20" step="1"></label>
+                <label class="slider-row" title="Generations the reigning champion keeps an untouched seat after being beaten."><span>Champion grace <b id="lb-grace">3</b></span>
+                    <input type="range" id="sl-grace" min="0" max="8" value="3" step="1"></label>
+                <label class="slider-row"><span>Benches drawn <b id="lb-benches">12</b></span>
+                    <input type="range" id="sl-benches" min="1" max="24" value="12" step="1"></label>
+                <div class="btn-row">
+                    <button id="btn-restart" class="btn">Restart</button>
+                    <button id="btn-reference" class="btn" title="Run the hand-written IK controller instead of a brain — the reference for what the physics allows.">Scripted ref</button>
+                    <button id="btn-export" class="btn">Export champion</button>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Generations</h2>
+                <div id="gen-log"></div>
+            </section>
+        </aside>
+    </main>
+</div>
+
+<script src="three.min.js"></script>
+<script src="tasks.js"></script>
+<script src="nn.js"></script>
+<script src="arm.js"></script>
+<script src="task_embeddings.js"></script>
+<script src="embedding.js"></script>
+<script src="world.js"></script>
+<script src="evolution.js"></script>
+<script src="reference_policy.js"></script>
+<script src="default_brain.js"></script>
+<script src="render.js"></script>
+<script src="ui.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

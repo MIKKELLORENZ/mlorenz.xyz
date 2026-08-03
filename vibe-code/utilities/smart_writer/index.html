@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Writer — Craft messages, variation by variation</title>
+<meta name="description" content="A composer for messages worth getting right: sections, variations, locks, side-by-side version comparison, and an optional local writing model.">
+<link rel="stylesheet" href="styles.css">
+<script>
+  // Set the theme before first paint so there is no flash of the wrong mode.
+  try {
+    var saved = JSON.parse(localStorage.getItem('smartwriter.v1') || 'null');
+    var t = saved && saved.ui && saved.ui.theme;
+    if (!t) t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+</head>
+<body>
+<div class="app" id="app" data-view="compose">
+
+  <!-- ══ Top bar ══════════════════════════════════════════════════ -->
+  <header class="topbar">
+    <div class="topbar-group">
+      <button class="icon-btn" id="btn-sidebar" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar">
+        <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M6 2.5v11"/></svg>
+      </button>
+      <div class="brand">
+        <span class="brand-mark">
+          <svg viewBox="0 0 20 20"><path d="M3 15.2 4.1 11 12.6 2.5a1.9 1.9 0 0 1 2.7 2.7L6.8 13.7 3 15.2Z"/><path d="M11 4.2 13.6 6.8"/></svg>
+        </span>
+        <span class="brand-text">Smart<span class="brand-accent">Writer</span></span>
+      </div>
+      <div class="sep"></div>
+      <div class="doc-switch" id="doc-switch">
+        <input id="doc-title" class="doc-title" value="Untitled message" spellcheck="false" aria-label="Message title">
+        <button class="icon-btn sm doc-chev" id="btn-docs" title="Your messages (Ctrl+O)" aria-label="Switch message">
+          <span class="doc-count" id="doc-count">1</span>
+          <svg viewBox="0 0 16 16"><path d="M4 6.5 8 10.5l4-4"/></svg>
+        </button>
+
+        <div class="dropdown docs-dropdown" id="docs-dropdown" hidden>
+          <div class="dd-label">Your messages</div>
+          <div class="docs-list" id="docs-list"></div>
+          <div class="dd-sep"></div>
+          <button data-doc-act="new"><span class="dd-ico">◇</span>New blank message</button>
+          <button data-doc-act="guide"><span class="dd-ico">✦</span>New — guide me through it</button>
+          <button data-doc-act="sample"><span class="dd-ico">◈</span>New from the example</button>
+          <div class="dd-sep"></div>
+          <button data-doc-act="duplicate"><span class="dd-ico">⧉</span>Duplicate this message</button>
+          <button data-doc-act="export"><span class="dd-ico">↓</span>Save this message to a file</button>
+          <button data-doc-act="import"><span class="dd-ico">↑</span>Open a message from a file…</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="topbar-group topbar-center">
+      <div class="segmented" role="tablist" aria-label="View">
+        <button class="seg-btn active" data-view-btn="compose" role="tab">
+          <svg viewBox="0 0 16 16"><path d="M2.5 3.5h11M2.5 7h11M2.5 10.5h7"/></svg><span>Compose</span>
+        </button>
+        <button class="seg-btn" data-view-btn="compare" role="tab">
+          <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="5.5" height="11" rx="1.2"/><rect x="9" y="2.5" width="5.5" height="11" rx="1.2"/></svg><span>Compare</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="topbar-group topbar-right">
+      <button class="btn ghost" id="btn-guide" title="Answer a few questions and get a first draft (Ctrl+G)">
+        <svg viewBox="0 0 16 16"><path d="M9.4 1.8 10.6 4.6 13.4 5.8 10.6 7 9.4 9.8 8.2 7 5.4 5.8 8.2 4.6 9.4 1.8Z"/><path d="M4.2 9.2 4.9 10.9 6.6 11.6 4.9 12.3 4.2 14 3.5 12.3 1.8 11.6 3.5 10.9 4.2 9.2Z"/></svg>
+        <span>Guide me</span>
+      </button>
+      <button class="btn ghost" id="btn-reroll" title="Reroll every unlocked section (Ctrl+Shift+R)">
+        <svg viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><circle cx="5.8" cy="5.8" r="1" class="fill"/><circle cx="10.2" cy="10.2" r="1" class="fill"/><circle cx="10.2" cy="5.8" r="1" class="fill"/><circle cx="5.8" cy="10.2" r="1" class="fill"/></svg>
+        <span>Reroll</span>
+      </button>
+      <button class="btn ghost" id="btn-snapshot" title="Save this combination as a version (Ctrl+S)">
+        <svg viewBox="0 0 16 16"><path d="M3.5 2.5h7.2L13.5 5.3v8.2h-11z" /><path d="M5.5 2.5v4h5v-4M5.5 13.5v-4h5v4"/></svg>
+        <span>Save version</span>
+      </button>
+      <div class="sep"></div>
+      <button class="btn primary" id="btn-copy" title="Copy assembled message (Ctrl+Enter)">
+        <svg viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 5.5v-2a1.5 1.5 0 0 0-1.5-1.5H4a1.5 1.5 0 0 0-1.5 1.5V9A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
+        <span>Copy</span>
+      </button>
+      <div class="sep"></div>
+      <button class="ai-chip" id="btn-ai" title="Local writing model">
+        <span class="ai-dot"></span>
+        <svg viewBox="0 0 16 16"><path d="M8 1.6 9.5 5.4 13.3 6.9 9.5 8.4 8 12.2 6.5 8.4 2.7 6.9 6.5 5.4 8 1.6Z"/></svg>
+        <span class="ai-chip-text">AI off</span>
+      </button>
+      <button class="icon-btn" id="btn-theme" title="Toggle light / dark" aria-label="Toggle theme">
+        <svg class="ico-moon" viewBox="0 0 16 16"><path d="M13.4 9.6A5.8 5.8 0 0 1 6.4 2.6a5.9 5.9 0 1 0 7 7Z"/></svg>
+        <svg class="ico-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3.2"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3.05 3.05l1.15 1.15M11.8 11.8l1.15 1.15M3.05 12.95 4.2 11.8M11.8 4.2l1.15-1.15"/></svg>
+      </button>
+      <button class="icon-btn" id="btn-menu" title="More" aria-label="More actions">
+        <svg viewBox="0 0 16 16"><circle cx="3.2" cy="8" r="1.2" class="fill"/><circle cx="8" cy="8" r="1.2" class="fill"/><circle cx="12.8" cy="8" r="1.2" class="fill"/></svg>
+      </button>
+      <div class="dropdown" id="menu-dropdown" hidden>
+        <button data-act="lock-all"><span class="dd-ico">🔒</span>Lock all sections</button>
+        <button data-act="unlock-all"><span class="dd-ico">🔓</span>Unlock all sections</button>
+        <button data-act="proofread"><span class="dd-ico">✓</span>Check spelling now</button>
+        <div class="dd-sep"></div>
+        <button data-act="copy-rich"><span class="dd-ico">⧉</span>Copy with formatting</button>
+        <button data-act="export-txt"><span class="dd-ico">↓</span>Download as .txt</button>
+        <button data-act="export-md"><span class="dd-ico">↓</span>Download as .md</button>
+        <div class="dd-sep"></div>
+        <button data-act="shortcuts"><span class="dd-ico">⌘</span>Keyboard shortcuts</button>
+        <div class="dd-sep"></div>
+        <button data-act="reset" class="danger"><span class="dd-ico">⌫</span>Delete every message</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══ Workspace ════════════════════════════════════════════════ -->
+  <div class="workspace">
+
+    <!-- ── Sidebar ── -->
+    <aside class="sidebar" id="sidebar">
+      <div class="side-tabs">
+        <button class="side-tab active" data-tab="outline">Outline</button>
+        <button class="side-tab" data-tab="versions">Versions <span class="pill-count" id="ver-count">0</span></button>
+      </div>
+      <div class="side-body" id="tab-outline">
+        <div class="brief-card" id="brief-card" hidden></div>
+        <div class="outline-list" id="outline-list"></div>
+        <button class="side-add" id="btn-add-section-side">
+          <svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></svg> Add section
+        </button>
+      </div>
+      <div class="side-body" id="tab-versions" hidden>
+        <div class="version-list" id="version-list"></div>
+        <button class="side-add" id="btn-add-version-side">
+          <svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></svg> Save current as version
+        </button>
+      </div>
+      <div class="side-foot">
+        <div class="settled-row" id="settled-row" title="Locked sections are decisions you have already made">
+          <div class="settled-bar"><span id="settled-fill"></span></div>
+          <span class="settled-text" id="settled-text">0 of 0 settled</span>
+        </div>
+        <div class="combo-meter" id="combo-meter" title="Possible messages from the unlocked variations">
+          <span class="combo-num" id="combo-num">1</span>
+          <span class="combo-label">possible<br>messages</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── Compose view ── -->
+    <main class="view view-compose" id="view-compose">
+      <div class="composer" id="composer">
+        <div class="composer-inner">
+          <div class="sections" id="sections"></div>
+          <button class="add-section" id="btn-add-section">
+            <span class="add-ico"><svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></svg></span>
+            <span>Add a section</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="splitter" id="splitter" role="separator" aria-label="Resize preview"></div>
+
+      <section class="preview" id="preview">
+        <div class="panel-head">
+          <div class="panel-title">
+            <svg viewBox="0 0 16 16" class="ph-ico"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="1.9"/></svg>
+            <span>Live message</span>
+          </div>
+          <div class="panel-actions">
+            <button class="fix-chip" id="fix-chip" hidden title="Spelling and spacing fixes found while you were idle">
+              <svg viewBox="0 0 16 16"><path d="M3 8.5 6.5 12 13 4.5"/></svg>
+              <span id="fix-chip-text">0 fixes</span>
+            </button>
+            <button class="icon-btn sm" id="btn-recipient" title="Read it as the recipient will">
+              <svg viewBox="0 0 16 16"><rect x="1.5" y="3.5" width="13" height="9" rx="1.8"/><path d="m1.9 4.4 6.1 4.3 6.1-4.3"/></svg>
+            </button>
+            <div class="segmented tiny" id="font-switch" title="Preview typeface">
+              <button class="seg-btn active" data-font="sans">Aa</button>
+              <button class="seg-btn" data-font="serif">Aa</button>
+              <button class="seg-btn" data-font="mono">Aa</button>
+            </div>
+            <button class="icon-btn sm" id="btn-copy-2" title="Copy message">
+              <svg viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 5.5v-2a1.5 1.5 0 0 0-1.5-1.5H4a1.5 1.5 0 0 0-1.5 1.5V9A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="fix-panel" id="fix-panel" hidden>
+          <div class="fix-panel-head">
+            <span id="fix-panel-title">Suggested fixes</span>
+            <div class="fix-panel-acts">
+              <button class="mini-btn" id="fix-apply-all">Apply all</button>
+              <button class="mini-btn" id="fix-dismiss">Dismiss</button>
+            </div>
+          </div>
+          <div class="fix-list" id="fix-list"></div>
+          <label class="switch tiny-switch">
+            <input type="checkbox" id="chk-autofix">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">Apply these automatically from now on</span>
+          </label>
+        </div>
+
+        <div class="preview-body" id="preview-body" data-font="sans"></div>
+
+        <div class="signals-strip" id="signals-strip" hidden></div>
+
+        <div class="preview-foot">
+          <span id="stat-words">0 words</span>
+          <span class="dot">·</span>
+          <span id="stat-chars">0 characters</span>
+          <span class="dot">·</span>
+          <span id="stat-read">0s read</span>
+          <span class="foot-spacer"></span>
+          <button class="foot-toggle" id="btn-signals" title="Objective counts — no scores, no verdicts">Signals</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- ── Compare view ── -->
+    <main class="view view-compare" id="view-compare" hidden>
+      <div class="compare-bar">
+        <div class="compare-picker" id="compare-picker"></div>
+        <div class="compare-tools">
+          <label class="switch" title="Highlight what changed relative to the leftmost column">
+            <input type="checkbox" id="chk-diff" checked>
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">Highlight differences</span>
+          </label>
+          <label class="switch" title="Hide sections that are identical in every column">
+            <input type="checkbox" id="chk-only-diff">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">Only changed sections</span>
+          </label>
+          <label class="switch" title="Hide which column is which, so the names don't sway you">
+            <input type="checkbox" id="chk-blind">
+            <span class="switch-track"><span class="switch-thumb"></span></span>
+            <span class="switch-label">Blind</span>
+          </label>
+        </div>
+      </div>
+      <div class="compare-scroll" id="compare-scroll"></div>
+    </main>
+  </div>
+
+  <!-- ══ Status bar ══════════════════════════════════════════════ -->
+  <footer class="statusbar">
+    <span class="status-item" id="status-sections">0 sections</span>
+    <span class="status-item" id="status-locked">0 locked</span>
+    <span class="status-item" id="status-variants">0 variations</span>
+    <span class="status-spacer"></span>
+    <span class="status-item muted" id="status-ai" hidden></span>
+    <span class="status-item muted" id="status-saved">Saved locally</span>
+  </footer>
+
+  <div class="toast-stack" id="toasts"></div>
+  <input type="file" id="file-input" accept="application/json,.json" multiple hidden>
+
+  <!-- ══ Generic modal ══ -->
+  <div class="modal-scrim" id="modal-scrim" hidden>
+    <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <h2 id="modal-title">Dialog</h2>
+        <button class="icon-btn sm" id="modal-close" aria-label="Close">
+          <svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-foot" id="modal-foot" hidden></div>
+    </div>
+  </div>
+</div>
+
+<script src="ai.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

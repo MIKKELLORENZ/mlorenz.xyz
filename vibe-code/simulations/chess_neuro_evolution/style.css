@@ -91,22 +91,40 @@ body {
 
 #layout { display: flex; flex: 1; min-height: 0; }
 
+/* Column layout: caption, board row, legend, then the control dock. Everything
+   is in normal flow, so the controls can never sit on top of the board no
+   matter how short the window gets - the board row simply gives up height. */
 #viewport {
     flex: 1;
     position: relative;
     min-width: 0;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 14px;
-    padding: 20px;
+    gap: 10px;
+    padding: 16px 20px;
     background: radial-gradient(1200px 800px at 50% 38%, #172131 0%, #0a0f17 74%);
 }
 
+#board-row {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+}
+
+/* Sized in JS - a square that fits whatever the row has left. CSS cannot do
+   "square, bounded by both the remaining width and the remaining height"
+   without over-constraining aspect-ratio. */
 #board-wrap {
     position: relative;
-    width: min(78vh, 92%, 640px);
-    aspect-ratio: 1;
+    width: 480px;
+    height: 480px;
+    flex: 0 0 auto;
 }
 
 #board {
@@ -136,11 +154,11 @@ body {
     letter-spacing: 0.04em;
 }
 
-#board-side { display: flex; align-items: center; }
+#board-side { display: flex; align-items: center; flex: 0 0 auto; }
 
 #eval-bar-wrap {
     width: 14px;
-    height: min(78vh, 640px);
+    height: 480px; /* kept level with the board by sizeBoard() */
     border-radius: 7px;
     background: #1c2434;
     border: 1px solid var(--panel-border);
@@ -157,10 +175,7 @@ body {
 }
 
 #board-caption {
-    position: absolute;
-    top: 14px;
-    left: 50%;
-    transform: translateX(-50%);
+    flex: 0 0 auto;
     padding: 6px 18px;
     border-radius: 999px;
     background: rgba(14, 19, 31, 0.86);
@@ -177,26 +192,72 @@ body {
 #board-caption b, #caption-main b { color: var(--accent-2); }
 #caption-main { color: var(--text); font-weight: 600; }
 
-#play-controls {
-    position: absolute;
-    bottom: 14px;
-    left: 50%;
-    transform: translateX(-50%);
+/* The watch and play control docks. Both float over the bottom of the board
+   area, stacked in rows so they can carry a few selects without becoming a
+   pill three screens wide. */
+#play-controls, #watch-controls {
+    flex: 0 0 auto;
+    max-width: 100%;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-radius: 999px;
-    background: rgba(14, 19, 31, 0.86);
+    gap: 7px;
+    padding: 9px 14px;
+    border-radius: 16px;
+    background: rgba(14, 19, 31, 0.9);
     border: 1px solid var(--panel-border);
     backdrop-filter: blur(6px);
 }
 
-#play-controls.hidden { display: none; }
+#play-controls.hidden, #watch-controls.hidden { display: none; }
 
-#play-controls .btn { flex: 0 0 auto; padding: 6px 14px; }
+.ctl-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
 
-#play-status { font-size: 0.8rem; color: var(--text-dim); padding: 0 6px; white-space: nowrap; }
+#play-controls .btn, #watch-controls .btn { flex: 0 0 auto; padding: 6px 14px; }
+
+#play-status, #watch-status {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    padding: 0 4px;
+    text-align: center;
+    max-width: 60ch;
+}
+
+.pick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+
+.pick select {
+    font: inherit;
+    font-size: 0.78rem;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text);
+    background: #1c2434;
+    border: 1px solid var(--panel-border);
+    border-radius: 7px;
+    padding: 4px 7px;
+    max-width: 190px;
+    cursor: pointer;
+}
+
+.pick select:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+
+.check-row.inline { font-size: 0.72rem; }
+.check-row.inline input { width: 13px; height: 13px; }
 
 #panel {
     width: 320px;
@@ -403,6 +464,158 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .about b { color: var(--text); }
+
+.about h3 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--accent-2);
+    font-weight: 700;
+    margin-top: 16px;
+}
+
+.about code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.74rem;
+    background: rgba(146, 167, 199, 0.12);
+    border-radius: 3px;
+    padding: 1px 4px;
+    color: var(--text);
+}
+
+#heat-legend {
+    margin: 0;
+    text-align: center;
+    flex: 0 0 auto;
+}
+
+#heat-legend.hidden { display: none; }
+
+/* ---------------------------------------------------------- startup screen */
+#startup {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    overflow-y: auto;
+    background: radial-gradient(900px 600px at 50% 30%, #1a2434 0%, #070b12 78%);
+}
+
+#startup.hidden { display: none; }
+
+.startup-card {
+    width: min(660px, 100%);
+    padding: 30px 30px 24px;
+    border-radius: 18px;
+    background: rgba(16, 22, 34, 0.92);
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
+    text-align: center;
+}
+
+.startup-eyebrow {
+    display: block;
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--accent-2);
+    font-weight: 700;
+}
+
+.startup-card h2 {
+    margin: 8px 0 0;
+    font-size: 1.5rem;
+    letter-spacing: -0.01em;
+    color: var(--text);
+}
+
+.startup-sub {
+    margin: 10px auto 0;
+    max-width: 46ch;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: var(--text-dim);
+}
+
+.startup-choices {
+    display: flex;
+    gap: 12px;
+    margin-top: 22px;
+    text-align: left;
+}
+
+.startup-choice {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 16px 16px 17px;
+    border-radius: 13px;
+    border: 1px solid var(--panel-border);
+    background: rgba(146, 167, 199, 0.07);
+    color: var(--text-dim);
+    cursor: pointer;
+    font: inherit;
+    transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.startup-choice:hover:not(:disabled) {
+    background: rgba(154, 214, 255, 0.1);
+    border-color: rgba(154, 214, 255, 0.5);
+    transform: translateY(-2px);
+}
+
+.startup-choice:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+
+.startup-choice.primary {
+    background: rgba(255, 190, 107, 0.09);
+    border-color: rgba(255, 190, 107, 0.42);
+}
+
+.startup-choice.primary:hover:not(:disabled) {
+    background: rgba(255, 190, 107, 0.16);
+    border-color: rgba(255, 190, 107, 0.75);
+}
+
+.startup-choice:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.choice-title { font-size: 0.98rem; font-weight: 700; color: var(--text); }
+.choice-sub { font-size: 0.78rem; line-height: 1.5; }
+
+.startup-note {
+    margin: 16px 0 0;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    min-height: 1em;
+}
+
+@media (max-width: 620px) {
+    .startup-choices { flex-direction: column; }
+}
+
+#ladder-stats {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.ladder-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+}
+
+.ladder-row .dot { margin: 0; }
+.ladder-name { flex: 1; }
+.ladder-value { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
+.ladder-row.locked { opacity: 0.45; }
+.ladder-row.locked .ladder-value { font-weight: 400; }
 
 @media (max-width: 900px) {
     #app { overflow-y: auto; }

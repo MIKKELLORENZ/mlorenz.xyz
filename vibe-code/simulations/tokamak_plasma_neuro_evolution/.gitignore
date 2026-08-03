@@ -1,0 +1,9 @@
+# training/ is scratch space. imitate.js and train.js recreate it on demand and
+# fill it with logs, clones and intermediate checkpoints; none of it is worth
+# committing. The champion you actually ship is baked into default_brain.js,
+# which IS committed, and every Node tool here reads that file by default so a
+# fresh clone works with no training directory at all.
+training/
+# brains exported from the browser land in Downloads, but people move them here
+# to compare runs before picking one to bake
+tokamak_brain_gen*.json

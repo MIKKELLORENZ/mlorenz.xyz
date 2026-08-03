@@ -1,0 +1,226 @@
+<!doctype html>
+<!-- pose_preview.html — a contact sheet of candidate START POSES, drawn with the
+     real body, the real skin and the real spawn code.
+
+     Nothing here is a mock-up. Each frame is produced by building a World on
+     flat ground, calling walker.reset(world, 0, 0, yaw, pose) — the same call
+     the trainer makes — and photographing the result. So the drop-to-ground,
+     the joint-limit clamping and the skin are exactly what an episode would
+     start from. If a pose is not reachable, the sheet says so under the frame
+     rather than drawing a lie.
+
+     Open it, or shoot it headless:
+       chrome --headless --screenshot=sheet.png --window-size=1500,2400 pose_preview.html
+-->
+<meta charset="utf-8">
+<title>candidate start poses</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 22px 26px; background: #0f1319; color: #e6edf5;
+         font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; letter-spacing: .01em; }
+  .sub { color: #8ea0b5; margin: 0 0 20px; font-size: 13px; }
+  .sheet { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  figure { margin: 0; background: #161c25; border: 1px solid #232c38; border-radius: 10px;
+           overflow: hidden; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #232c38; }
+  .shot { position: relative; background: #0f1319; }
+  .shot img { display: block; width: 100%; height: auto; }
+  .tag { position: absolute; left: 8px; top: 7px; font-size: 11px; letter-spacing: .04em;
+         text-transform: uppercase; color: #9fb2c9; background: rgba(15,19,25,.72);
+         padding: 2px 7px; border-radius: 4px; }
+  figcaption { padding: 9px 12px 11px; }
+  .nm { font-weight: 600; font-size: 13.5px; }
+  .why { color: #93a4b8; font-size: 12.5px; margin-top: 2px; }
+  .meta { color: #6f8298; font-size: 11.5px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .clamp { color: #ffb454; font-size: 11.5px; margin-top: 4px; }
+  .ok { color: #5fd08a; }
+</style>
+
+<h1>Candidate start poses</h1>
+<p class="sub">Drawn by the simulation itself — real body, real skin, real
+<code>walker.reset()</code> spawn including the drop onto flat ground and the joint-limit clamp.</p>
+<div class="sheet" id="sheet"></div>
+
+<script src="three.min.js"></script>
+<script src="nn.js"></script>
+<script src="physics.js"></script>
+<script src="body.js"></script>
+<script src="terrain.js"></script>
+<script src="walker.js"></script>
+<script src="world.js"></script>
+<script src="skin.js"></script>
+<script src="render.js"></script>
+<script src="pose_candidates.js"></script>
+<script>
+"use strict";
+(function () {
+    const M = HUMANOID;
+
+    /* One offscreen canvas, one WebGL context, reused for every frame. A canvas
+     * per pose would be eight live contexts, and browsers start dropping the
+     * oldest at about sixteen. */
+    const cv = document.createElement("canvas");
+    cv.width = 900; cv.height = 640;
+    // Renderer.resize() reads clientWidth, which is 0 for a detached canvas, so
+    // the size is set on the GL renderer directly below.
+    const R = new Renderer(cv, M);
+    R.setTheme("dark");
+    R.renderer.setPixelRatio(2);
+    R.renderer.setSize(cv.width, cv.height, false);
+    R.camera.aspect = cv.width / cv.height;
+    R.camera.updateProjectionMatrix();
+
+    const net = new Net(NET_SIZES, mulberry32(1));
+    const world = new World(M, [net], {
+        stage: 1, missionSeed: 1, noise: false, noiseSeed: 1, terrainDifficulty: 0
+    });
+    const w = world.walkers[0];
+    R._updateTerrain(world.terrain, 0, 0, true);
+    R._ensureDolls(1);
+    if (R.comDot) R.comDot.visible = false;
+    for (const g of (R.wpPool || [])) g.visible = false;
+
+    const p = new Float64Array(3);
+    const com = new Float64Array(6);
+    const sheet = document.getElementById("sheet");
+
+    const comHeight = () => { w.mb.comState(com); return com[1] - world.terrain.height(com[0], com[2]); };
+
+    /* Bounding box of every contact point — used to frame the camera on the pose
+     * instead of on a fixed guess, and to report the footprint. */
+    function bbox() {
+        const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+        for (const ct of M.contacts) {
+            w.mb.worldPoint(ct.body, ct.p[0], ct.p[1], ct.p[2], p, 0);
+            for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); }
+        }
+        return { lo, hi };
+    }
+
+    /* What is actually on the floor. The spawn drops a pose until its LOWEST
+     * point lands and stops, so anything the pose meant to plant and did not is
+     * silently left in mid-air — a reverse tabletop hanging off its palms with
+     * both feet 19 cm up still looks exactly like a reverse tabletop. */
+    function planted() {
+        const best = Object.create(null);
+        for (const ct of M.contacts) {
+            w.mb.worldPoint(ct.body, ct.p[0], ct.p[1], ct.p[2], p, 0);
+            const h = p[1] - world.terrain.height(p[0], p[2]);
+            const g = ct.foot >= 0 ? (ct.foot === 0 ? "left foot" : "right foot")
+                    : M.bodies[ct.body].name.replace("Shank", "Knee")
+                        .replace(/^L/, "left ").replace(/^R/, "right ").toLowerCase();
+            if (best[g] === undefined || h < best[g]) best[g] = h;
+        }
+        return Object.entries(best).filter(([, h]) => h < 0.02).map(([g]) => g);
+    }
+
+    function shoot(c, box, yawOff) {
+        const { lo, hi } = box;
+        const mid = [0, 1, 2].map(k => (lo[k] + hi[k]) * 0.5);
+        const rad = Math.max(0.55, 0.5 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]));
+        R._applyPose(R.dolls[0], w.mb);
+        const yaw = (c.camYaw !== undefined ? c.camYaw : 2.35) + (yawOff || 0);
+        const pit = c.camPitch !== undefined ? c.camPitch : 0.22;
+        const dist = rad * 3.4;
+        const tgt = new THREE.Vector3(mid[0], mid[1] + rad * 0.15, mid[2]);
+        R.camera.position.set(
+            tgt.x + Math.cos(yaw) * Math.cos(pit) * dist,
+            tgt.y + Math.sin(pit) * dist,
+            tgt.z + Math.sin(yaw) * Math.cos(pit) * dist
+        );
+        R.camera.lookAt(tgt);
+        R.sun.position.set(tgt.x + 6, tgt.y + 11, tgt.z + 5);
+        R.sun.target.position.copy(tgt);
+        R.sun.target.updateMatrixWorld();
+        R.renderer.render(R.scene, R.camera);
+        return cv.toDataURL("image/png");
+    }
+
+    for (const c of POSE_CANDIDATES) {
+        const pose = c.pose;
+        w.reset(world, 0, 0, c.yaw || 0, pose);
+
+        /* Which joints the model refused. A pose the body cannot hold is not a
+         * pose — better to read it here than to wonder later why the render
+         * does not match the photograph. */
+        const clamped = [];
+        for (let j = 0; j < M.nj; j++) {
+            const want = pose.q[j], got = w.mb.q[j + 1];
+            if (Math.abs(want - got) > 1e-9)
+                clamped.push(`${M.jointNames[j]} ${want.toFixed(2)}→${got.toFixed(2)}`);
+        }
+
+        const box0 = bbox();
+        const comH0 = comHeight();
+        const pelv0 = Array.from(w.mb.bp);
+        /* Which way the chest points. mb.R is row-major per body, so the body's
+         * own +X axis in world coordinates is COLUMN 0, and its Y component is
+         * the cosine of the angle between the chest and the sky. Worth printing:
+         * "on its back" and "on its front" are the same silhouette from most
+         * camera angles, and it is the difference between a bridge and a crawl. */
+        const chestUp = w.mb.R[3];
+        const onFloor = planted();
+        // Two angles of the SAME spawn frame, 75 degrees apart. One view cannot
+        // settle a posture: on a doll with no face, lying on its back and lying
+        // on its front are the same silhouette from three quarters.
+        const shot0 = shoot(c, box0, 0);
+        const shot1 = shoot(c, box0, 1.3);
+
+        /* Is the pose in static equilibrium? The network is switched off and every
+         * servo commanded to the angle it woke up at, then half a second of the
+         * real physics runs. This is NOT what an episode looks like — a live
+         * network re-commands every 10 ms — but it answers a question that
+         * matters before that: can the body be in this shape without being held
+         * there? The servos are strong enough to carry 65 kg, so a pose they
+         * cannot hold does not sag gently, it sinks until the PD error saturates
+         * the torque and then throws the walker. Both warriors do exactly that,
+         * which is the honest reading of a one-foot balance, not a bug. */
+        for (let j = 0; j < M.nj; j++) w.cmd[j] = w.base[j] = w.mb.q[j + 1];
+        w.amp.fill(0); w.gaitGain = 0;
+        const HOLD = 0.5;
+        for (let t = 0; t < HOLD / DT; t++) w.stepPhysics(world, DT);
+        const comH1 = comHeight();
+        const pelv1 = Array.from(w.mb.bp);
+
+        /* Judge it on how far the PELVIS moved, not on the COM height. A walker
+         * toppling onto its back throws its legs in the air and its centre of
+         * mass goes UP, which the first version of this readout scored as
+         * "holds". Displacement cannot be gamed that way. */
+        const moved = Math.hypot(pelv1[0] - pelv0[0], pelv1[1] - pelv0[1], pelv1[2] - pelv0[2]) * 100;
+        const verdict = moved < 4 ? ["stands on its own", "ok"]
+                      : moved < 15 ? ["sags " + moved.toFixed(0) + " cm unheld", ""]
+                      : ["needs active balance — " + moved.toFixed(0) + " cm unheld", "clamp"];
+
+        const fig = document.createElement("figure");
+        const pair = document.createElement("div");
+        pair.className = "pair";
+        for (const [src, tag] of [[shot0, "spawn"], [shot1, "spawn, other side"]]) {
+            const d = document.createElement("div");
+            d.className = "shot";
+            const im = new Image(); im.src = src;
+            d.appendChild(im);
+            const t = document.createElement("div"); t.className = "tag"; t.textContent = tag;
+            d.appendChild(t);
+            pair.appendChild(d);
+        }
+        fig.appendChild(pair);
+        const cap = document.createElement("figcaption");
+        const { lo, hi } = box0;
+        cap.innerHTML =
+            `<div class="nm">${c.pose.name} — <span class="${verdict[1]}">${verdict[0]}</span></div>` +
+            `<div class="why">${c.why}</div>` +
+            `<div class="meta">COM ${(comH0 * 100).toFixed(0)} cm` +
+            ` (standing hip is ${(M.standHipY * 100).toFixed(0)} cm)` +
+            ` &middot; chest ${chestUp > 0.35 ? "UP" : chestUp < -0.35 ? "DOWN" : "level"}` +
+            ` &middot; footprint ${((hi[0] - lo[0]) * 100).toFixed(0)}×${((hi[2] - lo[2]) * 100).toFixed(0)} cm</div>` +
+            `<div class="meta">on the ground: ${onFloor.join(", ")}</div>` +
+            (clamped.length
+                ? `<div class="clamp">clamped: ${clamped.join(", ")}</div>`
+                : `<div class="meta ok">every joint inside its limits</div>`);
+        fig.appendChild(cap);
+        sheet.appendChild(fig);
+    }
+    document.title = "candidate start poses — ready";
+})();
+</script>

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Traffic Light Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Traffic Light Neuroevolution</h1>
+            <span class="brand-sub">one brain &middot; every junction &middot; no gradients</span>
+        </div>
+        <nav id="mode-tabs" aria-label="Mode selector">
+            <button class="mode-tab active" data-mode="train">Train</button>
+            <button class="mode-tab" data-mode="watch">Watch &amp; compare</button>
+        </nav>
+    </header>
+
+    <main id="layout">
+        <div id="viewport">
+            <div id="caption">
+                <span id="caption-main">Generation 1</span>
+                <span id="caption-sub">building the city&hellip;</span>
+            </div>
+            <div id="canvas-wrap">
+                <canvas id="city"></canvas>
+                <div id="canvas-overlay" class="hidden">
+                    <div id="overlay-text">Training with the picture switched off &mdash; untick <i>run headless</i> to watch again</div>
+                </div>
+                <div id="live-strip">
+                    <span class="live"><b id="live-clock">0s</b><i>clock</i></span>
+                    <span class="live"><b id="live-cars">0 / 0</b><i>cars arrived</i></span>
+                    <span class="live"><b id="live-peds">0 / 0</b><i>people arrived</i></span>
+                    <span class="live"><b id="live-delay">0s</b><i>delay each</i></span>
+                    <span class="live danger"><b id="live-crash">0</b><i>collisions</i></span>
+                    <span class="live danger"><b id="live-hit">0</b><i>people struck</i></span>
+                </div>
+            </div>
+            <p class="legend">
+                <i class="dot dot-green"></i>green <i class="dot dot-amber"></i>amber
+                <i class="dot dot-red"></i>red <i class="dot dot-blue"></i>vehicle
+                <i class="dot dot-mint"></i>pedestrian <i class="dot dot-pink"></i>collision <i class="dot dot-slate"></i>ring road
+                <span class="hint" id="map-hint">click a junction to inspect it &middot; scroll to zoom &middot; drag to pan</span>
+            </p>
+
+            <div id="watch-controls" class="hidden">
+                <div class="ctl-row">
+                    <label class="pick"><span>Controller</span><select id="watch-brain"></select></label>
+                    <label class="pick"><span>Compare with</span><select id="watch-rival"></select></label>
+                    <label class="pick"><span>City</span><select id="watch-tier"></select></label>
+                    <label class="pick speed" title="How fast the world runs. Below 1&times; it runs slower than real time, which is the only way to watch a single junction change phase.">
+                        <span>Playback speed <b id="lab-pace">2&times;</b></span>
+                        <input type="range" id="sl-pace" min="0" max="8" value="5" step="1">
+                        <span class="speed-marks"><i>slow</i><i>real time</i><i>fast</i></span>
+                    </label>
+                </div>
+                <div class="ctl-row">
+                    <button id="btn-watch-run" class="btn primary">New run</button>
+                    <button id="btn-watch-pause" class="btn">Pause</button>
+                    <button id="btn-watch-slow" class="btn tiny" title="Jump straight to quarter speed (or back to 2&times;)">Slow motion</button>
+                    <button id="btn-watch-step" class="btn tiny" title="While paused, advance one second of simulated time">Step 1s</button>
+                    <span id="watch-status"></span>
+                    <span class="hint" style="margin-left:auto">space pauses &middot; [ and ] change speed</span>
+                </div>
+                <div id="race">
+                    <div class="race-row"><span class="race-name" id="race-a-name">Champion</span>
+                        <div class="race-bar"><div id="race-a-fill"></div></div>
+                        <span class="race-val" id="race-a-val">0</span></div>
+                    <div class="race-row"><span class="race-name" id="race-b-name">Actuated</span>
+                        <div class="race-bar rival"><div id="race-b-fill"></div></div>
+                        <span class="race-val" id="race-b-val">0</span></div>
+                    <p class="note" id="race-note">Both controllers are driving the same city, the same trips and the same drivers &mdash; only the signals differ.</p>
+                </div>
+            </div>
+        </div>
+
+        <aside id="panel">
+            <section class="card status-card">
+                <h2>Run status</h2>
+                <div class="stats-grid">
+                    <div class="stat"><span class="stat-label">Generation</span><span class="stat-value" id="stat-gen">1</span></div>
+                    <div class="stat"><span class="stat-label">City tier</span><span class="stat-value" id="stat-tier">1 / 8</span></div>
+                    <div class="stat"><span class="stat-label">Scoring</span><span class="stat-value" id="stat-progress">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">Junctions</span><span class="stat-value" id="stat-lights">1</span></div>
+                    <div class="stat"><span class="stat-label">Best score</span><span class="stat-value" id="stat-best">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">vs actuated</span><span class="stat-value" id="stat-vs">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">Arrivals</span><span class="stat-value" id="stat-thr">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">Delay each</span><span class="stat-value" id="stat-delay">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">Collisions</span><span class="stat-value" id="stat-crash">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">Stagnation</span><span class="stat-value" id="stat-stag">0</span></div>
+                    <div class="stat"><span class="stat-label">Diversity</span><span class="stat-value" id="stat-div">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">Speed</span><span class="stat-value" id="stat-rate">&ndash;</span></div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Is it learning? <span class="hint">score vs the controllers a real city installs</span></h2>
+                <canvas id="chart-bench" width="290" height="128"></canvas>
+                <p class="legend small">
+                    <i class="dot dot-orange"></i>best genome <i class="dot dot-blue"></i>population median
+                    <i class="dot dot-mint"></i>actuated <i class="dot dot-gray"></i>fixed-time <i class="dot dot-dim"></i>random
+                </p>
+                <p class="note">The three grey lines are re-measured every generation on the <b>same city and the same trips</b> the population just drove. Beating fixed-time is easy. Beating a properly tuned vehicle-actuated controller is the whole job.</p>
+            </section>
+
+            <section class="card">
+                <h2>Arrivals and safety <span class="hint">best genome, per generation</span></h2>
+                <canvas id="chart-thr" width="290" height="96"></canvas>
+                <p class="legend small"><i class="dot dot-mint"></i>share of trips completed <i class="dot dot-pink"></i>collisions</p>
+            </section>
+
+            <section class="card">
+                <h2>Junction inspector <span class="hint" id="insp-which">click a junction</span></h2>
+                <div id="insp-body">
+                    <p class="note">Nothing selected. Click any junction on the map to see what its controller can see and what it decided.</p>
+                </div>
+            </section>
+
+            <section class="card controls">
+                <h2>Training</h2>
+                <div class="row">
+                    <button id="btn-pause" class="btn primary">Pause</button>
+                    <button id="btn-reset" class="btn danger">Reset run</button>
+                </div>
+                <label class="slider-row">
+                    <span>Compute per frame <b id="lab-budget">12 ms</b></span>
+                    <input type="range" id="sl-budget" min="4" max="60" value="12" step="2">
+                </label>
+                <label class="slider-row">
+                    <span>Population <b id="lab-pop">36</b> <i class="hint">next reset</i></span>
+                    <input type="range" id="sl-pop" min="12" max="72" value="36" step="4">
+                </label>
+                <label class="slider-row">
+                    <span>Episode length <b id="lab-eplen">240 s</b> <i class="hint">next reset</i></span>
+                    <input type="range" id="sl-eplen" min="120" max="400" value="240" step="20">
+                </label>
+                <label class="slider-row">
+                    <span>Traffic volume <b id="lab-demand">100%</b></span>
+                    <input type="range" id="sl-demand" min="40" max="180" value="100" step="10">
+                </label>
+                <label class="slider-row">
+                    <span>Mutation size <b id="lab-sigma">0.26</b></span>
+                    <input type="range" id="sl-sigma" min="5" max="80" value="26" step="1">
+                </label>
+                <label class="slider-row">
+                    <span>Genes per mutation <b id="lab-K">60</b></span>
+                    <input type="range" id="sl-K" min="1" max="400" value="60" step="1">
+                </label>
+                <label class="pick block"><span>City tier</span><select id="sel-tier"></select></label>
+                <label class="check-row" title="Stay on the chosen tier instead of letting the curriculum advance.">
+                    <input type="checkbox" id="chk-lock"><span>Lock the city tier</span>
+                </label>
+                <label class="check-row" title="Skip all drawing and give every millisecond to the simulation.">
+                    <input type="checkbox" id="chk-headless"><span>Run headless (much faster)</span>
+                </label>
+                <label class="check-row" title="Draw the reach of each approach's vehicle detectors.">
+                    <input type="checkbox" id="chk-det"><span>Show detector loops</span>
+                </label>
+                <label class="slider-row">
+                    <span>Run seed <b id="lab-seed"></b></span>
+                    <input type="text" id="inp-seed" placeholder="blank = random" style="width:100%">
+                </label>
+            </section>
+
+            <section class="card champion-card">
+                <h2>Champion</h2>
+                <p id="champion-note" class="note">No champion yet &mdash; train at least one generation.</p>
+                <div class="row">
+                    <button id="btn-save" class="btn">Save to browser</button>
+                    <button id="btn-load" class="btn">Load saved</button>
+                    <button id="btn-export" class="btn">Export JSON</button>
+                </div>
+            </section>
+
+            <details class="card about">
+                <summary>How it works</summary>
+
+                <p>Every genome here is the complete set of <b>weights and biases of one traffic-signal controller</b> &mdash; 8&thinsp;114 numbers, never touched by a gradient. The only things that change them are crossover and Gaussian mutation, and the only thing that decides which ones get copied is <b>how many people got where they were going</b>.</p>
+
+                <h3>One brain runs the whole city</h3>
+                <p>The genome is not one junction's timing plan. It is a single controller applied at <i>every</i> junction, the way a convolution applies one filter to every pixel &mdash; so the weights get feedback from all four arms of every light on every decision, and a brain evolved on a three-by-three grid can be dropped straight onto a five-by-five one it has never seen. Each light takes one decision per simulated second.</p>
+
+                <h3>What a light can see</h3>
+                <p>Its own position and which way it is currently running. Its own detectors: how many vehicles are queued on each of its four arms, how far away the nearest one is, how many have gone through lately, how many people are waiting at each crossing, how many are <i>in</i> a crossing right now and how long they still need, and whether the road it would release traffic onto is already full.</p>
+                <p>Then the network. Every light is on the same wire, so it also sees what its four road-connected neighbours are showing <b>now and at twelve points in the last thirty seconds</b> &mdash; 1, 2, 3, 4, 5, 10, 13, 15, 18, 20, 25 and 30 seconds ago &mdash; along with their identity, their distance, and how much traffic they are currently sending down the street towards it. Four more distant lights are visible at lower resolution, and a network-wide summary (what fraction of the city is running north-south, east-west, or all-pedestrian) carries the same thirty-second history. Thirty seconds is roughly how long it takes a platoon to travel one block, which is exactly the information a green wave needs.</p>
+                <p>Finally, each light gets a <b>picture of the city</b>: a 64&times;64 black-and-white road map, pooled to 16&times;16 for the whole plan plus a 24&times;24 crop centred on itself. Both go through small evolved convolutions. They are the same every second of an episode, so they are encoded once and cost nothing thereafter.</p>
+
+                <h3>What it decides</h3>
+                <p>Four choices &mdash; hold, run north-south, run east-west, or stop everything and let people cross &mdash; plus two continuous numbers: <b>how long the amber should be, and how long the all-red after it</b>. Minimum green, maximum green and the clearance limits are hardware, and the brain cannot violate them. Everything inside that envelope is its problem.</p>
+
+                <h3>Where the accidents come from</h3>
+                <p>Nothing about a crash is scripted. Drivers here follow the Intelligent Driver Model, take the shortest route, and obey the law. What the law says is that you stop for an amber <i>unless you cannot do so safely</i> &mdash; so an amber that is too short leaves cars in the <b>dilemma zone</b>, and they go through. If the all-red after it is also too short, the next phase is released while they are still in the box, and the two paths cross. A left-turner waiting in the middle of the junction has to be out before the cross street moves. Somebody halfway across a crossing when the traffic is released has to be given time. Every one of those is a real failure mode of a real signal, and every one of them is a consequence of a number this network chose. Long clearances are safe and throw away several seconds of capacity per cycle, per junction. There is no setting that is good at both.</p>
+
+                <h3>How it is scored</h3>
+                <p>Completed journeys are the point: <b>+100</b> per vehicle and <b>+70</b> per pedestrian that reaches its destination. Against that: <b>0.55 per second</b> of delay for every traveller, measured against the time the same trip would have taken with every light green &mdash; including the people still stuck in traffic when the episode ends, so a controller cannot score by never letting anyone finish. A collision costs <b>1&thinsp;400</b>, about fourteen completed journeys, and leaves two wrecked vehicles blocking the junction for twenty-five seconds. Striking a pedestrian costs <b>4&thinsp;200</b>.</p>
+
+                <h3>Common random numbers</h3>
+                <p>Within a generation every genome gets the <b>same city, the same schedule of trips, and the same drivers</b>. Without that, a two-episode score measures the luck of the draw as much as the controller &mdash; it was the single biggest improvement in the chess sim on this site, and it is why the baseline lines on the chart mean something: those three controllers drove the identical traffic, this generation, on this map.</p>
+
+                <h3>The streets are not a grid of straight lines</h3>
+                <p>Junction boxes stay square &mdash; the phases, the crossings and the stop lines all depend on that &mdash; but the junctions themselves are nudged off the lattice and every street is a curve that leaves each junction along its arm and <b>bends across the middle</b>. A bend has to be driven slower than a straight, because nobody pulls more than about 3&nbsp;m/s&sup2; sideways, so a winding street genuinely costs capacity.</p>
+                <p>Layouts also carry <b>roundabouts</b> &mdash; junctions with no signals at all, where everything gives way to whatever is already circulating and a car may only join if nothing coming round will reach the give-way line within about three seconds. The controller cannot touch those, so it has to cope with a neighbour it is unable to command. They are quick for vehicles (a quarter of the island beats waiting out a red) and hard on pedestrians, whose crossing there is much longer than at a signal. There are <b>one-way pairs</b>, streets that are simply missing so a four-way becomes a T, and on one tier a <b>ring road</b> at 80&nbsp;km/h looping the whole city and joining it at every perimeter stub. Because routes are chosen by travel <i>time</i>, the ring changes what the shortest path even is: crossing town can be quicker the long way round.</p>
+                <p>Every generated city is <b>closed-looped</b>: no internal street is the only way in or out of anywhere, so nothing is a dead end and every block can be driven around. A street that would break that when removed is put back.</p>
+
+                <h3>The curriculum</h3>
+                <p>Eight cities, each harder than the last: one crossroads, then two-by-two, then nine blocks with an arterial, then winding streets with heavy foot traffic, roundabouts and a rush-hour surge, missing streets and one-way pairs, a ring road, and finally a five-by-five downtown with all of it at once where vehicles break down mid-episode and block a street. A tier unlocks when the population <b>median</b> matches the vehicle-actuated controller for three generations running &mdash; not when one lucky genome does. Three different street layouts are rotated within each tier so nothing can be memorised.</p>
+
+                <h3>What it is not</h3>
+                <p>This is a microsimulation, not a digital twin. Approaches have one lane, so there is no left-turn pocket and a car waiting to turn left really does hold up everyone behind it &mdash; which is why the trip table is through-dominated, as real urban grids are. Vehicles do not change route when they hit a queue, so the ring road is chosen on free-flow times rather than because it happens to be clear. Nobody jumps a red on purpose, nobody blocks the box on purpose, and there is no weather, no bus, and no cyclist.</p>
+            </details>
+        </aside>
+    </main>
+</div>
+
+<script src="rng.js"></script>
+<script src="city.js"></script>
+<script src="nn.js"></script>
+<script src="signals.js"></script>
+<script src="traffic.js"></script>
+<script src="evolution.js"></script>
+<script src="render.js"></script>
+<script src="default_brain.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

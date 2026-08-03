@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Power Grid Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+    <div id="start-modal">
+        <div class="start-card">
+            <h1 class="start-title">Keeping the Lights On</h1>
+            <p class="start-lede">An AI teaches itself to run an electricity grid.</p>
+
+            <p class="start-why">Electricity isn&rsquo;t stored &mdash; it&rsquo;s made the moment you use it. Overload a power line and it switches off, dumping its load onto the others, which overload too. That cascade is a blackout, and stopping it is the job.</p>
+
+            <div class="start-grid">
+                <button class="start-opt" data-mode="watch">
+                    <span class="start-badge">Start here</span>
+                    <b>Watch the trained AI</b>
+                    <span class="start-desc">One day on the grid, racing a normal control-room program.</span>
+                </button>
+                <button class="start-opt" data-mode="train">
+                    <span class="start-badge alt">The slow way</span>
+                    <b>Train your own</b>
+                    <span class="start-desc">Start from random operators and watch evolution work. Slow.</span>
+                </button>
+            </div>
+            <p class="start-foot">Everything else is explained as you go.</p>
+        </div>
+    </div>
+
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Keeping the Lights On</h1>
+            <span class="brand-sub">an AI learns to run a power grid</span>
+        </div>
+        <nav id="mode-tabs" aria-label="Mode selector">
+            <button class="mode-tab" data-mode="watch">Watch the trained AI</button>
+            <button class="mode-tab" data-mode="train">Train one yourself</button>
+        </nav>
+    </header>
+
+    <main id="layout">
+        <div id="viewport">
+            <div id="caption">
+                <span id="caption-main">Generation 1</span>
+                <span id="caption-sub">building the network&hellip;</span>
+            </div>
+            <div id="canvas-wrap">
+                <canvas id="grid"></canvas>
+                <div id="canvas-overlay" class="hidden">
+                    <div id="overlay-text">Picture switched off so it trains faster &mdash; untick <i>hide the picture</i> to watch again</div>
+                </div>
+                <div id="live-strip">
+                    <span class="live"><b id="live-clock">00:00</b><i>time of day</i></span>
+                    <span class="live"><b id="live-demand">0 MW</b><i>power being used</i></span>
+                    <span class="live"><b id="live-renew">0%</b><i>from wind &amp; sun</i></span>
+                    <span class="live"><b id="live-load">0%</b><i>busiest line</i></span>
+                    <span class="live"><b id="live-n1">0%</b><i>if one line failed</i></span>
+                    <span class="live danger"><b id="live-unserved">0 MW</b><i>blacked out</i></span>
+                    <span class="live"><b id="live-margin">&euro;0</b><i>money made today</i></span>
+                </div>
+                <div id="event-log"></div>
+                <div id="race" class="hidden">
+                    <p class="race-cap">Money made today &mdash; longer is better</p>
+                    <div class="race-row"><span class="race-name" id="race-a-name">Champion</span>
+                        <div class="race-bar"><div id="race-a-fill"></div></div>
+                        <span class="race-val" id="race-a-val">0</span></div>
+                    <div class="race-row"><span class="race-name" id="race-b-name">Redispatch</span>
+                        <div class="race-bar rival"><div id="race-b-fill"></div></div>
+                        <span class="race-val" id="race-b-val">0</span></div>
+                </div>
+                <div id="winner-banner" class="hidden">
+                    <div class="wb-title" id="wb-title">&nbsp;</div>
+                    <div class="wb-sub" id="wb-sub">&nbsp;</div>
+                    <button class="btn primary wb-btn" id="wb-again">Try another day</button>
+                </div>
+            </div>
+            <p class="legend">
+                <b>How full each power line is:</b>
+                <i class="dot dot-ok"></i>plenty of room <i class="dot dot-warn"></i>getting busy
+                <i class="dot dot-hot"></i>nearly full <i class="dot dot-over"></i>over its limit, heating up
+                <i class="dot dot-out"></i>switched off <i class="dot dot-n1"></i>the line that would suffer most if another one failed
+                <span class="hint">click a substation to look inside it &middot; scroll to zoom &middot; drag to move</span>
+            </p>
+
+            <div id="watch-controls" class="hidden">
+                <div class="ctl-row">
+                    <button id="btn-watch-run" class="btn primary">Try another day</button>
+                    <button id="btn-watch-pause" class="btn">Pause</button>
+                </div>
+                <p class="race-note">Two operators, the same grid, the same weather, the same faults at the same minute &mdash; the <b>only</b> difference is what they decide to do.</p>
+                <div id="watch-status"></div>
+                <div class="ctl-row">
+                    <label class="pick"><span>Who is running the grid</span><select id="watch-brain"></select></label>
+                    <label class="pick"><span>Racing against</span><select id="watch-rival"></select></label>
+                    <label class="pick"><span>Which grid</span><select id="watch-tier"></select></label>
+                    <label class="pick"><span>Speed</span><select id="watch-pace">
+                        <option value="2">slow</option>
+                        <option value="6" selected>normal</option>
+                        <option value="18">fast</option>
+                        <option value="60">very fast</option>
+                    </select></label>
+                </div>
+            </div>
+        </div>
+
+        <aside id="panel">
+            <section class="card watch-card" data-only="watch">
+                <h2>What am I looking at?</h2>
+                <p class="note">A map of an electricity network. <b>Dots</b> are substations, <b>lines</b> are power lines, and the colour is how full each line is. Red means it is over its limit and heating up.</p>
+                <p class="note">One whole day runs in five-minute steps. Two operators, the same weather, the same faults &mdash; only their decisions differ. Whoever ends the day with more money won.</p>
+                <p class="note">Most days are quiet and the AI loses a little by fidgeting. Then one day is not quiet, and it is worth millions. Press <b>Try another day</b> a few times.</p>
+            </section>
+
+            <section class="card status-card" data-only="train">
+                <h2>How the training run is going</h2>
+                <div class="stats-grid">
+                    <div class="stat"><span class="stat-label">Generation</span><span class="stat-value" id="stat-gen">1</span></div>
+                    <div class="stat"><span class="stat-label">Grid</span><span class="stat-value" id="stat-tier">1 / 6</span></div>
+                    <div class="stat"><span class="stat-label">Testing now</span><span class="stat-value" id="stat-progress">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">Substations</span><span class="stat-value" id="stat-buses">6</span></div>
+                    <div class="stat"><span class="stat-label">Best money made</span><span class="stat-value" id="stat-best">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">vs the best normal program</span><span class="stat-value" id="stat-vs">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">Power delivered</span><span class="stat-value" id="stat-served">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">Lines that cut out</span><span class="stat-value" id="stat-trips">&ndash;</span></div>
+                    <div class="stat"><span class="stat-label">Generations with no progress</span><span class="stat-value" id="stat-stag">0</span></div>
+                    <div class="stat"><span class="stat-label">How different they are</span><span class="stat-value" id="stat-div">&ndash;</span></div>
+                </div>
+            </section>
+
+            <section class="card" data-only="train">
+                <h2>Is it learning? <span class="hint">money made, against the normal programs</span></h2>
+                <canvas id="chart-bench" width="290" height="128"></canvas>
+                <p class="legend small">
+                    <i class="dot dot-orange"></i>best operator <i class="dot dot-blue"></i>the middling one
+                    <i class="dot dot-mint"></i>rewire as well <i class="dot dot-gray"></i>turn stations up/down <i class="dot dot-dim"></i>do nothing
+                </p>
+                <p class="note">The three pale lines are ordinary programs, re-run every generation on the <b>exact same day</b> the evolved ones just did &mdash; so this chart answers &ldquo;is it any good?&rdquo;, not just &ldquo;is it better than it was?&rdquo;. Beating <i>do nothing</i> is harder than it sounds: on a calm day doing nothing is the perfect answer, and anything else just wastes money. The line that really matters is the mint one, which is roughly what a real control room runs.</p>
+            </section>
+
+            <section class="card" data-only="train">
+                <h2>Safety, which nobody is paid for <span class="hint">measured, never rewarded</span></h2>
+                <canvas id="chart-viol" width="290" height="104"></canvas>
+                <p class="legend small"><i class="dot dot-mint"></i>time spent safe if any one line failed <i class="dot dot-pink"></i>time spent with a line over its limit</p>
+                <p class="note">Real grid operators obsess over one rule: <b>the grid must survive losing any single power line, at any moment.</b> Engineers call it N-1. Here that is deliberately <i>not</i> rewarded &mdash; these operators are paid only for delivering electricity cheaply without breaking anything. The mint line is the experiment: if an operator that was never paid to be safe turned out safe anyway, that would tell you something real. It did not. It learned to survive the trouble that actually happens, not to stand ready for trouble that might.</p>
+            </section>
+
+            <section class="card" data-only="both">
+                <h2>Look inside a substation <span class="hint" id="insp-which">click one on the map</span></h2>
+                <div id="insp-body">
+                    <p class="note">Nothing picked yet. Click any dot on the map to see the power lines meeting there, any power stations plugged in, and what the operator has been doing about them.</p>
+                </div>
+            </section>
+
+            <section class="card controls" data-only="train">
+                <h2>Dials you can turn</h2>
+                <div class="row">
+                    <button id="btn-pause" class="btn primary">Pause</button>
+                    <button id="btn-reset" class="btn danger">Start over</button>
+                </div>
+                <label class="slider-row">
+                    <span>How hard your computer works <b id="lab-budget">14 ms</b></span>
+                    <input type="range" id="sl-budget" min="4" max="60" value="14" step="2">
+                </label>
+                <label class="slider-row">
+                    <span>How many operators compete <b id="lab-pop">32</b> <i class="hint">applies on restart</i></span>
+                    <input type="range" id="sl-pop" min="12" max="64" value="32" step="4">
+                </label>
+                <label class="slider-row">
+                    <span>How long each test day is <b id="lab-eplen">100%</b> <i class="hint">applies on restart</i></span>
+                    <input type="range" id="sl-eplen" min="40" max="150" value="100" step="10">
+                </label>
+                <label class="slider-row">
+                    <span>How big the random changes are <b id="lab-sigma">0.24</b></span>
+                    <input type="range" id="sl-sigma" min="5" max="80" value="24" step="1">
+                </label>
+                <label class="slider-row">
+                    <span>How many numbers change at once <b id="lab-K">60</b></span>
+                    <input type="range" id="sl-K" min="1" max="400" value="60" step="1">
+                </label>
+                <label class="pick block"><span>Which grid to practise on</span><select id="sel-tier"></select></label>
+                <label class="check-row" title="Stay on the chosen network instead of letting the curriculum advance.">
+                    <input type="checkbox" id="chk-lock"><span>Stay on this grid, do not move up</span>
+                </label>
+                <label class="check-row" title="Charge a risk premium for N-1 insecurity as well as for real overloads. Off by default: with it on, the N-1 metric stops being an independent measure.">
+                    <input type="checkbox" id="chk-n1"><span>Also pay them to be safe (a different experiment)</span>
+                </label>
+                <label class="check-row" title="Skip all drawing and give every millisecond to the simulation.">
+                    <input type="checkbox" id="chk-headless"><span>Hide the picture &mdash; trains much faster</span>
+                </label>
+                <label class="check-row" title="Draw the arc from the outage that would hurt most to the line it would overload.">
+                    <input type="checkbox" id="chk-n1arc" checked><span>Show which line would suffer if one failed</span>
+                </label>
+                <label class="slider-row">
+                    <span>Random seed <b id="lab-seed"></b> <i class="hint">same seed, same run</i></span>
+                    <input type="text" id="inp-seed" placeholder="blank = random" style="width:100%">
+                </label>
+            </section>
+
+            <section class="card champion-card" data-only="train">
+                <h2>Best operator so far</h2>
+                <p id="champion-note" class="note">Nothing yet &mdash; let it run for at least one generation. Whatever it finds you can save here, and then watch it race in the other mode.</p>
+                <div class="row">
+                    <button id="btn-save" class="btn">Save it</button>
+                    <button id="btn-load" class="btn">Load a saved one</button>
+                    <button id="btn-export" class="btn">Download as a file</button>
+                </div>
+            </section>
+
+            <details class="card about" data-only="both">
+                <summary>How all of this works &mdash; the long version</summary>
+
+                <h3>Why a power grid is hard to run</h3>
+                <p>Electricity is not stored in the wires. Whatever the country is using right this second is being made right this second, somewhere, and travelling to you down metal cables. Nobody chooses which cable it takes &mdash; physics does, and it splits the flow across every possible route according to how easy each one is.</p>
+                <p>That is the trap. <b>You cannot steer electricity directly.</b> If a line is carrying too much, you cannot just tell the electricity to go somewhere else. You have to change something else about the system until the physics decides differently.</p>
+                <p>And you have to, because a line carrying more than it was built for gets hot, sags, and eventually a protective switch cuts it out to save it. The instant that happens, every amp that was using it reappears on the neighbouring lines. If they were already busy, they overload too, and cut out, and so on. A grid can unravel in minutes. Real ones have: the north-east of America in 2003, most of Italy the same year, half of Europe wobbling in 2006.</p>
+
+                <h3>The two levers</h3>
+                <p><b>Turn power stations up and down.</b> If a line running south is too full, make less power in the north and more in the south, and less has to travel. Real, reliable &mdash; and expensive, because the cheap station was already running and the one you are turning up is dearer. That is why it is a lever and not a free lunch.</p>
+                <p><b>Rewire.</b> Switch a line out on purpose, or split a substation so that what was one junction becomes two. The flow re-routes. Free &mdash; and genuinely dangerous, because you have just removed a road from the map and the traffic has to go somewhere. Real operators do it, carefully, one move at a time, checking each one first. So does this simulation: one switching move per five minutes, maximum.</p>
+
+                <h3>What the AI actually is</h3>
+                <p>6&thinsp;756 numbers. That is the whole operator. Feed in what is happening on the grid, multiply and add through those numbers, and out comes a decision. There is no code in there saying &ldquo;if a line is over 100%, do X&rdquo; &mdash; just arithmetic that happens to produce sensible behaviour once the numbers are right.</p>
+                <p>Getting them right is the trick, and it is not done by teaching. It is done by <b>breeding</b>. Make a few dozen operators with random numbers. Give them all the same day to run. Score them. Throw away the worst, keep the best, make children by mixing two parents and nudging some numbers at random, and run the whole thing again tomorrow. Repeat a few hundred times. Nothing is ever explained to them; the ones that happen to be less bad simply have more descendants. This is a <b>genetic algorithm</b>, and it is the same idea as actual evolution, run at a few generations per minute.</p>
+
+                <h3>The clever bit: one brain, any grid</h3>
+                <p>An obvious design would give the AI one input per power line. But then a brain grown on a fourteen-substation grid is meaningless on a thirty-substation one, and everything it learned about line 7 tells it nothing about line 8. It would be memorising, not understanding.</p>
+                <p>So instead the same small set of numbers is applied to <b>every</b> line, and again to <b>every</b> substation, and each one passes a short message to its neighbours &mdash; twice, so news travels two junctions before anyone decides anything. It is the same idea as how you recognise a face in any photo without needing separate eye-detectors for every position.</p>
+                <p>The payoff: a brain bred on the 14-substation grid runs, unchanged, on a 30-substation grid it has never seen. That is the only honest way to ask whether it learned <i>electricity</i> or just learned <i>this grid</i>.</p>
+
+                <h3>What it can see</h3>
+                <p>For each substation: voltage, how much power is being used and made there, how much spare capacity the local stations have. For each line: how full it is, how hot it has got, whether losing it would cut part of the grid off entirely. Overall: the time, the spare capacity in the whole system, a weather forecast half an hour ahead, and how bad things would get if any single line failed right now.</p>
+                <p>Plus two numbers a real control room has on a screen: for the most stressed line, <i>how much would turning each power station up help?</i>, and <i>what would switching each line off do?</i> The ordinary programs it races against read exactly the same two numbers. The AI gets no secret information.</p>
+
+                <h3>The weather is invented, not recorded</h3>
+                <p>No real data is used anywhere. The <b>sunshine</b> is worked out from actual orbital geometry &mdash; where the Earth is in its year, how high the sun sits, how much atmosphere the light has to cross &mdash; and then multiplied by a randomly generated cloudiness that drifts over about an hour, so clouds pass instead of flickering. The <b>wind</b> is random but with the statistics real wind has, fed through a real turbine&rsquo;s power curve: nothing below a light breeze, full output in a good blow, and a hard cut-off in a gale, because turbines shut down to protect themselves &mdash; the whole farm at once. <b>Demand</b> is a daily rhythm (low at 4am, peak in the evening) times a weekly one, plus random drift and the occasional sudden jump.</p>
+                <p>Everything comes from one seed number, which means the same day can be replayed exactly. That is what makes the race fair: every operator faces the identical weather and the identical faults at the identical minute.</p>
+
+                <h3>How the physics is calculated</h3>
+                <p>Every five simulated minutes the program solves the real equations for how power flows through a network &mdash; the same maths, in the same form, that actual grid engineers use. It is a system of non-linear equations with no direct solution, so it is solved by repeated guessing and correcting until it settles, several times per step. There is a fast approximate method for testing &ldquo;what if this line failed?&rdquo; across every line, every step, and a slow exact one for what actually happens. Getting a whole day of this to run in under a second in a browser is most of the work in the code.</p>
+
+                <h3>How the score works</h3>
+                <p>Everything is money, which is how the real industry thinks. Electricity delivered earns &euro;70 per unit. Fuel costs whatever that station costs to run. Changing a station&rsquo;s plan at short notice costs a premium on top. Flipping a switch costs a small fixed amount, because a real switching operation needs a person to authorise it and carries risk. Paying a wind farm to stop costs money. And electricity you fail to deliver &mdash; the lights actually going out &mdash; costs <b>&euro;3&thinsp;000</b> per unit, roughly forty times what it would have earned.</p>
+                <p>That last number is the whole design. It means the cheapest way to run the grid is also the way that keeps the lights on, so a program chasing money is automatically chasing reliability, without anybody having to write down a safety rule.</p>
+
+                <h3>The one thing deliberately left out</h3>
+                <p>Every real grid operator lives by a rule called <b>N-1</b>: at every moment, the grid must be able to survive losing any one line, immediately, without anything else breaking. It is the single most optimised number in the industry.</p>
+                <p>Here it is measured every five minutes, drawn on the chart &mdash; and never paid for. Not once. The question being asked is: <i>if you pay an operator only to deliver electricity cheaply and not break things, does it discover safety on its own?</i> If the reward already contained the safety rule, the question would be meaningless. There is a switch to turn the payment on, and it is off by default for exactly that reason.</p>
+                <p>The answer this run gives is a fairly clean <b>no</b>. It ends up about as N-1 secure as doing nothing at all. It learned to survive the trouble that actually happens; it never learned to stand ready for trouble that merely might.</p>
+
+                <h3>The mistake that nearly sank the whole thing</h3>
+                <p>For a long time the AI learned nothing, and the reason turned out to be almost funny. <b>A well-built power grid is boring nearly every day.</b> Nothing goes wrong, so doing nothing is exactly the right answer, so every operator in the crowd scores the same to the penny and evolution has nothing to choose between them. Worse than useless: on a boring day the only operators that <i>differ</i> from the crowd are the ones that did something, and doing something costs money &mdash; so a boring day actively breeds out the instinct to act at all.</p>
+                <p>The fix is to <b>audition the day</b>. Before spending a whole crowd on it, the program cheaply tries out nine possible days and keeps the ones where sitting on your hands demonstrably costs you. One slot is always given to the quietest day it found, though, because an operator that has only ever seen crises learns that fiddling always pays, and then fidgets expensively through every calm Tuesday for the rest of its life. It has to learn both halves of the job.</p>
+
+                <h3>What this is not</h3>
+                <p>A snapshot every five minutes, not a film: nothing here happens in fractions of a second, which is where a lot of real grid drama lives. No transformer tap changing, no HVDC links. And the operator is never allowed to switch customers off on purpose &mdash; when the lights go out here it is because the automatic protection did it, after everything else had already failed.</p>
+            </details>
+        </aside>
+    </main>
+</div>
+
+<script src="rng.js"></script>
+<script src="powerflow.js"></script>
+<script src="grid.js"></script>
+<script src="weather.js"></script>
+<script src="nn.js"></script>
+<script src="world.js"></script>
+<script src="operator.js"></script>
+<script src="evolution.js"></script>
+<script src="render.js"></script>
+<script src="default_brain.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

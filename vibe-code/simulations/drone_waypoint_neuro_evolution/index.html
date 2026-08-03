@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Learning to Fly — Drone Waypoint Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Learning to Fly</h2>
+        <p>A 1&nbsp;kg quadrotor sitting on a pad with <b>four rotors and no idea what they do</b>.
+           It has to take off, work out which way is up, and fly to waypoints scattered
+           around a room — through pillars, doorways and shelving. Touch anything and the
+           flight is over. Nothing is scripted, there is no attitude controller underneath,
+           and there is <b>no gradient descent</b>: brains are mutated, scored, and bred.</p>
+        <div class="intro-choices">
+            <button id="intro-watch" class="intro-choice primary">
+                <b>▶&nbsp; Watch the trained champion</b>
+                <small>The best evolved brain flies the whole fleet at once</small>
+            </button>
+            <button id="intro-scratch" class="intro-choice">
+                <b>🧬&nbsp; Evolve from scratch</b>
+                <small>Random brains — watch them learn, generation by generation</small>
+            </button>
+        </div>
+        <button id="intro-explore" class="intro-dismiss">or just explore the controls →</button>
+    </div>
+</div>
+
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Learning to Fly</h1>
+            <span class="brand-sub">quadrotor · neuroevolution · no gradients</span>
+        </div>
+        <div id="top-stats">
+            <span class="tstat">gen <b id="stat-gen">1</b></span>
+            <span class="tstat" title="Best score on the fixed six-mission exam — not the training log">champion <b id="stat-best">—</b></span>
+            <span class="tstat">waypoints <b id="stat-wp">0 / 0</b></span>
+            <span class="tstat">flying <b id="stat-alive">0/0</b></span>
+            <span class="tstat badge" id="stat-stage">stage 0</span>
+        </div>
+        <div id="top-actions">
+            <div id="speed-group"></div>
+            <button class="btn" id="btn-pause">Pause</button>
+        </div>
+    </header>
+
+    <div id="layout">
+        <!-- ------------------------------------------------ left: the run -->
+        <aside id="panel-left">
+            <div class="card">
+                <h2>Curriculum</h2>
+                <div id="stage-track"></div>
+                <p class="hint" id="stage-desc"></p>
+                <label class="slider-row">
+                    <span>Stage lock <b id="lb-stagelock">auto</b></span>
+                    <input type="range" id="sl-stagelock" min="-1" max="2" step="1" value="-1">
+                </label>
+                <p class="hint">The ratchet promotes when the <i>mean</i> drone reaches
+                   waypoints reliably for three generations running, and never demotes.</p>
+            </div>
+
+            <div class="card">
+                <h2>Population</h2>
+                <label class="slider-row">
+                    <span>Drones <b id="lb-pop">96</b></span>
+                    <input type="range" id="sl-pop" min="8" max="120" step="4" value="96">
+                </label>
+                <label class="slider-row">
+                    <span>Episodes / generation <b id="lb-eps">4</b></span>
+                    <input type="range" id="sl-eps" min="1" max="5" step="1" value="4">
+                </label>
+                <p class="hint">One episode ranks the waypoint chain as much as the brain.
+                   More episodes, less luck. <b>96 × 4 is what produced the built-in
+                   champion</b> — turn them down to watch, not to train.</p>
+                <label class="slider-row">
+                    <span>Champion grace <b id="lb-grace">3 gens</b></span>
+                    <input type="range" id="sl-grace" min="0" max="10" step="1" value="3">
+                </label>
+                <p class="hint">The reigning champion keeps an untouched seat this many
+                   generations after being beaten.</p>
+            </div>
+
+            <div class="card">
+                <h2>Mutation</h2>
+                <label class="slider-row">
+                    <span>Rate <b id="lb-mutrate">10%</b></span>
+                    <input type="range" id="sl-mutrate" min="1" max="40" step="1" value="10">
+                </label>
+                <label class="slider-row">
+                    <span>Sigma <b id="lb-mutsig">0.09</b></span>
+                    <input type="range" id="sl-mutsig" min="1" max="40" step="1" value="9">
+                </label>
+                <label class="slider-row">
+                    <span>Stop immigrants past <b id="lb-imm-zero">1.2</b></span>
+                    <input type="range" id="sl-imm-zero" min="0" max="120" step="1" value="12">
+                </label>
+                <label class="slider-row">
+                    <span>Stop crossover past <b id="lb-child-zero">2.5</b></span>
+                    <input type="range" id="sl-child-zero" min="0" max="200" step="1" value="25">
+                </label>
+                <p class="hint">Both gates narrow the search as the run matures: first no
+                   fresh random brains, then no gene mixing at all — pure hill climbing.</p>
+            </div>
+
+            <div class="card">
+                <h2>Run</h2>
+                <label class="check-row"><input type="checkbox" id="chk-noise" checked><span>Sensor &amp; actuator noise</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-headless"><span>Headless (hide the view, train fast)</span></label>
+                <button class="btn danger wide" id="btn-restart">Restart from random brains</button>
+            </div>
+        </aside>
+
+        <!-- ------------------------------------------------ centre: the view -->
+        <main id="canvas-wrap">
+            <canvas id="view"></canvas>
+            <div id="hud"></div>
+        </main>
+
+        <!-- ------------------------------------------------ right: telemetry -->
+        <aside id="panel-right">
+            <div class="card">
+                <h2>Fitness</h2>
+                <canvas id="chart" width="280" height="90"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-best"></i>best</span>
+                    <span><i class="sw sw-avg"></i>mean</span>
+                </div>
+                <p class="hint">These are training scores, on the missions the population was
+                   selected against — the best line is partly luck. The <b>champion</b> figure
+                   in the header is different: after every generation the top brain re-flies
+                   six fixed courses it was never trained on, and only that decides who is
+                   champion. Without it, one lucky generation holds the title forever.</p>
+            </div>
+
+            <div class="card">
+                <h2>Skills</h2>
+                <canvas id="chart2" width="280" height="90"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-off"></i>airborne</span>
+                    <span><i class="sw sw-crash"></i>crashed</span>
+                    <span><i class="sw sw-wp"></i>waypoints</span>
+                </div>
+                <p class="hint">Waypoints stay flat at zero for a long time. Takeoff rising
+                   while crashes fall is what a working run looks like before that.</p>
+            </div>
+
+            <div class="card">
+                <h2>Leader</h2>
+                <div class="kv"><span>state</span><b id="ep-state">—</b></div>
+                <div class="kv"><span>episode time</span><b id="ep-time">0 s</b></div>
+                <div class="kv"><span>clock left</span><b id="ep-clock">0 s</b></div>
+                <div class="kv"><span>altitude</span><b id="ep-alt">0 m</b></div>
+                <div class="kv"><span>speed</span><b id="ep-speed">0 m/s</b></div>
+                <div class="kv"><span>uprightness</span><b id="ep-up">0</b></div>
+                <div class="kv"><span>nearest surface</span><b id="ep-clear">0 m</b></div>
+                <div class="kv"><span>to waypoint</span><b id="ep-dist">—</b></div>
+                <div class="kv"><span>waypoints</span><b id="ep-wp">0</b></div>
+                <div class="kv"><span>rotors</span><b id="ep-rotors">—</b></div>
+                <div class="kv"><span>fitness</span><b id="ep-fit">0</b></div>
+            </div>
+
+            <div class="card">
+                <h2>View</h2>
+                <label class="check-row"><input type="checkbox" id="chk-follow" checked><span>Camera follows the leader</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-rays" checked><span>Sensor beams (all 32)</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-waypoints" checked><span>Waypoint &amp; bearing</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-trail" checked><span>Leader's track</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-dead"><span>Keep wrecks on screen</span></label>
+                <label class="slider-row">
+                    <span>Ghost drones <b id="lb-ghosts">14</b></span>
+                    <input type="range" id="sl-ghosts" min="0" max="60" step="1" value="14">
+                </label>
+                <p class="hint">Drag to orbit, wheel to zoom. The fleet shares one pad, so how
+                   far the ghosts spread is how much variance is left in the gene pool.</p>
+            </div>
+
+            <div class="card">
+                <h2>Brain</h2>
+                <div class="btn-row">
+                    <button class="btn" id="btn-save">Save</button>
+                    <button class="btn" id="btn-load">Load</button>
+                </div>
+                <div class="btn-row" style="margin-top:6px">
+                    <button class="btn" id="btn-export">Export</button>
+                    <button class="btn" id="btn-import">Import</button>
+                </div>
+                <button class="btn wide" id="btn-default">Load built-in champion</button>
+                <button class="btn wide primary" id="btn-showcase">Showcase the champion</button>
+                <button class="btn wide" id="btn-inject">Inject champion into the pool</button>
+                <button class="btn wide" id="btn-bake">Bake default_brain.js</button>
+                <input type="file" id="file-import" accept="application/json" hidden>
+                <p class="hint">Bake downloads a drop-in replacement for
+                   <code>default_brain.js</code> — put it next to
+                   <code>index.html</code> and your brain is what the page opens on.</p>
+                <p class="hint" id="brain-shape"></p>
+                <pre id="bake-out" hidden></pre>
+            </div>
+
+            <div class="card">
+                <h2>Log</h2>
+                <div id="log"></div>
+            </div>
+        </aside>
+    </div>
+</div>
+
+<script src="three.min.js"></script>
+<script src="nn.js"></script>
+<script src="room.js"></script>
+<script src="drone.js"></script>
+<script src="world.js"></script>
+<script src="evolution.js"></script>
+<script src="default_brain.js"></script>
+<script src="render.js"></script>
+<script src="ui.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

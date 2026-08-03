@@ -1,0 +1,4 @@
+# Island snapshots are tens of megabytes of raw genomes and are only useful for
+# --resume on the machine that produced them. champion.json / log.txt / bench.json
+# are small and worth keeping.
+training/*/state.json

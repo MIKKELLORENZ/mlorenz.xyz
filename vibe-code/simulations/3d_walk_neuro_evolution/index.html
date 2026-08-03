@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Learning to Walk — 3D Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Learning to Walk</h2>
+        <p>A 65&nbsp;kg humanoid with <b>18 servo joints</b> and no idea what legs are for.
+           It has to stand up out of a squat, hold its balance, then walk to waypoints —
+           over slopes, up stairs, into the wind. Nothing is scripted and there is
+           <b>no gradient descent</b>: brains are mutated, scored, and bred.</p>
+        <div class="intro-choices">
+            <button id="intro-watch" class="intro-choice primary">
+                <b>▶&nbsp; Watch Mikkels AI</b>
+                <small>The best evolved brain drives the whole fleet at once</small>
+            </button>
+            <button id="intro-scratch" class="intro-choice">
+                <b>🧬&nbsp; Evolve from scratch</b>
+                <small>Random brains — watch them learn, generation by generation</small>
+            </button>
+        </div>
+        <label class="intro-eval" title="Keeps a byte-for-byte copy of the best brain in the fleet every generation, so it re-spawns unchanged instead of drifting under mutation.">
+            <input type="checkbox" id="intro-eval">
+            <span><b>Eval mode</b> — freeze the best brain so it spawns unchanged every generation</span>
+        </label>
+        <button id="intro-explore" class="intro-dismiss">or just explore the controls →</button>
+    </div>
+</div>
+
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Learning to Walk</h1>
+            <span class="brand-sub">18-joint humanoid · neuroevolution · no gradients</span>
+        </div>
+        <div id="top-stats">
+            <!-- There are no generations in watch mode: one frozen brain is
+                 replayed, nothing is bred, and a counter ticking up beside it
+                 only invites the reading that it is still learning. -->
+            <span class="tstat train-only">gen <b id="stat-gen">1</b></span>
+            <span class="tstat watch-only" title="Deterministic hash of the loaded weights — matches the id printed when the brain was baked.">brain <b id="stat-brain">–</b></span>
+            <span class="tstat watch-only">episode <b id="stat-episode">1</b></span>
+            <span class="tstat badge" id="stat-stage">stage 1 · stand</span>
+            <span class="tstat" title="episode phase — every episode replays the whole curriculum">phase <b id="stat-phase">stand</b></span>
+            <span class="tstat">best <b id="stat-best">–</b></span>
+            <span class="tstat" title="best / mean waypoints reached last generation">waypoints <b id="stat-wp">–</b></span>
+            <span class="tstat">wind <b id="stat-wind">–</b></span>
+        </div>
+        <div id="top-actions">
+            <div id="speed-group" aria-label="Simulation speed"></div>
+            <button id="btn-theme" class="btn" title="Dark environment — easier on the eye for long runs" aria-pressed="false">Dark</button>
+            <button id="btn-pause" class="btn primary">Pause</button>
+        </div>
+    </header>
+
+    <main id="layout">
+        <aside id="panel-left">
+            <section class="card">
+                <h2>Curriculum</h2>
+                <div id="stage-track"></div>
+                <p class="hint" id="stage-desc"></p>
+                <label class="slider-row train-only" title="0 = let the population's own progress decide when to advance. Anything else pins the environment to that stage so you can drill it.">
+                    <span>Stage <b id="lb-stagelock">auto</b></span>
+                    <input type="range" id="sl-stagelock" min="0" max="5" value="0" step="1">
+                </label>
+                <label class="slider-row train-only" title="How rough stage 4 gets: slope angle and stair rise both scale with this.">
+                    <span>Terrain difficulty <b id="lb-terrdiff">auto</b></span>
+                    <input type="range" id="sl-terrdiff" min="0" max="100" value="0" step="5">
+                </label>
+                <div id="terrain-buttons"></div>
+                <!-- Watch mode only. Pinning the pose is what makes two attempts
+                     at the same problem comparable; with a random draw you never
+                     see the same question twice. -->
+                <label class="slider-row watch-only" title="Which position the walker starts each episode from.">
+                    <span>Start pose</span>
+                    <select id="pose-select"></select>
+                </label>
+                <!-- A brain shown on a stage it never trained on falls over
+                     immediately, which reads as a broken transfer rather than a
+                     mismatched exam. Defaults to the stage baked into the brain. -->
+                <label class="slider-row watch-only" title="Which curriculum stage to replay on. Defaults to the stage this brain was trained to.">
+                    <span>Replay stage</span>
+                    <select id="stage-select"></select>
+                </label>
+                <div class="watch-only" style="display:flex;gap:6px;margin-top:6px">
+                    <button id="btn-respawn" class="wide" title="Restart this episode — new ground, new pose if the picker says Random.">Respawn</button>
+                    <button id="btn-reload-brain" class="wide" title="Re-read default_brain.js from disk without a page reload or a cache clear.">Reload brain</button>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2 class="train-only">Evolution</h2>
+                <label class="slider-row train-only">
+                    <span>Population <b id="lb-pop">40</b> <i class="hint">on restart</i></span>
+                    <input type="range" id="sl-pop" min="12" max="96" value="40" step="4">
+                </label>
+                <label class="slider-row train-only" title="Episodes per generation, each with a different mission seed and weather. One episode rewards luck about where the waypoints fell; several reward skill.">
+                    <span>Episodes / generation <b id="lb-eps">2</b></span>
+                    <input type="range" id="sl-eps" min="1" max="4" value="2" step="1">
+                </label>
+                <label class="slider-row train-only" title="The reigning champion keeps an untouched seat for this many generations even when beaten. 0 = off.">
+                    <span>Champion grace <b id="lb-grace">3 gens</b></span>
+                    <input type="range" id="sl-grace" min="0" max="20" value="3" step="1">
+                </label>
+                <label class="slider-row train-only" title="Fraction of weights each child perturbs. Past about 6% almost no child survives its own mutation.">
+                    <span>Mutation rate <b id="lb-mutrate">3.5%</b></span>
+                    <input type="range" id="sl-mutrate" min="0.5" max="15" value="3.5" step="0.5">
+                </label>
+                <label class="slider-row train-only" title="Size of each perturbation. Measured: at 0.15 not one child in 24 lands near its parent; at 0.04 about a fifth improve on it.">
+                    <span>Mutation strength <b id="lb-mutsig">0.04</b></span>
+                    <input type="range" id="sl-mutsig" min="1" max="20" value="4" step="1">
+                </label>
+                <label class="slider-row train-only" title="Once the best-ever fitness passes this, fresh random immigrant brains stop being injected.">
+                    <span>Stop immigrants past <b id="lb-imm-zero">6k</b></span>
+                    <input type="range" id="sl-imm-zero" min="0" max="30000" value="6000" step="500">
+                </label>
+                <label class="slider-row train-only" title="Once the best-ever fitness passes this, crossover stops too and the population becomes pure hill-climbing.">
+                    <span>Stop crossover past <b id="lb-child-zero">15k</b></span>
+                    <input type="range" id="sl-child-zero" min="0" max="60000" value="15000" step="1000">
+                </label>
+                <button id="btn-restart" class="btn danger wide">Restart evolution</button>
+            </section>
+
+            <section class="card">
+                <h2>View</h2>
+                <label class="check-row train-only" title="Turn off all rendering and pour every millisecond into physics + evolution — much the fastest way to train in a browser.">
+                    <input type="checkbox" id="chk-headless"><span><b>Headless mode</b> — no visuals, max speed</span>
+                </label>
+                <label class="slider-row">
+                    <span>Ghost walkers drawn <b id="lb-ghosts">10</b></span>
+                    <input type="range" id="sl-ghosts" min="0" max="40" value="10" step="1">
+                </label>
+                <label class="check-row"><input type="checkbox" id="chk-waypoints" checked><span>Waypoints</span></label>
+                <label class="check-row" title="Ground projection of the leader's centre of mass. Inside the feet = stable; outside = falling."><input type="checkbox" id="chk-com" checked><span>Centre of mass</span></label>
+                <label class="check-row" title="Sensor and actuator noise, servo lag, and per-episode randomisation of friction, torque and gains. Off makes learning easier and the result far less transferable."><input type="checkbox" id="chk-noise" checked><span>Sim-to-real noise</span></label>
+                <label class="check-row" title="Opens a panel showing the ground channels exactly as the leader's brain receives them — the 36-point ring around the pelvis and the 5×5 patch under each foot."><input type="checkbox" id="chk-sensors"><span>Terrain sense — what the brain reads</span></label>
+                <label class="check-row" title="Keeps the last 10 seconds of every walker's speed, spin and peak contact force in memory. Costs a little speed; leave it off unless you are chasing something."><input type="checkbox" id="chk-record"><span>Incident recorder</span></label>
+                <button id="btn-incident" class="btn wide" disabled title="Writes the last 10 seconds to a .json file, together with the episode's seeds — enough to replay this exact episode headlessly.">Save incident</button>
+                <p class="hint">Drag to orbit, scroll to zoom.</p>
+            </section>
+
+            <section class="card">
+                <h2>Champion brain</h2>
+                <div class="btn-row">
+                    <button id="btn-save" class="btn">Save</button>
+                    <button id="btn-load" class="btn">Load</button>
+                    <button id="btn-export" class="btn">Export</button>
+                </div>
+                <input type="file" id="file-import" accept=".json" style="display:none">
+                <button id="btn-import" class="btn wide">Import .json</button>
+                <button id="btn-default" class="btn wide primary">Load built-in champion</button>
+                <button id="btn-showcase" class="btn wide primary">Watch Mikkels AI</button>
+                <button id="btn-inject" class="btn wide" title="Drop the built-in champion into the evolving pool and shelter it for 10 generations so it cannot be bred out before it proves itself.">Inject champion — 10-gen grace</button>
+                <label class="check-row" title="Keeps a byte-for-byte copy of the best-ever brain in the fleet every generation.">
+                    <input type="checkbox" id="chk-eval"><span><b>Eval mode</b> — elite frozen</span>
+                </label>
+                <label class="check-row train-only" title="Every 10th generation the whole fleet becomes minor variations of the elite, starts face-down on the floor, and is ranked on mean centre-of-mass height alone instead of the usual score. The winners seed the next generation, so it pushes the lineage toward getting up — but the trial never updates the champion and never advances the stage, because its number is metres and the normal one is not.">
+                    <input type="checkbox" id="chk-rise"><span><b>Rise trials</b> — every 10th gen, prone</span>
+                </label>
+                <p class="hint" id="brain-shape"></p>
+            </section>
+        </aside>
+
+        <div id="canvas-wrap">
+            <canvas id="view"></canvas>
+            <div id="hud"></div>
+        </div>
+
+        <aside id="panel-right">
+            <section class="card" id="sensor-card" hidden>
+                <h2>Terrain sense</h2>
+                <canvas id="sensors" width="280" height="264"></canvas>
+                <p class="hint">The ground channels as the leader's brain receives them — a
+                   36-point ring out to 1&nbsp;m around the pelvis, and the 5×5 patch each foot
+                   samples ahead of itself. Warm = above the reference height, cool = below.</p>
+            </section>
+            <section class="card stats-only">
+                <h2>Fitness</h2>
+                <canvas id="chart" width="280" height="120"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-best"></i>best</span>
+                    <span><i class="sw sw-avg"></i>mean</span>
+                </div>
+            </section>
+            <section class="card stats-only">
+                <h2>Skills acquired</h2>
+                <canvas id="chart2" width="280" height="110"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-stood"></i>stood</span>
+                    <span><i class="sw sw-bal"></i>balanced</span>
+                    <span><i class="sw sw-wp"></i>waypoints</span>
+                </div>
+            </section>
+            <section class="card">
+                <h2>Leader</h2>
+                <div class="kv"><span>episode time</span><b id="ep-time">0.0 s</b></div>
+                <div class="kv"><span>own clock</span><b id="ep-clock">–</b></div>
+                <div class="kv"><span>hip height</span><b id="ep-hip">–</b></div>
+                <div class="kv"><span>uprightness</span><b id="ep-up">–</b></div>
+                <div class="kv"><span>speed</span><b id="ep-speed">–</b></div>
+                <div class="kv"><span>foot load L / R</span><b id="ep-load">–</b></div>
+                <div class="kv"><span>waypoints</span><b id="ep-wp">0</b></div>
+                <div class="kv"><span>milestones</span><b id="ep-mile">–</b></div>
+                <div class="kv"><span>fitness</span><b id="ep-fit">–</b></div>
+            </section>
+            <section class="card stats-only">
+                <h2>Log</h2>
+                <div id="log"></div>
+            </section>
+        </aside>
+    </main>
+</div>
+
+<script src="three.min.js"></script>
+<script src="nn.js"></script>
+<script src="physics.js"></script>
+<script src="body.js"></script>
+<script src="terrain.js"></script>
+<script src="walker.js"></script>
+<script src="rise_scaffold.js"></script>
+<script src="world.js"></script>
+<script src="evolution.js"></script>
+<script src="default_brain.js"></script>
+<script src="skin.js"></script>
+<script src="render.js"></script>
+<script src="ui.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

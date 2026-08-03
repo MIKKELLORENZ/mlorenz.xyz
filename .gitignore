@@ -8,3 +8,30 @@ vibe-code/games/mall_walk/cert.pem
 vibe-code/shared_assets/audio/candidates/
 
 vibe-code/games/just_a_man/
+
+# Training scratch. Every neuro-evolution sim writes its run logs, checkpoints,
+# island snapshots and A/B side-runs into a training/ folder next to the sim.
+# It is regenerated on demand by that sim's trainer and is only useful for
+# --resume on the machine that produced it (~155 MB across the sims so far).
+# The champion that actually ships is baked into default_brain.js, which IS
+# committed, so a fresh clone runs with no training/ directory at all.
+training/
+
+# Run logs and process bookkeeping, wherever they land.
+*.log
+*.err
+*.out
+*.pid
+
+# SSH tunnels to the private training node. These describe personal
+# infrastructure (host, forwarded ports, NAT layout) and are useless to anyone
+# else cloning this repo, which is published as a public site.
+dashboard_tunnel*.cmd
+
+# Launchers for that same node. They carry its absolute home paths, its user
+# account and the exact worker/port layout of runs on it — again personal
+# infrastructure, and unusable anywhere else since they cd into a directory that
+# only exists there. Globbed rather than listed one by one so the next A/B
+# launcher is covered the day it is written instead of the day it is noticed.
+relaunch*.sh
+lidar_watch.sh

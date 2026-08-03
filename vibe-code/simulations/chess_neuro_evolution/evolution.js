@@ -1,153 +1,347 @@
-// Neuroevolution driver: observation encoding, greedy one-ply move selection,
-// paired self-play matches, fitness aggregation, and the genetic algorithm
-// (elitism, rank selection, blended crossover, Gaussian mutation, immigrants,
-// stagnation-adaptive mutation). No gradients, no value functions.
+// Neuroevolution driver: move selection from the dual-head policy, opening
+// diversity, self-play plus a scripted opponent ladder, fitness aggregation and
+// the genetic algorithm. No gradients, no backpropagation, no value targets.
+//
+// Three things here matter as much as the network does:
+//
+//  * Openings. Every game starts from a different position (book line or a
+//    short random prefix). Without this, two similar genomes play the exact
+//    same game every time and a whole generation produces one bit of signal.
+//
+//  * The ladder. Pure self-play has no absolute yardstick - a population can
+//    happily go round in circles beating itself. Every genome also plays a
+//    scripted opponent whose strength is fixed forever, so fitness means the
+//    same thing in generation 900 as it did in generation 9.
+//
+//  * A validated champion. A new best-of-generation only takes the crown after
+//    winning a head-to-head duel against the sitting champion. Otherwise the
+//    crown tracks luck in an 8-game sample, and the archive fills with noise.
 'use strict';
 
-const MAX_PLIES = 140;
-const WIN_REWARD = 10000;
-const FEAT_LEN = 401; // 6 piece planes * 64 squares + 17 engineered features
+const WIN_POINTS = 1, DRAW_POINTS = 0.5;
 
 const GA = {
-    elites: 4,
-    champVariantFrac: 0.08,
-    crossoverFrac: 0.55,
-    mutantFrac: 0.25,
-    immigrantFrac: 0.12,
-    selectionPressure: 2.0,
-    baseMutationRate: 0.08,
-    baseMutationStrength: 0.15,
-    baseResetProb: 0.001,
-    stagnationThreshold: 12
+    elites: 3,
+    champVariantFrac: 0.10,
+    crossoverFrac: 0.50,
+    mutantFrac: 0.22,
+    rowMutantFrac: 0.08,
+    immigrantFrac: 0.08,
+    selectionPressure: 1.9,
+    baseMutationRate: 0.07,
+    baseMutationStrength: 0.14,
+    baseResetProb: 0.0008,
+    stagnationThreshold: 14,
+    gauntletOpponents: 2,
+    hofSize: 10,
+    duelGames: 6,
+    // A challenger must beat the incumbent by a margin, not merely draw the
+    // duel. At 6 games a 3.5-2.5 happens by luck often enough that a bare
+    // "> 50%" rule hands the crown around every generation and the archive
+    // fills with genomes that were never better than what they replaced.
+    duelMargin: 0.58,
+    benchGames: 4,
+    cloneDistance: 0.012
 };
 
-const _feat = new Float64Array(FEAT_LEN);
+// Weights on a game's points, by how hard the opponent is. Beating the material
+// bot has to be worth more than beating a random mover, or a population can
+// farm the easy rungs forever.
+const OPP_WEIGHT = { self: 1.0, random: 0.5, capture: 0.85, careless: 1.1, greedy: 1.45, hof: 1.15 };
 
-// Encode the position from `side`'s perspective. `oppMoves` are the opponent's
-// last two committed moves (may contain nulls).
-function encodeFeatures(game, side, oppMoves, ply) {
-    const f = _feat;
+// --------------------------------------------------------------- opponents --
+const _bAtkW = new Int8Array(128), _bAtkB = new Int8Array(128);
+
+// Static evaluation used only by the scripted ladder bots: material, minus
+// what is hanging. Never used by an evolved brain.
+function staticEval(game, side) {
+    game.attackMaps(_bAtkW, _bAtkB);
+    const own = side === 1 ? _bAtkW : _bAtkB;
+    const opp = side === 1 ? _bAtkB : _bAtkW;
     const b = game.board;
-    // 6 signed one-hot piece planes (P,N,B,R,Q,K): +1 own piece, -1 opponent
-    // piece on that square. Own home rank is always at the bottom (rank-flip
-    // for black), so both colors perceive positions identically.
-    f.fill(0, 0, 384);
-    for (let r = 0; r < 8; r++) {
-        const rank = side === 1 ? r : 7 - r;
-        for (let file = 0; file < 8; file++) {
-            const p = b[rank * 16 + file];
-            if (p === 0) continue;
-            f[(Math.abs(p) - 1) * 64 + r * 8 + file] = Math.sign(p) * side;
-        }
-    }
-    let k = 384;
-    // castling rights: own K/Q, opponent K/Q
-    const cr = game.castling;
-    const ownK = side === 1 ? 1 : 4, ownQ = side === 1 ? 2 : 8;
-    f[k++] = (cr & ownK) ? 1 : 0;
-    f[k++] = (cr & ownQ) ? 1 : 0;
-    f[k++] = (cr & (side === 1 ? 4 : 1)) ? 1 : 0;
-    f[k++] = (cr & (side === 1 ? 8 : 2)) ? 1 : 0;
-    // material balance, own perspective, clamped to [-1, 1]
-    const mat = game.material() * side;
-    f[k++] = Math.max(-1, Math.min(1, mat / 12));
-    // pawn advancement: fraction of own pawns past midline, same for opponent
-    let ownPawns = 0, ownAdv = 0, oppPawns = 0, oppAdv = 0;
+    let score = 0;
     for (let sq = 0; sq < 128; sq++) {
         if (sq & 0x88) { sq += 7; continue; }
         const p = b[sq];
-        if (Math.abs(p) !== 1) continue;
-        const rank = sq >> 4;
-        if (Math.sign(p) === side) {
-            ownPawns++;
-            if (side === 1 ? rank >= 4 : rank <= 3) ownAdv++;
-        } else {
-            oppPawns++;
-            if (side === 1 ? rank <= 3 : rank >= 4) oppAdv++;
-        }
+        if (p === 0) continue;
+        const ap = p > 0 ? p : -p;
+        const val = MAT_VAL[ap] / 10;
+        const mine = (p > 0 ? 1 : -1) === side;
+        score += mine ? val : -val;
+        if (ap === K) continue;
+        if (mine && opp[sq] > 0 && own[sq] === 0) score -= val * 0.9;
+        else if (!mine && own[sq] > 0 && opp[sq] === 0) score += val * 0.5;
     }
-    f[k++] = ownPawns ? ownAdv / ownPawns : 0;
-    f[k++] = oppPawns ? oppAdv / oppPawns : 0;
-    // opponent's last two moves: from/to file & rank in [0, 1], rank-flipped
-    for (let i = 0; i < 2; i++) {
-        const m = oppMoves[i];
-        if (!m) { f[k++] = 0; f[k++] = 0; f[k++] = 0; f[k++] = 0; continue; }
-        for (const sq of [m.from, m.to]) {
-            const rank = side === 1 ? (sq >> 4) : 7 - (sq >> 4);
-            f[k++] = (sq & 7) / 7;
-            f[k++] = rank / 7;
-        }
-    }
-    // opponent in check right now
-    f[k++] = game.inCheck(-side) ? 1 : 0;
-    // game progress
-    f[k++] = Math.min(1, ply / MAX_PLIES);
-    // safety: clamp + scrub invalid values
-    for (let i = 0; i < FEAT_LEN; i++) {
-        const v = f[i];
-        if (!Number.isFinite(v)) f[i] = 0;
-        else if (v > 1) f[i] = 1;
-        else if (v < -1) f[i] = -1;
-    }
-    return f;
+    return score;
 }
 
-// One-ply greedy policy: try every legal move, score the resulting position
-// with the genome's network, play the argmax. `noise` adds a little score
-// jitter for early exploration. Returns the chosen move or null (game over).
-function chooseMove(game, genome, noise, rng, record) {
-    const moves = game.moves();
-    if (moves.length === 0) return null;
+function pickMateIn1(game, moves) {
     const side = game.turn;
-    const lm = game.lastMoves;
-    // opponent's last two committed moves (most recent first)
-    const oppMoves = [lm.length >= 1 ? lm[lm.length - 1] : null,
-                      lm.length >= 3 ? lm[lm.length - 3] : null];
-    let best = null, bestScore = -Infinity, bestFeatRecord = null;
     for (const m of moves) {
         const undo = game._make(m);
-        // Exact terminal detection: a 1-ply evaluator cannot tell checkmate
-        // from a harmless check (it never sees the opponent's reply count),
-        // so a move that mates on the spot is always played. Only computed
-        // when the move gives check, which keeps it cheap.
-        if (game.inCheck(-side) && game.moves().length === 0) {
-            game._unmake(m, undo);
-            if (record) record.score = 1;
-            return m;
-        }
-        const feats = encodeFeatures(game, side, oppMoves, game.ply + 1);
-        const wantRecord = record ? [] : null;
-        let score = forward(genome, feats, wantRecord);
+        let mate = false;
+        const ks = game.kingSq(-side);
+        if (ks >= 0 && game.isAttacked(ks, side)) mate = game.moves().length === 0;
         game._unmake(m, undo);
-        if (noise > 0) score += gaussian(rng) * noise;
-        if (score > bestScore) { bestScore = score; best = m; bestFeatRecord = wantRecord; }
+        if (mate) return m;
     }
-    if (record && bestFeatRecord) {
-        record.layers = bestFeatRecord;
-        record.score = bestScore;
+    return null;
+}
+
+function botRandom(game, rng) {
+    const ms = game.moves();
+    return ms.length ? ms[Math.floor(rng() * ms.length)] : null;
+}
+
+function botCapture(game, rng) {
+    const ms = game.moves();
+    if (!ms.length) return null;
+    const mate = pickMateIn1(game, ms);
+    if (mate) return mate;
+    if (rng() < 0.8) {
+        let best = null, bv = 0;
+        for (const m of ms) {
+            const v = m.capture !== 0 ? MAT_VAL[Math.abs(m.capture)] : 0;
+            if (v > bv) { bv = v; best = m; }
+        }
+        if (best) return best;
+    }
+    return ms[Math.floor(rng() * ms.length)];
+}
+
+function botGreedy(game, rng) {
+    const ms = game.moves();
+    if (!ms.length) return null;
+    const mate = pickMateIn1(game, ms);
+    if (mate) return mate;
+    const side = game.turn;
+    let best = null, bestScore = -Infinity;
+    for (const m of ms) {
+        const undo = game._make(m);
+        let s = staticEval(game, side);
+        game._unmake(m, undo);
+        s += rng() * 0.08;
+        if (s > bestScore) { bestScore = s; best = m; }
     }
     return best;
 }
 
-// A single game between two population members.
-class Match {
-    constructor(whiteIdx, blackIdx) {
-        this.white = whiteIdx;
-        this.black = blackIdx;
-        this.game = new Chess();
-        this.done = false;
-        this.outcome = null; // {winner: 1|-1|0, reason}
+// Half greedy, half capture-grabber. The gap between "grabs whatever is free"
+// and "never leaves anything hanging" is enormous - a population that has
+// mastered the first scores zero against the second, and a rung nobody can
+// take a point off contributes no selection signal at all. This is the step in
+// between, and it is where most of the useful pressure comes from.
+function botCareless(game, rng) {
+    return rng() < 0.5 ? botGreedy(game, rng) : botCapture(game, rng);
+}
+
+const LADDER = [
+    { name: 'random', label: 'random mover', fn: botRandom, weight: OPP_WEIGHT.random },
+    { name: 'capture', label: 'capture grabber', fn: botCapture, weight: OPP_WEIGHT.capture },
+    { name: 'careless', label: 'careless bot', fn: botCareless, weight: OPP_WEIGHT.careless },
+    { name: 'greedy', label: 'material bot', fn: botGreedy, weight: OPP_WEIGHT.greedy }
+];
+
+// ----------------------------------------------------------------- openings --
+// Coordinate notation, applied by matching moveStr(). Short mainlines only -
+// the point is a spread of sane, structurally different middlegame starts.
+const OPENING_BOOK = [
+    'e2e4 e7e5 g1f3 b8c6 f1b5',
+    'e2e4 e7e5 g1f3 b8c6 f1c4 g8f6',
+    'e2e4 c7c5 g1f3 d7d6 d2d4 c5d4',
+    'e2e4 e7e6 d2d4 d7d5 b1c3',
+    'e2e4 c7c6 d2d4 d7d5 e4e5',
+    'd2d4 d7d5 c2c4 e7e6 b1c3',
+    'd2d4 d7d5 c2c4 c7c6 g1f3',
+    'd2d4 g8f6 c2c4 g7g6 b1c3 f8g7',
+    'd2d4 g8f6 c2c4 e7e6 g1f3 b7b6',
+    'c2c4 e7e5 b1c3 g8f6',
+    'g1f3 d7d5 g2g3 g8f6 f1g2',
+    'e2e4 d7d5 e4d5 d8d5 b1c3',
+    'e2e4 g8f6 e4e5 f6d5 d2d4',
+    'd2d4 f7f5 g2g3 g8f6 f1g2',
+    'e2e4 e7e5 f1c4 f8c5 d1h5',
+    'e2e4 e7e5 b1c3 g8f6 f2f4'
+].map(s => s.split(' '));
+
+// Deterministic opening from a seed, so a colour-swapped rematch replays the
+// exact same starting position and the pair is a fair comparison.
+function applyOpening(game, seed) {
+    const rng = makeRng(seed >>> 0);
+    const roll = rng();
+    if (roll < 0.15) return;                      // straight from the initial position
+    if (roll < 0.50) {
+        const line = OPENING_BOOK[Math.floor(rng() * OPENING_BOOK.length)];
+        const depth = 2 + Math.floor(rng() * (line.length - 1));
+        for (let i = 0; i < Math.min(depth, line.length); i++) {
+            const ms = game.moves();
+            const m = ms.find(x => game.moveStr(x) === line[i]);
+            if (!m || game.result()) return;
+            game.push(m);
+        }
+        return;
+    }
+    const depth = 2 + 2 * Math.floor(rng() * 3);  // 2, 4 or 6 random plies
+    for (let i = 0; i < depth; i++) {
+        const ms = game.moves();
+        if (!ms.length || game.result()) return;
+        game.push(ms[Math.floor(rng() * ms.length)]);
+    }
+}
+
+// ------------------------------------------------------------ move selection --
+// Scratch for grouping legal moves by their (perspective) origin square.
+const _fromBuckets = [];
+for (let i = 0; i < 64; i++) _fromBuckets.push([]);
+const _usedFrom = [];
+const _cand = { move: [], score: [] };
+const PROMO_ORDER = [Q, R, B, N];
+
+// Board index (white's point of view, rank*8+file) for a perspective index.
+function boardIdx(pi, side) {
+    const pr = pi >> 3, file = pi & 7;
+    return (side === 1 ? pr : 7 - pr) * 8 + file;
+}
+
+// The policy in one call: encode, run both heads, score every legal move as
+// FROM[origin] + TO[origin][destination], then take the argmax (or sample from
+// a softmax while exploring). No search, no lookahead - the single exception is
+// an immediate checkmate, which a policy with no search could never learn to
+// recognise as final rather than merely aggressive.
+function chooseMove(game, genome, temp, rng, record) {
+    const moves = game.moves();
+    if (moves.length === 0) return null;
+    const side = game.turn;
+
+    if (moves.length > 1) {
+        const mate = pickMateIn1(game, moves);
+        if (mate) {
+            if (record) { record.mate = true; record.move = mate; record.side = side; }
+            return mate;
+        }
     }
 
-    // Advance one ply. Returns true if the game just finished.
-    // Protected genomes (exact elites + champion, indices < protectedCount)
-    // play without exploration noise so their results are deterministic.
-    step(pop, noise, rng, record, protectedCount) {
+    const feats = encodePosition(game, side, moves);
+    const pol = forwardPolicy(genome, feats);
+
+    _usedFrom.length = 0;
+    for (let i = 0; i < moves.length; i++) {
+        const pi = perspIdx(moves[i].from, side);
+        if (_fromBuckets[pi].length === 0) _usedFrom.push(pi);
+        _fromBuckets[pi].push(moves[i]);
+    }
+
+    _cand.move.length = 0;
+    _cand.score.length = 0;
+    for (let u = 0; u < _usedFrom.length; u++) {
+        const pi = _usedFrom[u];
+        const bucket = _fromBuckets[pi];
+        const toLog = toLogitsFor(genome, pi);
+        const fromScore = pol.fromLogit[pi];
+        for (let i = 0; i < bucket.length; i++) {
+            const m = bucket[i];
+            let s = fromScore + toLog[perspIdx(m.to, side)];
+            if (m.promo !== 0) s += pol.promo[PROMO_ORDER.indexOf(Math.abs(m.promo))];
+            _cand.move.push(m);
+            _cand.score.push(s);
+        }
+        bucket.length = 0;
+    }
+
+    let chosen = 0;
+    if (temp > 0) {
+        // Softmax sampling. Exploration has to happen in move space: a genome
+        // that always plays its argmax explores only when its weights change.
+        let max = -Infinity;
+        for (const s of _cand.score) if (s > max) max = s;
+        let sum = 0;
+        const w = _cand.score.map(s => { const e = Math.exp((s - max) / temp); sum += e; return e; });
+        let t = rng() * sum;
+        for (let i = 0; i < w.length; i++) { t -= w[i]; if (t <= 0) { chosen = i; break; } }
+    } else {
+        let best = -Infinity;
+        for (let i = 0; i < _cand.score.length; i++) {
+            if (_cand.score[i] > best) { best = _cand.score[i]; chosen = i; }
+        }
+    }
+
+    const move = _cand.move[chosen];
+    if (record) {
+        record.mate = false;
+        record.side = side;
+        record.move = move;
+        record.score = _cand.score[chosen];
+        record.trunk = Array.from(pol.h);
+        // Head activity, redrawn on the board. Softmax over the squares that
+        // actually have a legal move, so the picture is a real distribution.
+        const fromProb = new Float64Array(64), toProb = new Float64Array(64);
+        let fmax = -Infinity;
+        for (const pi of _usedFrom) if (pol.fromLogit[pi] > fmax) fmax = pol.fromLogit[pi];
+        let fsum = 0;
+        const fExp = new Map();
+        for (const pi of _usedFrom) { const e = Math.exp(pol.fromLogit[pi] - fmax); fExp.set(pi, e); fsum += e; }
+        for (const pi of _usedFrom) fromProb[boardIdx(pi, side)] = fExp.get(pi) / fsum;
+
+        const chosenFrom = perspIdx(move.from, side);
+        const toLog = toLogitsFor(genome, chosenFrom);
+        const targets = moves.filter(m => m.from === move.from);
+        let tmax = -Infinity;
+        for (const m of targets) { const v = toLog[perspIdx(m.to, side)]; if (v > tmax) tmax = v; }
+        let tsum = 0;
+        const tExp = targets.map(m => { const e = Math.exp(toLog[perspIdx(m.to, side)] - tmax); tsum += e; return e; });
+        targets.forEach((m, i) => { toProb[boardIdx(perspIdx(m.to, side), side)] = tExp[i] / tsum; });
+
+        record.fromProb = fromProb;
+        record.toProb = toProb;
+        record.legalCount = moves.length;
+    }
+    return move;
+}
+
+// ------------------------------------------------------------------ players --
+function netPlayer(genome, popIdx, protectedPlay) {
+    return { type: 'net', genome, popIdx, kind: 'self', label: 'genome', protectedPlay: !!protectedPlay };
+}
+function botPlayer(rung) {
+    return { type: 'bot', fn: rung.fn, popIdx: -1, kind: rung.name, label: rung.label };
+}
+function hofPlayer(genome, gen) {
+    return { type: 'net', genome, popIdx: -1, kind: 'hof', label: `champion g${gen}`, protectedPlay: true };
+}
+
+// -------------------------------------------------------------------- match --
+class Match {
+    // `opts.noOpening` starts from the initial position instead of a book line
+    // or random prefix - used by the page's watch mode, where a viewer wants to
+    // see a game from move one.
+    constructor(white, black, openingSeed, opts) {
+        this.white = white;
+        this.black = black;
+        this.game = new Chess();
+        if (!(opts && opts.noOpening)) applyOpening(this.game, openingSeed);
+        // Private RNG seeded from the scenario, not shared with the rest of the
+        // generation. A capture bot that flips its coin the same way in every
+        // genome's copy of the same game is the other half of common random
+        // numbers: without it, two genomes facing "the same" opponent from the
+        // same opening still get different games.
+        this.rng = makeRng((openingSeed ^ 0xA53C9E17) >>> 0);
+        this.done = false;
+        this.outcome = this.game.result() || null;
+        if (this.outcome) this.done = true;
+    }
+
+    step(temp, rng, record) {
         if (this.done) return false;
         const g = this.game;
-        const idx = g.turn === 1 ? this.white : this.black;
-        const useNoise = idx < (protectedCount | 0) ? 0 : noise;
-        const move = chooseMove(g, pop[idx].genome, useNoise, rng, record);
+        const p = g.turn === 1 ? this.white : this.black;
+        const r = this.rng || rng;
+        let move;
+        if (p.type === 'bot') {
+            move = p.fn(g, r);
+        } else {
+            const t = p.protectedPlay ? 0 : temp;
+            move = chooseMove(g, p.genome, t, r, record);
+        }
         if (move === null) {
             this._finish(g.result() || { winner: 0, reason: 'stalemate' });
             return true;
@@ -157,8 +351,8 @@ class Match {
         if (res) { this._finish(res); return true; }
         if (g.ply >= MAX_PLIES) {
             const mat = g.material();
-            const winner = mat >= 2 ? 1 : mat <= -2 ? -1 : 0;
-            this._finish({ winner, reason: 'adjudicated' });
+            const winner = mat >= 1.5 ? 1 : mat <= -1.5 ? -1 : 0;
+            this._finish({ winner, reason: winner === 0 ? 'balanced' : 'adjudicated' });
             return true;
         }
         return false;
@@ -169,70 +363,89 @@ class Match {
         this.outcome = outcome;
     }
 
-    // Fitness for one player. Wins dominate everything; material, survival and
-    // speed are small shaping terms only. Checkmates beat adjudications so
-    // evolution is pushed toward actually finishing games.
-    fitnessFor(side) {
-        const mat = Math.max(-10, Math.min(10, this.game.material() * side));
-        const plies = this.game.ply;
-        if (this.outcome.winner === side) {
-            const mateBonus = this.outcome.reason === 'checkmate' ? 1500 : 0;
-            return WIN_REWARD + mateBonus + (MAX_PLIES - plies) * 5 + mat * 20;
-        }
-        if (this.outcome.winner === 0) return 1000 + mat * 40;
-        return -1000 + mat * 40 + plies * 2;
+    pointsFor(side) {
+        if (this.outcome.winner === side) return WIN_POINTS;
+        if (this.outcome.winner === 0) return DRAW_POINTS;
+        return 0;
     }
 }
 
+// ---------------------------------------------------------------- evolution --
 class Evolution {
-    constructor(popSize, seed) {
+    constructor(popSize, seed, opts) {
+        opts = opts || {};
         this.popSize = Math.max(16, popSize - (popSize % 2));
         this.seed = seed >>> 0;
         this.rng = makeRng(this.seed);
         this.gen = 1;
         this.stagnantGens = 0;
-        this.bestEver = { wins: -1, aggregate: -Infinity };
-        this.champion = null; // {genome, wins, aggregate, gen}
-        // per-generation series for the UI:
-        //   best/median  aggregate fitness (median = population as a whole)
-        //   bench        champion score vs a random-mover baseline (0..1)
-        //   mates/adjWins/draws  outcome fractions of all games that generation
-        this.history = { best: [], median: [], bench: [], mates: [], adjWins: [], draws: [] };
+        this.bestEver = -Infinity;
+        this.champion = null;   // {genome, fitness, points, gen}
+        this.hof = [];          // past champions, oldest first
+        this.tier = 1;          // how far up the scripted ladder we currently play
         this.diversity = 0;
         this.leaderIdx = 0;
-        this.recordLeader = true; // UI turns this off in headless mode
-        this._protectedCount = 0; // gen 1 is fully random, nothing protected yet
+        this.recordLeader = true;
+        this.leaderRecord = null;
+        this._protected = new Set();
+        this.history = {
+            best: [], median: [], ladder: [],
+            bench: LADDER.map(() => []), // one series per ladder rung
+            mates: [], adjWins: [], draws: []
+        };
         this.pop = [];
         for (let i = 0; i < this.popSize; i++) {
             this.pop.push(this._newIndividual(randomGenome(this.rng)));
+        }
+        if (opts.seedGenome) {
+            // Warm start: the built-in champion plus a spread of variants.
+            const base = opts.seedGenome;
+            this.pop[0].genome = cloneGenome(base);
+            for (let i = 1; i < Math.min(this.popSize, 12); i++) {
+                this.pop[i].genome = mutate(cloneGenome(base), 0.12, 0.18, 0.001, this.rng);
+            }
+            this.champion = { genome: cloneGenome(base), fitness: 0, points: 0, gen: 0 };
         }
         this._startGeneration();
     }
 
     _newIndividual(genome) {
-        return { genome, fitnesses: [], wins: 0, draws: 0, losses: 0, aggregate: 0, score: 0 };
+        return {
+            genome, games: [], wsum: 0, psum: 0, points: 0,
+            wins: 0, draws: 0, losses: 0, matWins: 0, fitness: 0,
+            matSum: 0, mateCount: 0, repDraws: 0
+        };
     }
 
     effectiveMutation() {
         const s = Math.min(this.stagnantGens / GA.stagnationThreshold, 1);
         const lerp = (a, b) => a + (b - a) * s;
         return {
-            rate: GA.baseMutationRate * lerp(1, 1.8),
-            strength: GA.baseMutationStrength * lerp(1, 2.2),
+            rate: GA.baseMutationRate * lerp(1, 1.9),
+            strength: GA.baseMutationStrength * lerp(1, 2.4),
             resetProb: GA.baseResetProb * lerp(1, 3.0),
             scale: s
         };
     }
 
+    // Which scripted rungs are in play this generation.
+    activeLadder() {
+        return LADDER.slice(0, Math.min(this.tier, LADDER.length));
+    }
+
     _startGeneration() {
         for (const ind of this.pop) {
-            ind.fitnesses = [];
-            ind.wins = 0; ind.draws = 0; ind.losses = 0; ind.score = 0;
+            ind.games = []; ind.wsum = 0; ind.psum = 0; ind.points = 0;
+            ind.wins = 0; ind.draws = 0; ind.losses = 0;
+            ind.matSum = 0; ind.mateCount = 0; ind.repDraws = 0;
         }
         this._genOutcomes = { mate: 0, adj: 0, draw: 0, total: 0 };
-        this.round = 0;       // 0..3: R1 colors A, R1 colors B, R2 A, R2 B
-        this.noise = Math.max(0, 0.15 * (1 - this.gen / 25));
-        this._round1Pairs = this._shufflePairs();
+        this.wave = 0;
+        // Exploration temperature: high early, effectively off once the
+        // population is doing something deliberate.
+        this.temp = Math.max(0, 0.55 * (1 - this.gen / 60));
+        this._selfPairs = this._shufflePairs();
+        this._gauntlet = this._drawGauntlet();
         this._startWave();
     }
 
@@ -248,197 +461,304 @@ class Evolution {
     }
 
     _scorePairs() {
-        // Swiss-style: rank by in-generation results so far, pair neighbours.
-        const order = [...Array(this.popSize).keys()].sort((a, b) => {
-            const A = this.pop[a], B = this.pop[b];
-            return (B.wins - A.wins) || (B.score - A.score);
-        });
+        const order = [...Array(this.popSize).keys()].sort((a, b) =>
+            (this.pop[b].psum - this.pop[a].psum));
         const pairs = [];
         for (let i = 0; i < order.length; i += 2) pairs.push([order[i], order[i + 1]]);
         return pairs;
     }
 
-    _startWave() {
-        const pairs = this.round < 2 ? this._round1Pairs : (this._round2Pairs ||= this._scorePairs());
-        const swap = this.round % 2 === 1;
-        this.matches = pairs.map(([a, b]) => swap ? new Match(b, a) : new Match(a, b));
-        this._cursor = 0;
-        this.gamesDone = 0;
+    // ONE bank of opponents for the whole generation, shared by every genome.
+    //
+    // This is the single most important variance reduction in the run. Drawing
+    // a different opponent and a different opening for each individual means
+    // two genomes are graded on two different exams, and with only a handful of
+    // games each the ranking measures the draw at least as much as it measures
+    // skill. Same opponents, same openings, same bot decisions - then a
+    // difference in score is a difference in play. The bank is redrawn every
+    // generation, so nothing gets to overfit to it.
+    _drawGauntlet() {
+        const rungs = this.activeLadder();
+        const bank = [];
+        for (let k = 0; k < GA.gauntletOpponents; k++) {
+            if (this.hof.length && this.rng() < 0.3) {
+                const h = this.hof[Math.floor(this.rng() * this.hof.length)];
+                bank.push({ player: hofPlayer(h.genome, h.gen), weight: OPP_WEIGHT.hof });
+                continue;
+            }
+            // Always a taste of the next rung up. A hard gate means the
+            // population only ever meets opponents it has already half-beaten,
+            // and the top rung can end up never unlocking at all.
+            const next = LADDER[this.tier];
+            const r = (next && this.rng() < 0.25) ? next
+                : (this.rng() < 0.6 ? rungs[rungs.length - 1]
+                                    : rungs[Math.floor(this.rng() * rungs.length)]);
+            bank.push({ player: botPlayer(r), weight: r.weight });
+        }
+        return bank;
     }
 
-    // Advance up to `budget` plies across active games. Returns plies made.
+    _openingSeed(waveGroup, idx) {
+        return (Math.imul(this.seed ^ Math.imul(this.gen, 0x9E3779B1), 0x85EBCA6B) ^
+                Math.imul(waveGroup * 977 + idx, 0xC2B2AE35)) >>> 0;
+    }
+
+    _startWave() {
+        const w = this.wave;
+        this.matches = [];
+        if (w < 4) {
+            const pairs = w < 2 ? this._selfPairs : (this._round2Pairs ||= this._scorePairs());
+            const swap = w % 2 === 1;
+            pairs.forEach(([a, b], i) => {
+                const seed = this._openingSeed(w < 2 ? 0 : 1, i);
+                const A = netPlayer(this.pop[a].genome, a, this._protected.has(a));
+                const B = netPlayer(this.pop[b].genome, b, this._protected.has(b));
+                this.matches.push(swap ? new Match(B, A, seed) : new Match(A, B, seed));
+            });
+        } else {
+            const asWhite = w === 4;
+            for (let i = 0; i < this.popSize; i++) {
+                this._gauntlet.forEach((opp, k) => {
+                    // Same opening and the same scripted opponent for every
+                    // genome in the population - only the genome differs. The
+                    // seed deliberately ignores the wave, so wave 4 and wave 5
+                    // are the same game with the colours swapped.
+                    const seed = this._openingSeed(2 + k, 0);
+                    const me = netPlayer(this.pop[i].genome, i, this._protected.has(i));
+                    const flip = k % 2 === 1; // second opponent gets the other colour
+                    const meWhite = asWhite !== flip;
+                    const m = meWhite ? new Match(me, opp.player, seed) : new Match(opp.player, me, seed);
+                    m.weight = opp.weight;
+                    this.matches.push(m);
+                });
+            }
+        }
+        for (const m of this.matches) if (m.weight === undefined) m.weight = OPP_WEIGHT.self;
+        this._cursor = 0;
+        this.gamesDone = this.matches.filter(m => m.done).length;
+        for (const m of this.matches) if (m.done) this._applyResult(m);
+    }
+
+    // Advance up to `budget` plies across the active wave.
     step(budget) {
         let made = 0;
         while (made < budget) {
             if (this.gamesDone >= this.matches.length) {
                 this._endWave();
-                made++; // count transitions so the loop always terminates
+                made++;
                 continue;
             }
             const m = this.matches[this._cursor];
             this._cursor = (this._cursor + 1) % this.matches.length;
             if (m.done) continue;
             const isLeader = this.recordLeader &&
-                (m.white === this.leaderIdx || m.black === this.leaderIdx);
+                (m.white.popIdx === this.leaderIdx || m.black.popIdx === this.leaderIdx);
             const record = isLeader ? {} : null;
-            const finished = m.step(this.pop, this.noise, this.rng, record, this._protectedCount);
-            if (record && record.layers) this.leaderRecord = record;
+            const finished = m.step(this.temp, this.rng, record);
+            if (record && record.fromProb) this.leaderRecord = record;
             made++;
-            if (finished) {
-                this.gamesDone++;
-                this._applyResult(m);
-            }
+            if (finished) { this.gamesDone++; this._applyResult(m); }
         }
         return made;
     }
 
     _applyResult(m) {
-        const w = this.pop[m.white], b = this.pop[m.black];
-        const fw = m.fitnessFor(1), fb = m.fitnessFor(-1);
-        w.fitnesses.push(fw); b.fitnesses.push(fb);
-        w.score += fw; b.score += fb;
-        const win = m.outcome.winner;
-        if (win === 1) { w.wins++; b.losses++; }
-        else if (win === -1) { b.wins++; w.losses++; }
-        else { w.draws++; b.draws++; }
+        const credit = (player, side) => {
+            if (player.popIdx < 0) return;
+            const ind = this.pop[player.popIdx];
+            const pts = m.pointsFor(side);
+            const w = m.weight;
+            ind.games.push(pts);
+            ind.wsum += w;
+            ind.psum += w * pts;
+            ind.points += pts;
+            if (pts === WIN_POINTS) ind.wins++;
+            else if (pts === DRAW_POINTS) ind.draws++;
+            else ind.losses++;
+            ind.matSum += Math.max(-8, Math.min(8, m.game.material() * side));
+            if (m.outcome.reason === 'checkmate' && m.outcome.winner === side) ind.mateCount++;
+            if (m.outcome.winner === 0 &&
+                (m.outcome.reason === 'repetition' || m.outcome.reason === '50-move')) ind.repDraws++;
+        };
+        credit(m.white, 1);
+        credit(m.black, -1);
         const o = this._genOutcomes;
-        if (win === 0) o.draw++;
+        if (m.outcome.winner === 0) o.draw++;
         else if (m.outcome.reason === 'checkmate') o.mate++;
         else o.adj++;
         o.total++;
     }
 
     _endWave() {
-        this.round++;
-        if (this.round < 4) { this._startWave(); return; }
+        this.wave++;
+        if (this.wave < 6) { this._startWave(); return; }
         this._finishGeneration();
     }
 
-    _finishGeneration() {
-        // Robust aggregate: mean * 0.58 + median * 0.27 + worst * 0.15
-        for (const ind of this.pop) {
-            const fs = ind.fitnesses.slice().sort((a, b) => a - b);
-            const mean = fs.reduce((s, v) => s + v, 0) / fs.length;
-            const median = fs.length % 2 ? fs[(fs.length - 1) / 2]
-                : (fs[fs.length / 2 - 1] + fs[fs.length / 2]) / 2;
-            ind.aggregate = mean * 0.58 + median * 0.27 + fs[0] * 0.15;
-        }
-        // Lexicographic rank: wins first, then aggregate fitness
-        const ranked = this.pop.slice().sort((a, b) =>
-            (b.wins - a.wins) || (b.aggregate - a.aggregate));
+    // Fitness. Weighted score against everything faced is the backbone; the
+    // shaping terms are small on purpose - they break ties between genomes with
+    // identical results, they must never outrank an actual win.
+    _score(ind) {
+        const n = ind.games.length || 1;
+        const rate = ind.wsum ? ind.psum / ind.wsum : 0;
+        const mat = ind.matSum / n;
+        return 1000 * rate
+            + 34 * Math.max(-8, Math.min(8, mat))
+            + 110 * (ind.mateCount / n)
+            - 45 * (ind.repDraws / n);
+    }
 
+    _finishGeneration() {
+        for (const ind of this.pop) ind.fitness = this._score(ind);
+        const ranked = this.pop.slice().sort((a, b) => b.fitness - a.fitness);
         const best = ranked[0];
         const o = this._genOutcomes;
-        this.history.best.push(best.aggregate);
-        this.history.median.push(ranked[Math.floor(ranked.length / 2)].aggregate);
+
+        this.history.best.push(best.fitness);
+        this.history.median.push(ranked[Math.floor(ranked.length / 2)].fitness);
         this.history.mates.push(o.total ? o.mate / o.total : 0);
         this.history.adjWins.push(o.total ? o.adj / o.total : 0);
         this.history.draws.push(o.total ? o.draw / o.total : 0);
 
-        // Champion update: champion plays every generation, so compare on
-        // current results only.
-        if (!this.champion || best.wins > this.champion.wins ||
-            (best.wins === this.champion.wins && best.aggregate >= this.champion.aggregate) ||
-            best.genome === this.champion.genome) {
-            this.champion = {
-                genome: cloneGenome(best.genome),
-                wins: best.wins, aggregate: best.aggregate, gen: this.gen
-            };
-        } else {
-            // refresh champion's current-generation stats if it is in the pop
-            const champInd = this.pop.find(i => i.genome === this._champRef);
-            if (champInd) { this.champion.wins = champInd.wins; this.champion.aggregate = champInd.aggregate; }
-        }
+        this._updateChampion(best);
+        this._benchmark();
+        this._updateTier();
 
-        // Stagnation tracking (meaningful improvement only)
-        const improved = best.wins > this.bestEver.wins ||
-            (best.wins === this.bestEver.wins &&
-             best.aggregate > this.bestEver.aggregate + Math.abs(this.bestEver.aggregate) * 0.005 + 1);
-        if (improved) {
-            this.bestEver = { wins: best.wins, aggregate: best.aggregate };
-            this.stagnantGens = 0;
-        } else {
-            this.stagnantGens++;
-        }
+        const improved = best.fitness > this.bestEver + Math.abs(this.bestEver) * 0.004 + 2;
+        if (improved) { this.bestEver = best.fitness; this.stagnantGens = 0; }
+        else this.stagnantGens++;
 
-        this._benchmarkChampion();
         this._breed(ranked);
         this._estimateDiversity();
+        const trim = a => { if (a.length > 600) a.shift(); };
         for (const key of Object.keys(this.history)) {
-            if (this.history[key].length > 400) this.history[key].shift();
+            const v = this.history[key];
+            if (key === 'bench') v.forEach(trim); else trim(v);
         }
         this.gen++;
         this._round2Pairs = null;
         this._startGeneration();
     }
 
-    // Interpretable learning signal: the champion plays 4 quick games against
-    // a uniformly random legal-move player. Score = (wins + draws/2) / 4.
-    // A random genome hovers near 0.5 vs random; real learning pushes this
-    // toward 1.0.
-    _benchmarkChampion() {
-        if (!this.champion) { this.history.bench.push(0.5); return; }
-        const rng = makeRng((this.seed ^ Math.imul(this.gen, 2654435761)) >>> 0);
-        let score = 0;
-        const games = 4;
-        for (let gi = 0; gi < games; gi++) {
-            const champSide = gi % 2 === 0 ? 1 : -1;
-            const g = new Chess();
-            while (!g.result() && g.ply < 120) {
-                let m;
-                if (g.turn === champSide) {
-                    m = chooseMove(g, this.champion.genome, 0, rng, null);
-                } else {
-                    const ms = g.moves();
-                    m = ms.length ? ms[Math.floor(rng() * ms.length)] : null;
-                }
-                if (!m) break;
-                g.push(m);
-            }
-            const res = g.result();
-            let winner;
-            if (res) winner = res.winner;
-            else { const mat = g.material(); winner = mat >= 2 ? 1 : mat <= -2 ? -1 : 0; }
-            if (winner === champSide) score += 1;
-            else if (winner === 0) score += 0.5;
+    // A challenger only becomes champion by beating the incumbent head to head,
+    // over openings neither of them trained on this generation.
+    _updateChampion(best) {
+        if (!this.champion) {
+            this.champion = {
+                genome: cloneGenome(best.genome), fitness: best.fitness,
+                points: best.points, gen: this.gen, duel: 1
+            };
+            this.hof.push({ genome: cloneGenome(best.genome), gen: this.gen });
+            return;
         }
-        this.history.bench.push(score / games);
+        const duel = this.duel(best.genome, this.champion.genome, GA.duelGames,
+            (this.seed ^ Math.imul(this.gen, 0x27D4EB2D)) >>> 0);
+        this.lastDuel = duel;
+        if (duel >= GA.duelMargin) {
+            this.champion = {
+                genome: cloneGenome(best.genome), fitness: best.fitness,
+                points: best.points, gen: this.gen, duel
+            };
+            this.hof.push({ genome: cloneGenome(best.genome), gen: this.gen });
+            while (this.hof.length > GA.hofSize) this.hof.shift();
+        }
     }
 
-    // Cheap genome-diversity estimate: mean |gene difference| over sampled
-    // pairs. Near zero means the population has converged.
+    // Head-to-head score for A against B, colours balanced, in [0, 1].
+    duel(a, b, games, seed) {
+        const rng = makeRng(seed >>> 0);
+        let score = 0;
+        for (let i = 0; i < games; i++) {
+            const openSeed = (seed ^ Math.imul(i + 1, 0x9E3779B1)) >>> 0;
+            const A = { type: 'net', genome: a, popIdx: -1, protectedPlay: true };
+            const B = { type: 'net', genome: b, popIdx: -1, protectedPlay: true };
+            const aWhite = i % 2 === 0;
+            const m = aWhite ? new Match(A, B, openSeed) : new Match(B, A, openSeed);
+            let guard = 0;
+            while (!m.done && guard++ < MAX_PLIES + 8) m.step(0, rng, null);
+            if (!m.done) m._finish({ winner: 0, reason: 'balanced' });
+            score += m.pointsFor(aWhite ? 1 : -1);
+        }
+        return score / games;
+    }
+
+    // Absolute yardsticks: the champion against each scripted rung. These
+    // numbers mean the same thing in every generation, which is the whole
+    // point of having them.
+    scoreVsBot(genome, rung, games, seed) {
+        const rng = makeRng(seed >>> 0);
+        let score = 0;
+        for (let i = 0; i < games; i++) {
+            const openSeed = (seed ^ Math.imul(i + 7, 0x85EBCA6B)) >>> 0;
+            const me = { type: 'net', genome, popIdx: -1, protectedPlay: true };
+            const bot = botPlayer(rung);
+            const meWhite = i % 2 === 0;
+            const m = meWhite ? new Match(me, bot, openSeed) : new Match(bot, me, openSeed);
+            let guard = 0;
+            while (!m.done && guard++ < MAX_PLIES + 8) m.step(0, rng, null);
+            if (!m.done) m._finish({ winner: 0, reason: 'balanced' });
+            score += m.pointsFor(meWhite ? 1 : -1);
+        }
+        return score / games;
+    }
+
+    // Every rung is measured every generation, unlocked or not, so the charts
+    // show the whole ladder from the start and the gating decision is never
+    // made on a series that only began after the gate opened.
+    _benchmark() {
+        const g = this.champion ? this.champion.genome : this.pop[0].genome;
+        const seed = (this.seed ^ Math.imul(this.gen, 2654435761)) >>> 0;
+        let sum = 0;
+        LADDER.forEach((rung, i) => {
+            const s = this.scoreVsBot(g, rung, GA.benchGames, (seed ^ Math.imul(i + 1, 0x2545F491)) >>> 0);
+            this.history.bench[i].push(s);
+            sum += s;
+        });
+        // One headline number: how far up the ladder the champion has climbed.
+        this.history.ladder.push(sum / LADDER.length);
+    }
+
+    // Unlock the next rung once the current top one is comfortably beaten.
+    // Each benchmark is only a handful of games, so the gate reads a mean over
+    // 8 generations - unlocking on one lucky sample throws the population at an
+    // opponent it cannot score against, and a rung nobody ever beats
+    // contributes no selection signal at all.
+    _updateTier() {
+        const GATE = [0.85, 0.78, 0.70];
+        const t = this.history.bench[this.tier - 1].slice(-8);
+        if (t.length < 8 || this.tier >= LADDER.length) return;
+        const mean = t.reduce((s, v) => s + v, 0) / t.length;
+        if (mean >= GATE[this.tier - 1]) this.tier++;
+    }
+
     _estimateDiversity() {
         const n = this.pop.length;
-        let sum = 0, count = 0;
-        for (let s = 0; s < 12; s++) {
+        let sum = 0;
+        for (let s = 0; s < 14; s++) {
             const a = this.pop[Math.floor(this.rng() * n)].genome;
             const b = this.pop[Math.floor(this.rng() * n)].genome;
-            for (let t = 0; t < 40; t++) {
-                const i = Math.floor(this.rng() * a.length);
-                sum += Math.abs(a[i] - b[i]);
-                count++;
-            }
+            sum += genomeDistance(a, b, this.rng, 60);
         }
-        this.diversity = sum / count;
+        this.diversity = sum / 14;
     }
 
     _breed(ranked) {
         const mut = this.effectiveMutation();
         const next = [];
-        // exact elites (deep-cloned so nothing can mutate them in place)
-        for (let i = 0; i < Math.min(GA.elites, ranked.length); i++) {
-            next.push(this._newIndividual(cloneGenome(ranked[i].genome)));
-        }
-        // protected global champion (skip if identical to elite #1)
-        const champDup = ranked[0].genome === this._champRef;
-        if (this.champion && !champDup) {
-            next.push(this._newIndividual(cloneGenome(this.champion.genome)));
-        }
-        this._champRef = next.length > GA.elites ? next[GA.elites].genome : next[0].genome;
-        this._protectedCount = next.length; // elites + champion play noise-free
-        this.leaderIdx = 0; // elites are placed first; slot 0 is last gen's best
+        const push = g => { next.push(this._newIndividual(g)); };
 
-        // rank-biased parent sampling
+        for (let i = 0; i < Math.min(GA.elites, ranked.length); i++) {
+            push(cloneGenome(ranked[i].genome));
+        }
+        // Skip the extra champion copy when an elite already is the champion.
+        const champIsElite = this.champion && ranked.slice(0, GA.elites).some(r =>
+            genomeDistance(r.genome, this.champion.genome, this.rng, 120) === 0);
+        if (this.champion && !champIsElite) push(cloneGenome(this.champion.genome));
+        // Elites and the champion play without exploration noise, so their
+        // results are their real strength and not a lucky sample.
+        this._protected = new Set([...Array(next.length).keys()]);
+        this.leaderIdx = 0;
+
         const nRanked = ranked.length;
         const weights = ranked.map((_, r) => Math.pow(nRanked - r, GA.selectionPressure));
         const totalW = weights.reduce((s, v) => s + v, 0);
@@ -450,45 +770,97 @@ class Evolution {
 
         const free = this.popSize - next.length;
         const nChampVar = Math.round(free * GA.champVariantFrac);
-        const nImmigrant = Math.max(1, Math.round(free * GA.immigrantFrac));
         const nCross = Math.round(free * GA.crossoverFrac);
+        const nRowMut = Math.round(free * GA.rowMutantFrac);
+        const nImmigrant = Math.max(1, Math.round(free * GA.immigrantFrac));
 
         for (let i = 0; i < nChampVar && next.length < this.popSize; i++) {
-            const g = mutate(cloneGenome(this.champion.genome),
-                mut.rate * 0.6, mut.strength * 0.5, mut.resetProb, this.rng);
-            next.push(this._newIndividual(g));
+            push(mutate(cloneGenome(this.champion.genome),
+                mut.rate * 0.55, mut.strength * 0.45, mut.resetProb, this.rng));
         }
         for (let i = 0; i < nCross && next.length < this.popSize; i++) {
             let a = pickParent(), b = pickParent(), tries = 0;
             while (b === a && tries++ < 8) b = pickParent();
-            const g = mutate(crossover(a.genome, b.genome, this.rng),
-                mut.rate, mut.strength, mut.resetProb, this.rng);
-            next.push(this._newIndividual(g));
+            push(mutate(crossover(a.genome, b.genome, this.rng),
+                mut.rate, mut.strength, mut.resetProb, this.rng));
+        }
+        for (let i = 0; i < nRowMut && next.length < this.popSize; i++) {
+            push(mutateRows(cloneGenome(pickParent().genome), 2 + Math.floor(this.rng() * 4),
+                mut.strength * 3.2, this.rng));
         }
         while (next.length < this.popSize - nImmigrant) {
-            const g = mutate(cloneGenome(pickParent().genome),
-                mut.rate * 1.4, mut.strength * 1.3, mut.resetProb, this.rng);
-            next.push(this._newIndividual(g));
+            push(mutate(cloneGenome(pickParent().genome),
+                mut.rate * 1.5, mut.strength * 1.4, mut.resetProb, this.rng));
         }
-        while (next.length < this.popSize) {
-            next.push(this._newIndividual(randomGenome(this.rng))); // fresh immigrants
+        while (next.length < this.popSize) push(randomGenome(this.rng));
+
+        // Near-duplicate guard: a population of clones cannot search anything.
+        // Anything that collapses onto an elite gets shaken hard instead.
+        const guardFrom = this._protected.size;
+        for (let i = guardFrom; i < next.length; i++) {
+            for (let e = 0; e < guardFrom; e++) {
+                if (genomeDistance(next[i].genome, next[e].genome, this.rng, 80) < GA.cloneDistance) {
+                    mutate(next[i].genome, 0.3, mut.strength * 2.5, 0.004, this.rng);
+                    break;
+                }
+            }
         }
-        // safety net: repair anything invalid rather than crash mid-run
-        for (const ind of next) {
-            if (!validGenome(ind.genome)) repairGenome(ind.genome);
-        }
+        for (const ind of next) if (!validGenome(ind.genome)) repairGenome(ind.genome);
         this.pop = next;
+    }
+
+    // Drop genomes in from outside (island migration, or a saved brain the user
+    // loaded) and restart the current generation so they play a full schedule
+    // instead of half of one.
+    inject(genomes) {
+        let i = this.popSize - 1;
+        for (const g of genomes) {
+            if (!validGenome(g) || i <= GA.elites) break;
+            this.pop[i].genome = cloneGenome(g);
+            i--;
+        }
+        this._startGeneration();
+    }
+
+    // Adopt an outside genome as champion, but only if it can prove it.
+    adoptChampion(genome, gen) {
+        if (!validGenome(genome)) return false;
+        if (this.champion) {
+            const s = this.duel(genome, this.champion.genome, GA.duelGames,
+                (this.seed ^ 0x5bf03635 ^ Math.imul(this.gen, 7)) >>> 0);
+            if (s <= 0.5) return false;
+        }
+        this.champion = { genome: cloneGenome(genome), fitness: 0, points: 0, gen: gen || this.gen };
+        this.hof.push({ genome: cloneGenome(genome), gen: gen || this.gen });
+        while (this.hof.length > GA.hofSize) this.hof.shift();
+        return true;
     }
 
     leaderMatch() {
         if (!this.matches) return null;
-        return this.matches.find(m =>
-            (m.white === this.leaderIdx || m.black === this.leaderIdx) && !m.done)
-            || this.matches.find(m => m.white === this.leaderIdx || m.black === this.leaderIdx)
-            || null;
+        const has = m => m.white.popIdx === this.leaderIdx || m.black.popIdx === this.leaderIdx;
+        return this.matches.find(m => has(m) && !m.done) || this.matches.find(has) || null;
+    }
+
+    // Snapshot for the trainer / UI.
+    summary() {
+        const h = this.history;
+        const last = a => a.length ? a[a.length - 1] : 0;
+        return {
+            gen: this.gen, tier: this.tier, stagnant: this.stagnantGens,
+            best: last(h.best), median: last(h.median),
+            bench: h.bench.map(last), ladder: last(h.ladder),
+            draws: last(h.draws), mates: last(h.mates),
+            diversity: this.diversity, hof: this.hof.length,
+            championGen: this.champion ? this.champion.gen : 0
+        };
     }
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { Evolution, Match, chooseMove, encodeFeatures, MAX_PLIES, FEAT_LEN, GA };
+    module.exports = {
+        Evolution, Match, chooseMove, staticEval, applyOpening, OPENING_BOOK,
+        LADDER, botRandom, botCapture, botGreedy, netPlayer, botPlayer, hofPlayer,
+        GA, OPP_WEIGHT, boardIdx
+    };
 }
