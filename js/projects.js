@@ -627,8 +627,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const thumb = pillsEl.querySelector('.vc-pill-thumb');
         const active = pillsEl.querySelector('.vc-pill.is-active');
         if (!thumb || !active) return;
+        /* Y as well as X: on a phone the pills wrap onto two rows rather than
+           scrolling sideways with the last one sliced in half, and a thumb
+           that only tracks X would sit above whichever pill is lit. */
         thumb.style.width = `${active.offsetWidth}px`;
-        thumb.style.transform = `translateX(${active.offsetLeft}px)`;
+        thumb.style.height = `${active.offsetHeight}px`;
+        thumb.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop - 3}px)`;
     }
 
     /* ═══════════════════════════════════════════════════════════

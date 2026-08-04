@@ -485,3 +485,56 @@ button:active {
     border: 1px solid var(--border-color);
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PHONE — see shared_assets/mobile.{css,js}
+
+   Desktop is settings | canvas | settings. On a phone the shared layer moves
+   both sidebars into a bottom sheet ("Setup" and "Puzzle") and the canvas
+   takes the screen; these are the app's own bits that have to follow.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+body.mob-shell { height: 100dvh; }
+
+/* 100px of breathing room around the artwork is most of a 390px screen. */
+body.mob-shell .canvas-area { padding: 16px; }
+
+/* The rulers are decorative at this size and the toolbar was parked 70px
+   above the artwork, i.e. off the top of the stage. */
+body.mob-shell .ruler { display: none; }
+body.mob-shell .ruler-wrapper { padding: 0; }
+
+/* The toolbar hangs 70px above the bed, i.e. off the top of the stage once
+   the stage is only as tall as the phone. Park it against the bottom bar,
+   clear of the artwork, instead of floating over it. */
+body.mob-shell .canvas-toolbar {
+    position: fixed;
+    top: auto;
+    bottom: calc(var(--mob-bar-h, 46px) + 10px);
+    left: 50%;
+    z-index: 40;
+}
+
+/* The sidebar was a fixed-width column with 24px padding; inside the sheet it
+   is the full width and the sheet supplies its own padding. */
+body.mob-shell .mob-sheet .sidebar {
+    width: 100% !important;
+    padding: 0 !important;
+    gap: 18px;
+    border: none;
+}
+
+body.mob-shell .mob-sheet .sidebar > header { display: none; }
+
+/* A flex child wider than a centred container overflows equally both ways,
+   and the half that goes past the start edge cannot be scrolled to. `auto`
+   margins centre the same way but keep the overflow scrollable — so a bed
+   larger than the screen is still reachable end to end. */
+body.mob-shell .canvas-area {
+    justify-content: flex-start;
+    align-items: flex-start;
+}
+
+body.mob-shell .canvas-area > .ruler-wrapper { margin: auto; }
+
+body.mob-shell .canvas-toolbar .toolbar-btn { white-space: nowrap; }

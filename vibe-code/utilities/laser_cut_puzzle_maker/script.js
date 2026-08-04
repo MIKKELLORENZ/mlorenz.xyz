@@ -151,6 +151,21 @@ function initCanvas() {
     canvas.setDimensions({ width: w, height: h });
     updateRulers();
 }
+
+/* The bed is a fixed pixel size, so 800×600 on a 390px phone hangs off both
+   edges of a centred flex container — the half that overflows to the left is
+   unreachable even by scrolling. Start it at something that fits instead; the
+   size inputs still take any number the moment you want a bigger puzzle. */
+function fitBedToPhone() {
+    /* Measured off the viewport, not the stage: this runs before mobile.js has
+       moved the sidebars out, so the stage is still squeezed between them. */
+    if (window.innerWidth > 700) return;
+    const w = Math.max(240, window.innerWidth - 34);
+    if (w >= parseInt(canvasWidthInput.value)) return;
+    canvasWidthInput.value = w;
+    canvasHeightInput.value = Math.round(w * 0.75);
+}
+fitBedToPhone();
 initCanvas();
 
 // Reactive canvas resizing (no update button)

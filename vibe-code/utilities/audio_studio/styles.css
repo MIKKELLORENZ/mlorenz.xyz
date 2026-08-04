@@ -2703,3 +2703,67 @@ input[type="range"]:hover::-moz-range-thumb {
 .modal-content.wide {
     max-width: 1200px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PHONE — see shared_assets/mobile.{css,js}
+
+   Desktop is header / (timeline + master strip). On a phone the shared layer
+   lifts the transport into the bottom bar and the master strip into a sheet,
+   so the timeline — the only part you actually read — gets the screen.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+body.mob-shell { height: 100dvh; }
+body.mob-shell .main-layout { height: 100dvh; }
+
+body.mob-shell {
+    /* 200px of track controls out of 390 leaves the waveform a sliver. */
+    --track-controls-width: 104px;
+    --master-track-width: 100%;
+}
+
+/* Six file buttons, a clock and the transport do not fit on one line and
+   there is nothing here worth hiding, so the row scrolls. */
+body.mob-shell .header {
+    padding: 6px 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+body.mob-shell .header::-webkit-scrollbar { display: none; }
+body.mob-shell .header-controls { flex-wrap: nowrap; gap: 6px; }
+body.mob-shell .header-controls > * { flex: 0 0 auto; }
+body.mob-shell .time-display { font-size: 0.8rem; }
+
+/* Transport, once it is a row in the bottom bar. */
+body.mob-shell .mob-bar .transport { gap: 4px; }
+body.mob-shell .mob-bar .transport-btn { width: 42px; height: 42px; font-size: 1rem; }
+
+/* The master strip was an 80px vertical column; in the sheet it is a full
+   width row, so the fader lies down and the meters sit beside it. */
+body.mob-shell .mob-sheet .master-track {
+    flex-direction: row;
+    align-items: stretch;
+    padding: 0;
+    gap: 14px;
+    border-left: none;
+    width: 100% !important;
+}
+
+body.mob-shell .mob-sheet .master-header { flex-direction: column; gap: 6px; }
+body.mob-shell .mob-sheet .master-fader { flex: 1 1 auto; }
+body.mob-shell .mob-sheet .vertical-slider-wrapper { height: 180px; }
+
+body.mob-shell .track-name { font-size: 0.72rem; }
+body.mob-shell .add-track-container { padding: 8px; }
+
+/* Settings modals were sized for a desktop dialog. */
+body.mob .modal-content,
+body.mob .modal-content.wide {
+    width: 96vw;
+    max-width: 96vw;
+    max-height: 88dvh;
+    margin: 4dvh auto;
+    padding: 16px 12px;
+}
+
+body.mob .settings-sections { grid-template-columns: 1fr; }

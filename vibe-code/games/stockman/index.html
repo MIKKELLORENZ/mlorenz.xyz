@@ -8,6 +8,11 @@
 </head>
 <body>
   <canvas id="game" tabindex="0"></canvas>
+
+  <!-- The board is a fixed 1280x720; upright on a phone that is a third of
+       actual size, and the game is perfectly playable there but hard to read.
+       Say so once, at the top, rather than letting people squint at it. -->
+  <p class="rotate-hint">Turn your phone sideways for a bigger board</p>
   <script src="variables.js"></script>
   <script src="game.js"></script>
 </body>

@@ -175,7 +175,11 @@
         grid.innerHTML = items.map(item => `
             <a class="card invention-card" href="#${item.slug}" onclick="showArticle('${item.slug}'); return false;">
                 ${item.cover
-                    ? `<div class="card-image"><img src="${item.slug}/${item.cover}" alt="${item.title}"></div>`
+                    /* A cover named in the JSON but missing on disk renders as
+                       a broken-image icon with the title spilled next to it —
+                       fall back to the same placeholder a coverless entry gets. */
+                    ? `<div class="card-image"><img src="${item.slug}/${item.cover}" alt="${item.title}" loading="lazy"
+                            onerror="this.closest('.card-image').classList.add('invention-placeholder'); this.remove();"></div>`
                     : `<div class="card-image invention-placeholder"><i class="fas fa-lightbulb"></i></div>`
                 }
                 <div class="card-content">

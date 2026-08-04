@@ -88,14 +88,43 @@ const sounds = {
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
+// The whole trading UI is drawn in canvas pixels against a wide screen: the
+// stock list, the portfolio column and the chart are laid out as fractions of
+// W, and below about 900px they collapse into each other. So on a narrow
+// screen we stop drawing at the viewport size and draw one fixed 1280x720
+// board instead, scaled down to fit. It comes out small in portrait and
+// full-size the moment the phone is turned, which is the honest trade — every
+// panel stays where the game expects it either way.
+const DESIGN_W = 1280, DESIGN_H = 720;
+let viewScale = 1, viewOffX = 0, viewOffY = 0, letterboxed = false;
+
 function resizeCanvas() {
-  W = window.innerWidth;
-  H = window.innerHeight;
-  canvas.width = W;
-  canvas.height = H;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  letterboxed = vw < 900;
+
+  if (!letterboxed) {
+    W = vw; H = vh;
+    canvas.width = W; canvas.height = H;
+    canvas.style.width = "100vw"; canvas.style.height = "100vh";
+    canvas.style.marginLeft = "0"; canvas.style.marginTop = "0";
+    viewScale = 1; viewOffX = 0; viewOffY = 0;
+    return;
+  }
+
+  W = DESIGN_W; H = DESIGN_H;
+  canvas.width = W; canvas.height = H;
+  viewScale = Math.min(vw / W, vh / H);
+  const cw = W * viewScale, ch = H * viewScale;
+  viewOffX = (vw - cw) / 2;
+  viewOffY = (vh - ch) / 2;
+  canvas.style.width = cw + "px";
+  canvas.style.height = ch + "px";
+  canvas.style.marginLeft = viewOffX + "px";
+  canvas.style.marginTop = viewOffY + "px";
 }
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
+window.addEventListener("orientationchange", () => setTimeout(resizeCanvas, 200));
 
 // Preload images
 const bgImg = new Image();   bgImg.src = "wallpaper.webp";
@@ -226,9 +255,40 @@ let mouseX = 0, mouseY = 0, mouseDown = false, mouseClicked = false, wheelDelta 
 let searchText = "", searchActive = false;
 let keysPressed = [];
 
-canvas.addEventListener("mousemove", e => { mouseX = e.clientX; mouseY = e.clientY; });
-canvas.addEventListener("mousedown", e => { mouseDown = true; mouseClicked = true; });
+// Viewport pixels -> board pixels. Identity on a desktop; on a phone the
+// board is drawn at 1280x720 and squeezed onto the screen, so a raw clientX
+// would land a couple of panels to the right of what was tapped.
+function toBoard(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  const sx = canvas.width / (r.width || 1);
+  const sy = canvas.height / (r.height || 1);
+  return [(clientX - r.left) * sx, (clientY - r.top) * sy];
+}
+
+canvas.addEventListener("mousemove", e => { [mouseX, mouseY] = toBoard(e.clientX, e.clientY); });
+canvas.addEventListener("mousedown", e => { [mouseX, mouseY] = toBoard(e.clientX, e.clientY); mouseDown = true; mouseClicked = true; });
 canvas.addEventListener("mouseup",   () => { mouseDown = false; });
+
+// Touch. The game reads one hover position and one click flag, which is
+// exactly what a finger provides — but a finger has no hover, so a tap has to
+// move the cursor and press in the same frame or the click lands wherever the
+// last one did.
+canvas.addEventListener("touchstart", e => {
+  const t = e.changedTouches[0];
+  [mouseX, mouseY] = toBoard(t.clientX, t.clientY);
+  mouseDown = true; mouseClicked = true;
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener("touchmove", e => {
+  const t = e.changedTouches[0];
+  [mouseX, mouseY] = toBoard(t.clientX, t.clientY);
+  e.preventDefault();
+}, { passive: false });
+
+function endTouch(e) { mouseDown = false; e.preventDefault(); }
+canvas.addEventListener("touchend", endTouch, { passive: false });
+canvas.addEventListener("touchcancel", endTouch, { passive: false });
 canvas.addEventListener("wheel", e => { wheelDelta += e.deltaY > 0 ? -30 : 30; e.preventDefault(); }, { passive: false });
 canvas.addEventListener("contextmenu", e => e.preventDefault());
 

@@ -3280,9 +3280,24 @@ function init() {
         }
     });
 
+    /* Below 1080px the sidebar stops being a column and becomes an overlay
+       (see styles.css), so remembering it as open means the app opens on a
+       file list covering the thing you came to write in. */
+    if (window.matchMedia('(max-width: 1080px)').matches) ui.sidebar = false;
+
     applyUI();
     wire();
     bootDoc();
+
+    /* An overlay sidebar with no way out but the one button that opened it is
+       a trap on a phone — tapping the document behind it should dismiss it,
+       the way every drawer on the device does. */
+    document.addEventListener('pointerdown', (e) => {
+        if (!ui.sidebar) return;
+        if (!window.matchMedia('(max-width: 1080px)').matches) return;
+        if (e.target.closest('#sidebar') || e.target.closest('#btn-sidebar')) return;
+        setSidebar(false);
+    });
 
     // Keep textarea heights honest when the composer width changes.
     let ro;

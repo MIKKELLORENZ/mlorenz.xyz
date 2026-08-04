@@ -543,3 +543,75 @@ textarea { resize: vertical; }
     from { opacity: 0; transform: translateX(20px); }
     to   { opacity: 1; transform: translateX(0); }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PHONE — see shared_assets/mobile.{css,js}
+
+   The desktop shape is a three-column grid: icon rail, canvas, 300px panel.
+   On a phone the shared layer takes the panel into a bottom sheet and the
+   icon rail into the bottom bar, leaving the canvas the whole screen. What
+   is left here is the app's own furniture that has to follow.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* The rulers cost 28px on each axis to show tick marks nobody reads on a
+   390px screen, and the coordinate readout has no room either. */
+body.mob-shell .ruler,
+body.mob-shell .ruler-corner { display: none; }
+
+body.mob-shell .stage {
+    display: block;
+    min-height: 0;
+}
+
+body.mob-shell .canvas-wrap {
+    position: absolute;
+    inset: 0;
+}
+
+/* The strip was anchored inside the ruler gutter that no longer exists. */
+body.mob-shell .preview-strip {
+    left: 0;
+    bottom: 0;
+    height: auto;
+    flex-wrap: wrap;
+    padding: 6px 8px;
+    gap: 6px;
+}
+
+body.mob-shell .preview-strip .pv-time { font-size: 10px; }
+body.mob-shell .preview-strip input[type="range"] { flex: 1 1 100px; min-width: 80px; }
+
+/* The tool rail, once it is a row in the bottom bar. */
+body.mob-shell .mob-bar .tools {
+    flex-direction: row;
+    border-right: none;
+    padding: 0;
+    gap: 4px;
+    background: transparent;
+}
+
+body.mob-shell .mob-bar .tools-spacer { flex: 0 0 4px; }
+
+/* Labels in the top toolbar are the first thing to go — it already scrolls
+   sideways, and a bar you have to scroll through to reach Generate is worse
+   than icons you can see all of. */
+body.mob-shell .topbar { padding: 0 6px; gap: 4px; }
+body.mob-shell .topbar .brand span,
+body.mob-shell .toolbar-sep,
+body.mob-shell .toolbar-spacer { display: none; }
+body.mob-shell .topbar .tbtn { padding: 6px 8px; }
+
+/* Inside the sheet the panel is full width, so the label/value rows can stop
+   pretending to be a 300px column. */
+body.mob-shell .mob-sheet .panel-body { padding: 10px 2px 20px; }
+body.mob-shell .mob-sheet .row { grid-template-columns: 110px 1fr; }
+body.mob-shell .mob-sheet .toast-stack { display: none; }
+
+/* Toasts land under the bottom bar otherwise. */
+body.mob-shell .toast-stack {
+    right: 8px;
+    left: 8px;
+    bottom: calc(var(--mob-bar-h, 46px) + 10px);
+}
+
+body.mob-shell .toast { max-width: none; }

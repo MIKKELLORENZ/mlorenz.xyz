@@ -616,8 +616,14 @@ footer {
 @supports (height: 100dvh) {
     body { min-height: 100dvh; }
     .projects-container { min-height: calc(100dvh - 45px); }
+    /* 45px was the old navbar; in interactive mode it is exactly 35px, and the
+       10px difference is a strip of footer showing under the embedded app. */
     body.interactive-mode .projects-container,
-    body.interactive-mode #main-content { height: calc(100dvh - 45px); min-height: 0; }
+    body.interactive-mode #main-content { height: calc(100dvh - 35px); min-height: 0; }
+
+    /* The page cannot scroll here (overflow is hidden), so a footer below the
+       app is just unreachable furniture pushing the layout past the screen. */
+    body.interactive-mode footer { display: none; }
 }
 
 /* An embedded project owns the screen: no rubber-banding the page behind it. */
@@ -1555,6 +1561,12 @@ main.container.interactive-mode {
     opacity: 0.3;
 }
 
+/* An entry whose cover 404s drops its img and lands here with nothing inside,
+   unlike a coverless entry, which still has its icon. */
+.invention-placeholder:empty::before {
+    content: "F4A1";
+}
+
 /* ── Back button ── */
 .invention-back-btn {
     display: inline-flex;
@@ -2088,4 +2100,87 @@ a.card:focus-visible,
         opacity: 1 !important;
         transform: none !important;
     }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Touch and phone polish
+
+   Everything the mouse-drawn layout gets away with and a thumb does not:
+   targets under 40px, inputs small enough to make iOS zoom in and never back
+   out, and the tap-highlight flash on cards that are really links.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+@media (pointer: coarse) {
+    .nav-items a {
+        padding: 10px 14px;
+        display: flex;
+        align-items: center;
+        min-height: 40px;
+    }
+
+    #theme-toggle,
+    .navbar button {
+        min-width: 40px;
+        min-height: 40px;
+    }
+
+    .cta-button,
+    .section-link,
+    .explore-card,
+    .about-link-card {
+        min-height: 44px;
+    }
+
+    input,
+    select,
+    textarea {
+        font-size: 16px;
+    }
+
+    /* A whole card flashing grey on every scroll-touch is noise. */
+    a,
+    button,
+    .card {
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Hover styling sticks after a tap and reads as "still selected". */
+    .card:hover,
+    .explore-card:hover,
+    .nav-items a:hover {
+        transform: none;
+    }
+}
+
+@media (max-width: 560px) {
+    /* Four nav links at a thumb-sized 40px tall no longer fit one row at the
+       desktop padding — they ran 26px past the edge. Trim the padding rather
+       than the height: it is the height that makes them tappable. */
+    .navbar .container { padding: 8px 12px; }
+    .nav-items { gap: 2px; width: 100%; justify-content: space-between; }
+    .nav-items a { padding: 10px 8px; font-size: 0.8rem; }
+
+    /* The headline was set for a desktop measure; at 2.6rem it breaks
+       "software" across two lines on a 390px screen. */
+    .hero-headline { font-size: clamp(1.9rem, 8.4vw, 2.6rem); }
+    .hero-split { padding: 34px 18px 30px; gap: 28px; }
+    .hero-cta-group { flex-direction: column; align-items: stretch; }
+    .hero-cta-group .cta-button { justify-content: center; }
+
+    .section-title { font-size: 1.55rem; }
+    .grid { grid-template-columns: 1fr; }
+    .flagship-card { padding: 22px 18px; }
+
+    .about-grid { grid-template-columns: 1fr; }
+
+    /* A 12-item marquee at desktop speed on a narrow screen is a strobe. */
+    .marquee-strip { font-size: 0.7rem; }
+
+    footer { padding: 22px 14px; }
+    .footer-inner p { font-size: 0.78rem; }
 }

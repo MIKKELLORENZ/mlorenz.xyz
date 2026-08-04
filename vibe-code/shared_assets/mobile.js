@@ -14,9 +14,14 @@
      data-mob-skip             never move this one
      data-mob-bar              move this control into the bottom bar itself,
                                so it is reachable without opening the sheet
+     data-mob-root             the element that should be exactly one screen tall
+     data-mob-layout           the flex row holding stage + panels
+     data-mob-stage            the thing that should get the whole screen
 
    With no attributes at all it finds #panel, #panel-left, #panel-right and
-   #panel-chart, which is what the sims already use.
+   #panel-chart next to #layout and #viewport, which is what the sims already
+   use. The three structural hooks exist for the tool apps (laser studio, the
+   DAW, the writer), which are the same shape under different class names.
 
    Exposes window.MobileUI = { active, open(i), close(), isPhone() }.
    ══════════════════════════════════════════════════════════════════════════ */
@@ -176,15 +181,21 @@
     }
 
     function stageEl() {
-        return document.getElementById('viewport') ||
+        return document.querySelector('[data-mob-stage]') ||
+               document.getElementById('viewport') ||
                document.getElementById('canvas-wrap') ||
                document.getElementById('stage') ||
                document.getElementById('stage-wrap') ||
                document.querySelector('.viewport');
     }
 
+    function layoutEl() {
+        return document.querySelector('[data-mob-layout]') ||
+               document.getElementById('layout');
+    }
+
     function dock() {
-        var layout = document.getElementById('layout');
+        var layout = layoutEl();
         var stage = stageEl();
         if (!layout || !stage || !sheet || sheet.classList.contains('docked')) return;
         sheetHome = document.createComment('mob-sheet');
@@ -219,8 +230,9 @@
     function measure() {
         if (!aspect || !sheet || !sheet.classList.contains('docked')) return;
         var stage = stageEl();
-        if (!stage) return;
-        var avail = document.getElementById('layout').clientHeight;
+        var layout = layoutEl();
+        if (!stage || !layout) return;
+        var avail = layout.clientHeight;
         var w = stage.clientWidth || document.documentElement.clientWidth;
         var want = Math.round(w / aspect);
         var h = Math.max(Math.min(avail * 0.34, 220), Math.min(want, avail * 0.66));

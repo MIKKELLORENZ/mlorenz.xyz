@@ -1337,3 +1337,46 @@ mark.sig { background: var(--lock-soft); color: var(--lock); border-radius: 3px;
     .doc-switch .doc-title { width: 140px; }
     .docs-dropdown { min-width: 270px; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PHONE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 700px) {
+    /* 100vh is the height with the URL bar hidden, so the status row at the
+       bottom sits under the browser chrome until you scroll. */
+    .app { height: 100dvh; }
+
+    /* The overlay sidebar was 232px of a 390px screen with the document
+       showing behind it — wide enough to look broken, narrow enough to be
+       unusable. Give it a real drawer width and darken what it covers. */
+    .sidebar { width: min(300px, 84vw); box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .45); }
+    .app.side-hidden .sidebar { margin-left: calc(-1 * min(300px, 84vw)); box-shadow: none; }
+
+    /* Compose splits into editor over preview; 42% each way leaves too little
+       of the thing being written. */
+    .preview { height: 38% !important; }
+
+    /* Ten controls in a bar that does not scroll pushed the document itself
+       590px wide, so the whole page slid sideways. Let the bar scroll and the
+       page stops moving; nothing has to be hidden to make it fit. */
+    .topbar {
+        gap: 4px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+    }
+
+    .topbar::-webkit-scrollbar { display: none; }
+    .topbar-group { flex: 0 0 auto; }
+
+    /* Absolutely centring the view switcher takes it out of the flow, which in
+       a scrolling bar means it sits on top of whatever is under the midpoint. */
+    .topbar-center { position: static; transform: none; }
+
+    .doc-switch .doc-title { width: 108px; }
+    .ai-chip-text { display: none; }
+    .topbar .sep { display: none; }
+
+    .status { font-size: 10px; }
+}

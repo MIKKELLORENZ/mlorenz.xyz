@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Retro Moon Lander Game</title>
     <link rel="stylesheet" href="moon_lander.css">
+    <link rel="stylesheet" href="../../shared_assets/mobile.css">
     <style>
         /* Add canvas background with deep blue gradient */
         canvas {
@@ -2870,8 +2871,11 @@
                 <h3 style="text-align: center; margin-top: 0;">CONTROLS</h3>
             `;
             
-            // Show different control instructions based on device
-            if (isMobile) {
+            // Match whatever the game actually put on screen. The touch pad
+            // appears for any coarse pointer, not just a phone user agent —
+            // an iPad reporting desktop Safari was being told to press keys it
+            // has no way to press.
+            if (shouldShowTouchControls) {
                 controlsHTML += `
                     <div style="text-align: center; margin-bottom: 15px;">
                         Use the touch controls at the bottom of the screen:
@@ -2918,5 +2922,6 @@
             loadingScreen.insertBefore(controlsGuide, startButton);
         }
     </script>
+    <script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

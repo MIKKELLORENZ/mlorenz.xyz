@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Laser Cutter Studio</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="../../shared_assets/mobile.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Roboto&family=Montserrat&family=Playfair+Display&family=Lobster&family=Oswald&family=Bangers&family=Dancing+Script&family=Pacifico&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/imagetracerjs@1.2.6/imagetracer_v1.2.6.js"></script>
@@ -13,7 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
 </head>
 <body>
-    <div class="app">
+    <div class="app" data-mob-root data-mob-layout>
 
         <!-- TOP TOOLBAR -->
         <header class="topbar">
@@ -83,7 +84,7 @@
         </header>
 
         <!-- LEFT TOOLBAR -->
-        <aside class="tools">
+        <aside class="tools" data-mob-bar>
             <button class="tool active" data-tool="select" title="Select (V)"><i data-lucide="mouse-pointer-2"></i></button>
             <button class="tool" data-tool="rect" title="Rectangle (R)"><i data-lucide="square"></i></button>
             <button class="tool" data-tool="circle" title="Ellipse (C)"><i data-lucide="circle"></i></button>
@@ -97,7 +98,7 @@
         </aside>
 
         <!-- CANVAS AREA -->
-        <main class="stage">
+        <main class="stage" data-mob-stage>
             <div class="ruler-corner" id="ruler-corner">
                 <span id="cursor-coords">0.0, 0.0 mm</span>
             </div>
@@ -130,7 +131,7 @@
         </main>
 
         <!-- RIGHT PANEL -->
-        <aside class="panel">
+        <aside class="panel" data-mob-panel data-mob-label="Design">
             <div class="panel-tabs">
                 <button class="panel-tab active" data-tab="layers">Layers</button>
                 <button class="panel-tab" data-tab="props">Properties</button>
@@ -447,5 +448,6 @@
     </div>
 
     <script src="script.js"></script>
+    <script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

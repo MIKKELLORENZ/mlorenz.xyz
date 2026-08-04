@@ -1017,3 +1017,40 @@ body, html {
     .command-palette { width: 95vw; }
     .diff-viewer { width: 96%; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PHONE
+
+   Panes sit side by side, each with a 220px floor, so two of them are already
+   wider than a phone and a third scrolls off the edge entirely. Stack them
+   instead: a diff reads perfectly well one above the other, and it is the
+   only arrangement where each pane still gets a usable line length.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 700px) {
+    .split-horizontal { flex-direction: column; }
+
+    .pane {
+        min-width: 0;
+        min-height: 140px;
+        /* startResize() writes an inline `flex: 0 0 <width>px`, which in a
+           column reads as a height and freezes the pane. */
+        flex: 1 1 0 !important;
+    }
+
+    /* Dragging the divider is a mousedown handler; there is nothing to drag
+       here and a 6px strip is not a touch target anyway. */
+    .split-bar { display: none; }
+
+    .toolbar { flex-wrap: wrap; padding: 4px 8px; row-gap: 2px; }
+    .toolbar-left, .toolbar-right { flex: 1 1 auto; }
+
+    .pane-header { padding: 4px 8px; }
+    .pane-status { font-size: 10px; padding: 2px 6px; gap: 6px; }
+
+    /* Three keyboard shortcuts and a drag-and-drop instruction, on a device
+       with neither a keyboard nor a file to drag. */
+    .welcome-hint { display: none; }
+
+    .sequence-panel { width: min(280px, 86vw); }
+}

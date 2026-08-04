@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Laser Cut Puzzle Maker</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="../../shared_assets/mobile.css">
     <!-- Fabric.js for canvas manipulation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <!-- ImageTracerJS: raster -> vector tracing (for real SVG paths) -->
@@ -15,8 +16,8 @@
     <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
 </head>
 <body>
-    <div class="app-container">
-        <aside class="sidebar">
+    <div class="app-container" data-mob-root data-mob-layout>
+        <aside class="sidebar" data-mob-panel data-mob-label="Setup">
             <header>
                 <h1>Puzzle Maker</h1>
                 <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 16px;">Create custom laser-ready jigsaw puzzles</p>
@@ -118,7 +119,7 @@
             </div>
         </aside>
 
-        <main class="canvas-area" id="canvas-drop-zone">
+        <main class="canvas-area" id="canvas-drop-zone" data-mob-stage>
             <div class="ruler-wrapper">
                 <div class="canvas-toolbar" aria-label="History controls">
                     <button id="undo-btn" class="icon-btn" type="button" aria-label="Undo" title="Undo"><i data-lucide="undo-2" style="width: 18px; height: 18px;"></i></button>
@@ -147,7 +148,7 @@
             </div>
         </main>
 
-        <aside class="sidebar sidebar-right">
+        <aside class="sidebar sidebar-right" data-mob-panel data-mob-label="Puzzle">
             <section class="control-group">
                 <h2><i data-lucide="puzzle" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></i> 4. Puzzle Settings</h2>
                 <div class="input-row">
@@ -221,6 +222,7 @@
         // Initialize Lucide icons
         lucide.createIcons();
     </script>
+    <script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>
 

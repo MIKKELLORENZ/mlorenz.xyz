@@ -1,3 +1,45 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #121212; }
-canvas { display: block; width: 100vw; height: 100vh; image-rendering: auto; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #121212;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+canvas {
+  display: block;
+  width: 100vw; height: 100vh;
+  image-rendering: auto;
+  /* The board is drawn at a fixed size and scaled on a phone, so it handles
+     its own gestures — no double-tap zoom, no pull-to-refresh mid-trade. */
+  touch-action: none;
+}
+
+.rotate-hint {
+  display: none;
+  position: fixed;
+  top: 10px; left: 10px; right: 10px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(20, 20, 24, .88);
+  border: 1px solid rgba(255, 255, 255, .12);
+  color: #e6e6e6;
+  font: 500 13px/1.35 system-ui, sans-serif;
+  text-align: center;
+  pointer-events: none;
+  animation: rotate-hint-out 5s ease forwards;
+}
+
+@media (max-width: 900px) and (orientation: portrait) {
+  .rotate-hint { display: block; }
+}
+
+@keyframes rotate-hint-out {
+  0%, 70% { opacity: 1; }
+  100%    { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotate-hint { animation: none; }
+}
