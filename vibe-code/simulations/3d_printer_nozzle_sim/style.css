@@ -412,3 +412,16 @@ input[type="range"]::-moz-range-thumb {
   .left-panel { min-height: 50vh; }
   .tag-row { display: none; }
 }
+
+/* ------------------------------------------------------- phone layout ----
+   The sidebar becomes the bottom sheet (mobile.js), so the viewport is the
+   whole of the main layout rather than half of it, and the layout is measured
+   against the visible viewport height instead of the URL-bar-less one. */
+body.mob-shell .main-layout {
+  flex-direction: column;
+  height: calc(100dvh - 36px - var(--mob-bar-h, 46px));
+}
+
+body.mob-shell .left-panel { min-height: 0; flex: 1 1 auto; }
+body.mob-shell .tag-row { display: none; }
+body.mob-shell .top-bar { padding: 4px 8px; }

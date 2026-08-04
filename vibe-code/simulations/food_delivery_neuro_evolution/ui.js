@@ -22,6 +22,9 @@ const camera = { follow: false, x: 0, y: 0, vx: 0, vy: 0 };
 function worldTransform(canvas, town, selectedCar) {
     const dpr = window.devicePixelRatio || 1;
     const cw = canvas.width / dpr, ch = canvas.height / dpr;
+    // On a phone the stage is sized to the town's own aspect instead of the
+    // whole screen, so the fit below stops leaving half the screen black.
+    if (window.MobileUI) window.MobileUI.stageAspect(town.W / town.H);
     const fitScale = Math.min(cw / town.W, ch / town.H);
     if (!camera.follow || !selectedCar) {
         return { scale: fitScale, ox: (cw - town.W * fitScale) / 2, oy: (ch - town.H * fitScale) / 2 };

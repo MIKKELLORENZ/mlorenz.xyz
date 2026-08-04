@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Holding the Plasma — Tokamak Control Neuroevolution</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
 <body>
 <div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
@@ -63,7 +64,7 @@
                 <b id="vs-pid">— cm</b><span class="vs-name">classic</span><i></i>
             </span>
         </div>
-        <div id="top-actions">
+        <div id="top-actions" data-mob-bar>
             <div id="diff-group" data-exhibit aria-label="Machine difficulty"></div>
             <div id="speed-group" aria-label="Simulation speed"></div>
             <button class="btn primary" id="btn-pause">Pause</button>
@@ -344,5 +345,6 @@
 <!-- Last, and only does anything when the URL says ?train — it drives main.js's
      own generation loop rather than reimplementing one. -->
 <script src="browser_train.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

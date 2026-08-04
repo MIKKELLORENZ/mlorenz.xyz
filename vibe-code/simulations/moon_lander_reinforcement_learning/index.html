@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Neural Moon Landers</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
 <body>
 <div id="app">
@@ -14,7 +15,7 @@
             <h1>Neural Moon Landers</h1>
             <span class="brand-sub">moon_lander physics + neuroevolution</span>
         </div>
-        <nav id="terrain-tabs" aria-label="Terrain selector">
+        <nav id="terrain-tabs" data-mob-bar aria-label="Terrain selector">
             <button class="terrain-tab active" data-terrain="0"><span class="swatch sw-0"></span>Tranquility</button>
             <button class="terrain-tab" data-terrain="1"><span class="swatch sw-1"></span>Crater Ladder</button>
             <button class="terrain-tab" data-terrain="2"><span class="swatch sw-2"></span>Basalt Teeth</button>
@@ -147,5 +148,6 @@
     </main>
 </div>
 <script src="main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

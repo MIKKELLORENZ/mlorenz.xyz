@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Tetris Neuroevolution — brains that learn the keyboard</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
 <body>
 <div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
@@ -51,7 +52,7 @@
             <span class="tstat" title="effective mutation strength after annealing">σ <b id="stat-sigma">–</b></span>
             <span class="tstat" title="brains still alive in this generation">alive <b id="stat-alive">–</b></span>
         </div>
-        <div id="top-actions">
+        <div id="top-actions" data-mob-bar>
             <div id="speed-group" aria-label="Simulation speed"></div>
             <button id="btn-pause" class="btn primary">Pause</button>
         </div>
@@ -209,5 +210,6 @@
 <script src="render.js"></script>
 <script src="ui.js"></script>
 <script src="main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

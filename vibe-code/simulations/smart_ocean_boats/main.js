@@ -241,6 +241,10 @@ let view = { scale: 10, ox: 0, oy: 0 };
 
 function resize() {
     const wrap = canvas.parentElement;
+    // Tell the phone layout how wide this map is, so the stage can be exactly
+    // as tall as the sea needs and the panel gets the rest instead of the
+    // letterbox getting it.
+    if (window.MobileUI) window.MobileUI.stageAspect(map.w / map.h);
     const dpr = Math.min(1.5, window.devicePixelRatio || 1);   // fill-rate cap
     canvas.width = wrap.clientWidth * dpr;
     canvas.height = wrap.clientHeight * dpr;

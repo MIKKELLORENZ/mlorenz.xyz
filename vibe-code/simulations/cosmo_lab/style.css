@@ -219,3 +219,30 @@ select {
     background-size: 12px;
     padding-right: 28px; /* Make space for arrow */
 }
+
+/* ------------------------------------------------------- phone layout ----
+   The controls are a 300 px panel pinned to the right edge, which on a 390 px
+   screen sits on top of the universe rather than beside it. On a phone they
+   move into the bottom sheet (mobile.js) and the canvas gets the screen —
+   sized by its 4:3 aspect from whichever of width or height runs out first,
+   instead of a 85vh height that a max-width then stretches out of shape. */
+body.mob-shell { display: block; }
+
+body.mob-shell h1 {
+    font-size: 1.1rem;
+    padding: 8px 0 6px;
+    margin-bottom: 0;
+}
+
+body.mob-shell .main-container {
+    height: calc(100dvh - 42px - var(--mob-bar-h, 46px));
+    width: 100%;
+}
+
+body.mob-shell #simulationCanvas {
+    width: min(97vw, calc((100dvh - 100px) * 4 / 3));
+    height: auto;
+    aspect-ratio: 4 / 3;
+    max-width: 97vw;
+    max-height: none;
+}

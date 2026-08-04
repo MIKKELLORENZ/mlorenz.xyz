@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Learning to Fly — Drone Waypoint Neuroevolution</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
 <body>
 <div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
@@ -44,7 +45,7 @@
             <span class="tstat">flying <b id="stat-alive">0/0</b></span>
             <span class="tstat badge" id="stat-stage">stage 0</span>
         </div>
-        <div id="top-actions">
+        <div id="top-actions" data-mob-bar>
             <div id="speed-group"></div>
             <button class="btn" id="btn-pause">Pause</button>
         </div>
@@ -220,5 +221,6 @@
 <script src="render.js"></script>
 <script src="ui.js"></script>
 <script src="main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

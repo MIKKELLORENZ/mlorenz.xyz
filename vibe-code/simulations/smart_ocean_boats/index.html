@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Smart Ocean Boats — Neuroevolution</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
 <body>
 <div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
@@ -45,7 +46,7 @@
             <span class="tstat" title="best / mean arrivals last generation">arrivals <b id="stat-arr">–</b></span>
             <span class="tstat">wind <b id="stat-wind">–</b></span>
         </div>
-        <div id="top-actions">
+        <div id="top-actions" data-mob-bar>
             <div id="speed-group" aria-label="Simulation speed"></div>
             <button id="btn-pause" class="btn primary">Pause</button>
         </div>
@@ -187,5 +188,6 @@
 <script src="default_brain.js"></script>
 <script src="ui.js"></script>
 <script src="main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

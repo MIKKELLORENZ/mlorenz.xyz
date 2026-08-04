@@ -1,0 +1,439 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Shared mobile layer for the vibe-code simulations.
+
+   The sims are all built the same way: a full-height #app, a #topbar, and a
+   #layout that puts one or two scrolling side panels next to the canvas. That
+   is a desktop shape. Squeezed onto a phone the panels either eat the screen
+   or stack above the thing people actually came to look at, so the simulation
+   ends up as a letterbox strip somewhere down the page.
+
+   This stylesheet (with mobile.js, which does the DOM half) turns that same
+   markup into a phone layout: the canvas keeps the whole screen, and the
+   panels move into a bottom sheet you pull up when you want to fiddle. All of
+   it is gated on body.mob, which mobile.js only sets on small screens, so the
+   desktop layout is untouched.
+
+   Load AFTER the app's own stylesheet.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Applies everywhere, phone or not ─────────────────────────────────── */
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+/* Stops the double-tap-to-zoom delay on the simulation itself. Canvases that
+   want to handle their own pans/pinches set touch-action:none in their own
+   stylesheet; this only kills the 300ms tap wait. */
+canvas { touch-action: manipulation; }
+
+/* ── Touch input, at any width ────────────────────────────────────────── */
+@media (pointer: coarse) {
+    /* Buttons drawn for a mouse cursor are routinely 22px tall here. 40px is
+       the smallest thing a thumb hits reliably. */
+    button,
+    .btn,
+    .mode-tab,
+    summary,
+    select {
+        min-height: 40px;
+    }
+
+    /* Anything below 16px makes iOS Safari zoom the page on focus and never
+       zoom back out. */
+    input[type="text"],
+    input[type="number"],
+    input[type="search"],
+    select,
+    textarea {
+        font-size: 16px;
+    }
+
+    /* Sliders are the most-used control in these sims and the hardest to grab. */
+    input[type="range"] {
+        height: 26px;
+        touch-action: pan-y;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+        width: 24px;
+        height: 24px;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+        width: 24px;
+        height: 24px;
+    }
+
+    input[type="checkbox"],
+    input[type="radio"] {
+        width: 22px;
+        height: 22px;
+    }
+
+    /* A checkbox is a small target; its label should be part of it. */
+    .check-row,
+    .check-row.inline {
+        min-height: 38px;
+    }
+
+    /* Hover styling sticks after a tap on touch devices — the button stays
+       lit until you tap something else, which reads as "still selected". */
+    .btn:hover,
+    button:hover {
+        filter: none;
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Phone layout — everything below needs body.mob, set by mobile.js
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* mob        — small screen, touch sizing and modal fixes apply
+   mob-shell   — mobile.js actually took the layout over (it found panels to
+                 move). Anything that locks the page to one screen has to wait
+                 for this: an app with no side panels, like Stick Balance, is
+                 an ordinary scrolling page and hiding its overflow would strand
+                 everything below the fold. */
+body.mob-shell {
+    overscroll-behavior: none;   /* no pull-to-refresh while dragging on canvas */
+    overflow: hidden;
+}
+
+/* 100vh on a phone is the height with the URL bar hidden, so a 100vh app is
+   always a little taller than the screen and the bottom of it is unreachable
+   until you scroll. dvh is the live value. */
+body.mob-shell #app,
+body.mob-shell .app-container,
+body.mob-shell .main-container {
+    height: 100dvh;
+    max-height: 100dvh;
+}
+
+/* ── Topbar ───────────────────────────────────────────────────────────── */
+
+body.mob #topbar {
+    padding: 6px 10px;
+    gap: 6px 10px;
+    flex-wrap: nowrap;
+    align-items: center;
+}
+
+body.mob #topbar .brand { min-width: 0; flex: 0 1 auto; }
+
+body.mob #topbar .brand h1 {
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The strapline under the title is the first thing to go — it is decoration
+   and it is what pushes the tabs onto a second row. */
+body.mob .brand-sub,
+body.mob #topbar .hint { display: none; }
+
+/* Live stats in the topbar scroll sideways instead of wrapping into three
+   rows that steal half the canvas. */
+body.mob #top-stats,
+body.mob #hud-strip,
+body.mob #top-versus {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+}
+
+body.mob #top-stats::-webkit-scrollbar,
+body.mob #hud-strip::-webkit-scrollbar,
+body.mob #top-versus::-webkit-scrollbar { display: none; }
+
+body.mob #top-actions {
+    flex: 0 0 auto;
+    gap: 6px;
+}
+
+/* Mode tabs (Train / Watch / Play and friends) stay on one scrollable line. */
+body.mob #mode-tabs {
+    flex: 1 1 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    gap: 6px;
+    padding-bottom: 2px;
+}
+
+body.mob #mode-tabs::-webkit-scrollbar { display: none; }
+body.mob .mode-tab { flex: 0 0 auto; padding: 6px 12px; font-size: 0.78rem; }
+
+/* ── The stage: canvas gets everything that is left ───────────────────── */
+
+body.mob-shell #layout {
+    flex-direction: column;
+    min-height: 0;
+    /* room for the control bar pinned to the bottom */
+    padding-bottom: var(--mob-bar-h, 46px);
+}
+
+body.mob-shell #viewport,
+body.mob-shell #canvas-wrap,
+body.mob-shell #stage,
+body.mob-shell #stage-wrap,
+body.mob-shell .viewport {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    min-width: 0;
+    min-height: 0;
+}
+
+body.mob-shell #viewport { padding: 8px 8px 6px; }
+
+/* ── Bottom sheet holding the panels ──────────────────────────────────── */
+
+.mob-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    max-height: 76dvh;
+    height: 76dvh;
+    background: var(--panel-2, var(--bg-2, #131a26));
+    border-top: 1px solid var(--line, var(--panel-border, rgba(146, 167, 199, 0.22)));
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -18px 44px rgba(0, 0, 0, 0.5);
+    transform: translateY(100%);
+    transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+    /* the sheet sits above the bar, so it carries the bar's height as padding */
+    padding-bottom: calc(var(--mob-bar-h, 46px) + env(safe-area-inset-bottom, 0px));
+    visibility: hidden;
+}
+
+.mob-sheet.open {
+    transform: translateY(0);
+    visibility: visible;
+}
+
+/* Kept visible during the slide-out so the close animation is not a jump cut. */
+.mob-sheet.closing { visibility: visible; }
+
+/* ── Docked sheet ─────────────────────────────────────────────────────
+   For sims that report their world aspect, the sheet stops being an overlay
+   and becomes the bottom half of a split screen: the stage takes exactly the
+   height its world needs, the panel takes the rest. Nothing is covered and
+   nothing is wasted. */
+
+body.mob-docked #layout > .mob-sheet {
+    position: relative;
+    flex: 1 1 auto;
+    height: auto;
+    max-height: none;
+    min-height: 0;
+    transform: none;
+    visibility: visible;
+    transition: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding-bottom: 0;
+    z-index: auto;
+}
+
+body.mob-docked #layout > .mob-sheet .mob-sheet-grip { height: 14px; }
+
+body.mob-docked #viewport,
+body.mob-docked #canvas-wrap,
+body.mob-docked #stage,
+body.mob-docked #stage-wrap,
+body.mob-docked .viewport {
+    flex: 0 0 var(--mob-stage-h, 46dvh) !important;
+    height: var(--mob-stage-h, 46dvh);
+    min-height: 0;
+}
+
+/* Tapping the lit tab collapses the dock and gives the sim the whole screen. */
+body.mob-collapsed #layout > .mob-sheet { display: none; }
+
+body.mob-collapsed #viewport,
+body.mob-collapsed #canvas-wrap,
+body.mob-collapsed #stage,
+body.mob-collapsed #stage-wrap,
+body.mob-collapsed .viewport {
+    flex: 1 1 auto !important;
+    height: auto;
+}
+
+.mob-sheet-grip {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 26px;
+    cursor: grab;
+    touch-action: none;
+}
+
+.mob-sheet-grip::before {
+    content: "";
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line, rgba(146, 167, 199, 0.4));
+}
+
+/* Panels, once moved in here, are plain scrolling columns. The !important is
+   load-bearing: several sims already carry a `@media (max-width: 900px) {
+   #panel-right { display: none } }` rule of their own, and an id selector
+   would otherwise win and hide the panel inside the sheet. */
+.mob-sheet .mob-panel {
+    display: none !important;
+    /* The apps size these as fixed-width flex columns (flex: 0 0 250px) with
+       an id selector, which inside the sheet reads as a fixed 250px *height*
+       and clips the panel. */
+    flex: 1 1 auto !important;
+    min-height: 0;
+    width: 100% !important;
+    max-width: none !important;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    border: none !important;
+    padding: 4px 12px 16px !important;
+}
+
+.mob-sheet .mob-panel.active { display: flex !important; flex-direction: column; gap: 10px; }
+
+/* Panel innards were laid out for a 250–320px column; here they get the
+   whole width, so the stat grids can breathe. */
+.mob-sheet .stats-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+
+/* ── The bar that is always there ─────────────────────────────────────── */
+
+.mob-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 61;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px 8px calc(4px + env(safe-area-inset-bottom, 0px));
+    background: var(--panel-2, var(--bg-2, #101725));
+    border-top: 1px solid var(--line, var(--panel-border, rgba(146, 167, 199, 0.18)));
+    backdrop-filter: blur(8px);
+}
+
+/* Row one — the app's own controls, lifted out of the topbar. They scroll
+   sideways rather than wrap, so a seven-button speed selector stays one row. */
+.mob-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+}
+
+.mob-bar-actions::-webkit-scrollbar { display: none; }
+.mob-bar-actions > * { flex: 0 0 auto; }
+
+/* Row two — one tab per panel. */
+.mob-bar-tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.mob-bar-tabs button {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 38px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--muted, var(--text-dim, #93a1b8));
+    font: inherit;
+    font-size: 0.76rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.mob-bar-tabs button.on {
+    color: var(--accent, #9ad6ff);
+    background: color-mix(in srgb, var(--accent, #9ad6ff) 14%, transparent);
+    border-color: color-mix(in srgb, var(--accent, #9ad6ff) 42%, transparent);
+}
+
+/* Scrim so a tap outside the sheet closes it. */
+.mob-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 59;
+    background: rgba(4, 8, 14, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.22s ease;
+}
+
+.mob-scrim.on { opacity: 1; pointer-events: auto; }
+
+/* ── Modals / intro cards ─────────────────────────────────────────────── */
+
+/* Every sim opens with a "watch the champion / train from scratch" card. They
+   are all built as a row of side-by-side choices with generous padding, which
+   on a phone becomes two slivers of text or an overflowing card. */
+body.mob #intro,
+body.mob #startup,
+body.mob #start-modal,
+body.mob #loader {
+    padding: 12px;
+    align-items: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+body.mob .intro-card,
+body.mob .startup-card,
+body.mob .start-card,
+body.mob .load-card {
+    width: 100%;
+    max-width: 100%;
+    margin: auto;
+    padding: 20px 18px 18px !important;
+    max-height: none;
+}
+
+body.mob .intro-choices,
+body.mob .startup-choices,
+body.mob .start-grid {
+    flex-direction: column;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+
+body.mob .intro-choice,
+body.mob .startup-choice {
+    width: 100%;
+    padding: 14px 14px 15px;
+}
+
+/* ── Misc ─────────────────────────────────────────────────────────────── */
+
+/* Charts inside the sheet were drawn at a fixed 280px buffer. */
+body.mob .mob-sheet canvas { max-width: 100%; height: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+    .mob-sheet, .mob-scrim { transition: none; }
+}

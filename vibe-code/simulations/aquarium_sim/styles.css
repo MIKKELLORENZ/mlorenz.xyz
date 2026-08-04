@@ -992,3 +992,32 @@ body {
 .shop-item:nth-child(3) { animation-delay: 60ms; }
 .shop-item:nth-child(4) { animation-delay: 90ms; }
 .shop-item:nth-child(5) { animation-delay: 120ms; }
+
+/* ------------------------------------------------------- phone layout ----
+   The desktop grid is tank | sidebar over a charts strip. On a phone the
+   sidebar and the charts move into the bottom sheet (mobile.js), so the grid
+   collapses to topbar over tank and the tank gets the whole screen. */
+body.mob-shell .app-container {
+    grid-template-areas:
+        "topbar"
+        "main";
+    grid-template-columns: 1fr;
+    grid-template-rows: var(--topbar-height) 1fr;
+    height: 100dvh;
+    width: 100%;
+    padding-bottom: var(--mob-bar-h, 46px);
+}
+
+body.mob-shell .main-area { min-height: 0; }
+body.mob-shell .topbar-center { display: none; }
+
+/* Inside the sheet the sidebar is a column again, not the squeezed row the
+   768px rules turned it into. */
+body.mob-shell .sidebar.mob-panel { flex-direction: column; }
+body.mob-shell .charts-panel.mob-panel { display: none; }
+body.mob-shell .charts-panel.mob-panel.active { display: flex !important; }
+
+body.mob-shell .topbar { padding: 4px 8px; gap: 8px; }
+body.mob-shell .logo { font-size: 0.85rem; white-space: nowrap; }
+body.mob-shell .topbar-left { min-width: 0; flex: 0 1 auto; overflow: hidden; }
+body.mob-shell .topbar-right { flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; }

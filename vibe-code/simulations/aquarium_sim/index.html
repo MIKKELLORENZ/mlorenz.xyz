@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Aquarium Simulator</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="../../shared_assets/mobile.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐠</text></svg>">
 </head>
 <body>
@@ -63,7 +64,7 @@
         <!-- ============================================
              SIDEBAR
              ============================================ -->
-        <aside class="sidebar">
+        <aside class="sidebar" data-mob-panel data-mob-label="Aquarium">
             <nav class="tab-nav">
                 <button class="tab-btn active" data-tab="add">Add</button>
                 <button class="tab-btn" data-tab="manage">Manage</button>
@@ -153,7 +154,7 @@
         <!-- ============================================
              CHARTS PANEL
              ============================================ -->
-        <section class="charts-panel">
+        <section class="charts-panel" data-mob-panel data-mob-label="Charts">
             <div class="charts-header">
                 <h3>Water Parameters</h3>
                 <div class="tips-container" id="tipsContainer">
@@ -202,5 +203,6 @@
     <script src="render.js"></script>
     <script src="charts.js"></script>
     <script src="app.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

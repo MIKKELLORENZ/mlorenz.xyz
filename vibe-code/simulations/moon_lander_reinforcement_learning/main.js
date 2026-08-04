@@ -3362,6 +3362,13 @@ function setupActivationPanel() {
     panel.append(title, netCv, controlsHost);
     document.body.appendChild(panel);
 
+    // On a phone this would hover over the descent it is meant to explain, so
+    // the mobile layer takes it as a tab of its own instead. The attributes
+    // cover the usual case where this runs before mobile.js has loaded.
+    panel.setAttribute('data-mob-panel', '');
+    panel.setAttribute('data-mob-label', 'Brain');
+    if (window.MobileUI) window.MobileUI.addPanel(panel, 'Brain');
+
     // Remove a now-empty legacy card without making assumptions about the
     // rest of the page layout.
     if (originalSection && originalSection !== panel) {
@@ -3959,11 +3966,30 @@ function drawOverlay(lead) {
     const template = S.template;
     const terrain = TERRAIN_DEFS[S.terrainIdx];
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // A 360px card is most of a phone screen, and four lines of seed and ray
+    // trivia are not what you are watching for. Narrow stages get the two
+    // numbers that change while the lander is coming down; the rest of it is
+    // in the run-status panel either way.
+    const narrow = canvas.width < 520;
+    const pad = narrow ? 10 : 18;
+    const boxW = narrow ? Math.min(canvas.width - 2 * pad, 250) : 360;
+    const boxH = narrow ? 46 : 96;
     ctx.fillStyle = 'rgba(8, 11, 18, 0.72)';
-    ctx.fillRect(18, 18, 360, 96);
+    ctx.fillRect(pad, pad, boxW, boxH);
     ctx.strokeStyle = 'rgba(147, 161, 184, 0.18)';
-    ctx.strokeRect(18.5, 18.5, 359, 95);
+    ctx.strokeRect(pad + 0.5, pad + 0.5, boxW - 1, boxH - 1);
     ctx.fillStyle = '#ebf2ff';
+
+    if (narrow) {
+        ctx.font = '600 12px Bahnschrift, Segoe UI, sans-serif';
+        ctx.fillText(`${terrain.name} · pads ${lead ? lead.landings : 0}/${lead ? lead.template.pads.length : 0}`, pad + 10, pad + 19);
+        ctx.font = '11px Bahnschrift, Segoe UI, sans-serif';
+        ctx.fillStyle = '#93a1b8';
+        ctx.fillText(`fuel ${lead ? Math.round(lead.fuel / FUEL_MAX * 100) : 0}% · O₂ ${lead ? Math.round(lead.oxygen / OXYGEN_MAX * 100) : 0}% · clearance ${lead ? Math.round(lead.altitude) : 0}px`, pad + 10, pad + 36);
+        return;
+    }
+
     ctx.font = '600 13px Bahnschrift, Segoe UI, sans-serif';
     ctx.fillText(`${terrain.name} · seed ${template.seed >>> 0} · ${algorithmLabel(S.trainingEvolutionMode)}`, 30, 42);
     ctx.font = '12px Bahnschrift, Segoe UI, sans-serif';

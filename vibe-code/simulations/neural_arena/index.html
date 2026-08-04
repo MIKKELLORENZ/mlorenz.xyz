@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Neural Arena — Cars Learning to Fight</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
 <body>
 <div id="app">
@@ -14,11 +15,11 @@
             <h1>Neural Arena</h1>
             <span class="brand-sub">evolutionary battle learning</span>
         </div>
-        <nav id="mode-tabs" aria-label="Mode selector">
+        <nav id="mode-tabs" data-mob-bar aria-label="Mode selector">
             <button class="tab mode-tab active" data-mode="ffa"><span class="swatch sw-ffa"></span>Free-for-all</button>
             <button class="tab mode-tab" data-mode="teams"><span class="swatch sw-red"></span><span class="swatch sw-blue"></span>Team battle</button>
         </nav>
-        <nav id="arena-tabs" aria-label="Arena selector">
+        <nav id="arena-tabs" data-mob-bar aria-label="Arena selector">
             <button class="tab arena-tab active" data-arena="0"><span class="swatch sw-0"></span>Pillars</button>
             <button class="tab arena-tab" data-arena="1"><span class="swatch sw-1"></span>Bunkers</button>
             <button class="tab arena-tab" data-arena="2"><span class="swatch sw-2"></span>Crossfire</button>
@@ -105,5 +106,6 @@
     </main>
 </div>
 <script src="main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

@@ -5,12 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cosmo Lab</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
 <body>
     <h1>Cosmo Lab</h1>
     <div class="main-container">
         <canvas id="simulationCanvas"></canvas>
-        <div id="controls">
+        <div id="controls" data-mob-panel data-mob-label="Controls">
             <fieldset>
                 <legend>Genesis Parameters</legend>
                 <!-- Add Genesis Mode Dropdown -->
@@ -75,5 +76,6 @@
     <script src="js/renderer.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

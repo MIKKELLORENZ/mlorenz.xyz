@@ -83,14 +83,20 @@ function buildStage() {
 /* Sizes the hero board to the window and refills the small-multiples grid. */
 function layoutStage() {
     if (!heroCanvas) return;
-    const h = stageEl.clientHeight - 56;
-    const showFleet = CFG.fleet && mode === "evolve";
+    // On a phone the hold and next columns sit under the board instead of
+    // beside it (see body.mob .hero in the stylesheet), so the board gets the
+    // full width; and 4 px small-multiples of a whole generation are not worth
+    // the two thirds of the width they would cost.
+    const narrow = stageEl.clientWidth < 520;
+    if (narrow && window.MobileUI) window.MobileUI.stageAspect(BW / ROWS_SHOWN);
+    const h = stageEl.clientHeight - 56 - (narrow ? 104 : 0);
+    const showFleet = CFG.fleet && mode === "evolve" && !narrow;
     const compare = mode === "compare";
     // 200 px of the hero's budget goes to the hold and next columns; in compare
     // mode two boards have to fit side by side
-    const wBudget = showFleet ? stageEl.clientWidth * 0.55 : stageEl.clientWidth - 80;
+    const wBudget = showFleet ? stageEl.clientWidth * 0.55 : stageEl.clientWidth - (narrow ? 20 : 80);
     heroCell = Math.max(8, Math.min(32,
-        Math.floor(Math.min(h / ROWS_SHOWN, (wBudget - 200) / (compare ? BW * 2.2 : BW)))));
+        Math.floor(Math.min(h / ROWS_SHOWN, (wBudget - (narrow ? 0 : 200)) / (compare ? BW * 2.2 : BW)))));
     rivalWrap.style.display = compare ? "" : "none";
     fleetEl.style.display = showFleet ? "grid" : "none";
 

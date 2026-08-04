@@ -609,6 +609,22 @@ footer {
     min-height: calc(100vh - 45px); /* Reduced from 60px to 45px to match thinner navbar */
 }
 
+/* On a phone 100vh is the height the page *would* have with the URL bar
+   hidden, so an embedded project was always ~60px taller than the screen and
+   its bottom row of controls sat under the browser chrome. dvh is the height
+   the viewport actually has right now. */
+@supports (height: 100dvh) {
+    body { min-height: 100dvh; }
+    .projects-container { min-height: calc(100dvh - 45px); }
+    body.interactive-mode .projects-container,
+    body.interactive-mode #main-content { height: calc(100dvh - 45px); min-height: 0; }
+}
+
+/* An embedded project owns the screen: no rubber-banding the page behind it. */
+body.interactive-mode {
+    overscroll-behavior: none;
+}
+
 /* Add responsive margin to the main container */
 main.container {
     margin-top: 20px; /* Reduced from 30px to 20px */

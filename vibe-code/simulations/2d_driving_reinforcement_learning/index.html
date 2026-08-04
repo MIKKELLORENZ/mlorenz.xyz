@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Neural Racers — Cars Learning to Drive</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
 <body>
 <div id="app">
@@ -14,7 +15,7 @@
             <h1>Neural Racers</h1>
             <span class="brand-sub">evolutionary reinforcement learning</span>
         </div>
-        <nav id="track-tabs" aria-label="Track selector">
+        <nav id="track-tabs" data-mob-bar aria-label="Track selector">
             <button class="track-tab active" data-track="0"><span class="swatch sw-0"></span>Sunset Oval</button>
             <button class="track-tab" data-track="1"><span class="swatch sw-1"></span>Grand Circuit</button>
             <button class="track-tab" data-track="2"><span class="swatch sw-2"></span>Chicane Gauntlet</button>
@@ -103,5 +104,6 @@
     </main>
 </div>
 <script src="main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

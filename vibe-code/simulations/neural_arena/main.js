@@ -895,6 +895,9 @@ let arenaLayer = null;
 function resize() {
     const vp = document.getElementById('viewport');
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // The phone layout gives the stage exactly the height this world needs
+    // and hands the rest to the stats panel, instead of letterboxing it.
+    if (window.MobileUI) window.MobileUI.stageAspect(WORLD_W / WORLD_H);
     const w = vp.clientWidth, h = vp.clientHeight;
     if (!w || !h) return;
     canvas.width = Math.round(w * dpr);

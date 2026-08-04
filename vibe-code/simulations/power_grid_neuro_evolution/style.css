@@ -449,3 +449,31 @@ table.insp td { padding: 2px 4px; font-variant-numeric: tabular-nums; border-top
 
 .race-bar > div.loss { background: linear-gradient(90deg, #ff7070, #ffbe6b); }
 .race-val.loss { color: var(--danger); }
+
+/* ------------------------------------------------------- phone layout ----
+   The controls under the map are four full-width dropdowns and a paragraph of
+   explanation on a phone, which left the grid itself a 250 px strip. Two
+   columns of selects and a tighter overlay give the map back most of the
+   screen. */
+body.mob #viewport { padding: 8px 10px 6px; gap: 6px; }
+body.mob #canvas-wrap { height: auto; }
+
+body.mob #watch-controls .ctl-row,
+body.mob #train-controls .ctl-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 8px;
+}
+
+body.mob .pick { flex-direction: column; align-items: stretch; gap: 2px; font-size: 0.66rem; }
+body.mob .pick select { width: 100%; max-width: none; }
+body.mob #watch-controls .race-note { display: none; }
+
+/* The scoreboard and the event log are overlays on a map that is now the size
+   of a phone screen — the log goes, the scoreboard shrinks to fit. */
+body.mob #event-log { display: none; }
+body.mob #race { left: 6px; right: 6px; width: auto; bottom: 40px; padding: 7px 8px 5px; }
+body.mob .race-name { width: auto; flex: 1 1 auto; font-size: 0.7rem; }
+body.mob .race-val { width: 52px; font-size: 0.7rem; }
+body.mob #live-strip { gap: 10px; padding: 5px 8px; }
+body.mob .live b { font-size: 0.8rem; }

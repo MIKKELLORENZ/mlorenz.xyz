@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Particle Simulator</title>
   <style>
     body {
@@ -51,10 +52,11 @@
       border: none;
     }
   </style>
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
 <body>
   <canvas id="canvas"></canvas>
-  <div id="ui">
+  <div id="ui" data-mob-panel data-mob-label="Controls">
     <div class="button" id="addLaserButton">Add Laser</div>
     <div class="button" id="addPrismButton">Add Prism</div>
     <div class="button" id="addSlitButton">Add Slit Wall</div>
@@ -72,5 +74,6 @@
   </div>
 
   <script src="script.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>

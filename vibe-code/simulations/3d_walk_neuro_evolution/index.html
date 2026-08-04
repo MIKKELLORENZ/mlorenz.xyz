@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Learning to Walk — 3D Neuroevolution</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
 <body>
 <div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
@@ -53,7 +54,7 @@
             <span class="tstat" title="best / mean waypoints reached last generation">waypoints <b id="stat-wp">–</b></span>
             <span class="tstat">wind <b id="stat-wind">–</b></span>
         </div>
-        <div id="top-actions">
+        <div id="top-actions" data-mob-bar>
             <div id="speed-group" aria-label="Simulation speed"></div>
             <button id="btn-theme" class="btn" title="Dark environment — easier on the eye for long runs" aria-pressed="false">Dark</button>
             <button id="btn-pause" class="btn primary">Pause</button>
@@ -232,5 +233,6 @@
 <script src="render.js"></script>
 <script src="ui.js"></script>
 <script src="main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
 </body>
 </html>
