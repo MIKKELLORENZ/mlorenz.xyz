@@ -307,6 +307,12 @@ class Evolution {
      * of identical brains has nothing for selection to act on and spends its
      * first ten generations re-inventing variance. */
     seedFrom(brain, mutRate, mutSigma) {
+        /* Adopt the SEED BRAIN'S shape, not the shape this pool was born with.
+         * A distilled brain is wider than the from-scratch architecture, and
+         * the random immigrants the island layout tops the pool up with would
+         * otherwise arrive with the wrong number of weights. */
+        this.spec = { nin: brain.spec.nin, trunk: brain.spec.trunk.slice(),
+            guidance: brain.spec.guidance.slice(), control: brain.spec.control.slice() };
         for (let i = 0; i < this.brains.length; i++) {
             this.brains[i] = i === 0 ? brain.clone()
                 : brain.clone().mutate(mutRate, mutSigma, this.rng);

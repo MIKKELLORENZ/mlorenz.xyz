@@ -168,7 +168,24 @@ class Sensors {
         for (const a of [ax.x, ax.y, ax.z]) {
             for (let i = 0; i < 3; i++) c[k++] = a[i] + this._g(sigA);
         }
-        for (let i = 0; i < 3; i++) c[k++] = Math.tanh((st.craft.w[i] + this._g(3e-5 * NZ)) / 0.02);
+        /* BODY RATE ON AN ASINH SCALE, NOT A TANH ONE, and this one encoding
+         * decided whether the vehicle could be flown at all.
+         *
+         * tanh(w / 0.02) resolves a drift beautifully and then dies: 5 deg/s
+         * and 15 deg/s both come back as exactly 1.00000 in single precision.
+         * The tumbling limit is 15 deg/s. So the network was blind across the
+         * entire band between "I am drifting" and "I am about to be declared
+         * out of control" — every state in it looked identical, the correct
+         * torque across that set averages to nothing, and a policy fitted to it
+         * duly commanded nothing while the vessel spun up. Cloned from an
+         * autopilot that docks every scenario, the network tumbled 33 times out
+         * of 36 with its torque outputs sitting at 0.00x against a teacher
+         * asking for 1.0.
+         *
+         * asinh is logarithmic in the tail and linear near zero, so 0.1 deg/s
+         * is still resolved and 15 deg/s is still distinct from 8. Nothing
+         * saturates. */
+        for (let i = 0; i < 3; i++) c[k++] = Math.asinh((st.craft.w[i] + this._g(3e-5 * NZ)) / 0.002) / 5;
 
         /* ------------------------------- station's published port geometry */
         /* The station tells the chaser where its port is and which way it

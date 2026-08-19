@@ -249,6 +249,106 @@ the only symptom available:
 
 ---
 
+## The GA could not see what it was being asked to learn
+
+Two hundred and sixty generations of a carefully tuned genetic algorithm
+produced a champion with a held-out advantage of **0.011** and a docking rate of
+**zero**, and after four environment bugs had already been found and fixed the
+honest conclusion was that the fifth thing wrong was not a bug at all.
+
+The arithmetic decides it. An episode here returns ONE number - where the flight
+fell between "coasted" and "the autopilot" - after between two thousand and
+thirteen thousand control decisions. Selection is being asked to attribute that
+single scalar to all of them at once, and the per-episode spread of the scalar
+is larger than the improvement any one mutation can produce. That is not a
+search that needs more generations. That is a **signal** that cannot resolve the
+thing being searched for, and the fix is a training target per decision rather
+than per episode.
+
+There is one sitting in `pilot.js`. The autopilot docks every auditioned
+scenario, and - the property that matters - it answers *what should be done
+here* instantly, from any state, without waiting to see how the episode ends.
+So: clone it by DAgger (`imitate.js`), then hand the result back to the GA,
+which is not capped by it.
+
+### Three things had to be fixed before a single label was worth learning
+
+**The label was not a function of the state.** The autopilot's thruster command
+is the output of a delta-sigma pulse modulator: the same state yields 0 or 1
+depending on a hidden accumulator, and a network regressed onto that bang-bang
+sequence recovers its conditional mean - which is exactly the sub-deadband duty
+that fires nothing at all. The modulator therefore moved out of the pilot and
+into `craft.js`, where it now sits between **every** controller and the
+hardware, and the label became the pre-modulator demand.
+
+That change is worth more than the imitation it enabled. The minimum impulse bit
+is a hard 4% deadband, and before this the network's only route to firing a
+thruster was to shout: the output layer had been widened until the *median*
+fresh command cleared the floor, which buys a policy that can fire at all at the
+cost of one that can never fire gently. No output scale gives a controller 5
+mm/s of trim authority through a hard deadband. Now the network commands a
+continuous duty and the hardware does the pulsing, which is what real RCS
+phase-plane logic does.
+
+**The vehicle could not see itself tumbling.** Body rate was presented as
+`tanh(w / 0.02)`. That resolves a drift beautifully and then dies: in single
+precision, 5 deg/s and 15 deg/s both come back as exactly `1.00000`, and the
+tumbling limit is 15 deg/s. The network was blind across the whole band between
+"I am drifting" and "I am about to be declared out of control" - every state in
+it looked identical, the correct torque averaged over that set is nothing, and a
+policy fitted to it duly commanded nothing while the vessel spun up. Cloned from
+an autopilot that docks everything, the first network **tumbled 33 times out of
+36** with its torque outputs sitting at 0.00x against a teacher asking for 1.0.
+`asinh(w / 0.002) / 5` is linear near zero and logarithmic in the tail, and
+nothing saturates.
+
+**The teacher is idle nine times out of ten.** It coasts, it has an attitude
+deadband, and once trimmed it does nothing at all - so a uniformly collected set
+has a mean-squared optimum very close to "output zero", and a network that takes
+it scores a *low loss* and flies into the tumbling limit. Measured: the control
+head explained two thirds of the target variance overall and essentially none of
+it on the states where the teacher wanted full authority. Collection now keeps
+every acting state and thins the quiet ones to a sixth, which leaves the two
+roughly equal. Thinning rather than discarding matters - a network that has
+never been shown a quiet state fires continuously and runs the tank dry, which
+is the same failure seen from the other side.
+
+### What the loop actually does
+
+The teacher is re-consulted **at every decision, from the state the student
+actually reached**, never from a plan fixed at t = 0. Under DAgger the student
+drives and wanders somewhere the original plan cannot be flown from; a label
+computed against that stale plan is an action that cannot be executed, and the
+network is then trained on contradictions and gets worse every round.
+
+Beta decays from 1 to exactly 0 across the rounds - round 0 executes the
+teacher's action every time, the last round executes none of them, which makes
+that round's numbers an honest on-policy measurement rather than a graded
+exercise. Two losses are reported every round: on the accumulated set, and on
+the states the *current* policy just visited, held out of the fit. Training loss
+falling while on-policy validation collapses is the signature of a labelling
+bug, and it is the only thing that distinguishes one from "the method did not
+help".
+
+The fit is data-parallel and **the data never moves**: each worker keeps the
+samples it collected itself, and every step ships weights out and summed
+gradients back - about 600 kB of traffic against a hundred milliseconds of
+arithmetic. The main thread owns the Adam state and is the only writer.
+
+### Handing it back to the GA
+
+A gradient-trained network has never faced the mutation operator, and
+`mutate()` has always had a 3% chance of redrawing a touched weight outright.
+An evolved brain survives that because it was *selected under* it; lineages that
+could not take the occasional reset died out long ago. So `--mutreset 0
+--noimm --nocross` turns the search into elite hill-climbing, which is the
+correct search when the starting point is already good. `lineage` is carried
+through every save and stamped into `default_brain.js`, because a header that
+claims "evolved, no gradients" on a distilled brain is a false claim in a file
+nobody will re-read.
+
+---
+
 ## Running it
 
 ```bash
@@ -258,6 +358,12 @@ node train.js --gens 3000 --pop 128 --workers 5
 node train.js --stage 0 --gens 300         # lock a rung
 node train.js --resume training/checkpoint.json --gens 2000
 node train.js --bake training/checkpoint.json     # → default_brain.js
+
+node imitate.js --rounds 8 --episodes 480 --workers 64 \
+     --trunk 256,160 --guid 128 --ctrl 128 --out training/imit
+node exam.js --brains training/imit_best.json --pilot --per 8 --workers 48
+node train.js --resume training/imit_best.json --gens 400 \
+     --mutreset 0 --noimm --nocross --mutsigma 0.25 --workers 64
 ```
 
 `--workers` deliberately defaults below the core count. On a shared machine pass

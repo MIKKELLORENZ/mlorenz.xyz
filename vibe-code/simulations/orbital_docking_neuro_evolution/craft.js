@@ -162,4 +162,50 @@ class Craft {
     rollAxis() { return Q.rot(this.q, [0, 0, 1]); }
 }
 
-if (typeof module !== "undefined") module.exports = { CRAFT, Craft };
+
+/* ---------------------------------------------------------- pulse modulator */
+/* A DELTA-SIGMA MODULATOR ON ALL SIX AXES, and it belongs HERE — between any
+ * controller and the hardware — rather than inside the autopilot where it was
+ * originally written.
+ *
+ * The minimum impulse bit is a deadband: a demand under ~4% of full authority
+ * rounds to less than one 20 ms pulse and produces nothing whatsoever. The
+ * autopilot could not dock without integrating its demand and firing a pulse
+ * once enough had piled up, and neither can a network — which had exactly the
+ * same problem, diagnosed twice as "the GA is slow". Previously the only fix
+ * available to the network was to shout: the output layer was widened until the
+ * MEDIAN fresh command cleared the floor, which buys a thruster that fires at
+ * all at the cost of one that can never fire gently. There is no output scale
+ * that gives a policy 5 mm/s of trim authority through a hard 4% deadband.
+ *
+ * Two things follow from moving it here. The network now commands a CONTINUOUS
+ * duty and the hardware logic turns it into pulses, so fine control is
+ * expressible at last. And — the reason this had to happen before any
+ * imitation learning — the autopilot's action becomes a function of the STATE
+ * again: with the modulator inside the pilot, the same state produced 0 or 1
+ * depending on a hidden accumulator, and regressing a network onto that
+ * bang-bang sequence recovers its mean, which is precisely the sub-deadband
+ * duty that fires nothing. Label the demand, let the hardware do the pulsing.
+ */
+class PulseMod {
+    constructor(n) { this.acc = new Float64Array(n || 6); }
+    reset() { this.acc.fill(0); }
+    zero(k) { this.acc[k] = 0; }
+    /* `want` is a continuous signed duty demand; `out` receives the signed
+     * command to hand to commandWrench(). */
+    apply(want, dtTick, out) {
+        for (let k = 0; k < this.acc.length; k++) {
+            this.acc[k] += want[k] * dtTick;
+            const c = this.acc[k] / dtTick;
+            const cc = c > 1 ? 1 : (c < -1 ? -1 : c);
+            out[k] = cc;
+            this.acc[k] -= Craft.quantise(cc, dtTick) * dtTick;
+            // No wind-up past one tick of full authority: a saturated axis would
+            // otherwise keep firing long after the error it was chasing is gone.
+            this.acc[k] = Math.max(-dtTick, Math.min(dtTick, this.acc[k]));
+        }
+        return out;
+    }
+}
+
+if (typeof module !== "undefined") module.exports = { CRAFT, Craft, PulseMod };

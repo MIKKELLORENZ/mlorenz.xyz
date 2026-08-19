@@ -73,9 +73,31 @@ function gaussRand(rng) {
  * and the new shape in the same process. */
 const NET_ARCH = {
     trunk: [64, 48],
-    guidance: [32, 7],       // Δv(3) · pointing(3) · coast(1)
-    control: [40, 6]         // signed translation(3) · signed torque(3)
+    guidance: [32, 7],       // dv(3) - pointing(3) - coast(1)
+    control: [40, 6]         // signed translation(3) - signed torque(3)
 };
+
+/* The widths are overridable, because the answer to "is this width enough" is
+ * an empirical one and the two ways of asking it want different answers.
+ *
+ * Under a genetic algorithm a wide trunk is a liability: every weight is a
+ * dimension mutation has to search and selection has to pay for, so 64x48 was
+ * chosen for searchability rather than capacity. Under gradient descent the
+ * trade runs the other way -- backprop does not care how many weights there
+ * are, and the first thing to measure when cloning a controller is whether the
+ * network can represent it AT ALL. A low training loss on the teacher is the
+ * diagnostic that says the encoding and the capacity are fine and the problem
+ * is somewhere else; a high one says stop and widen this.
+ *
+ * `spec` travels inside every saved brain, so the page, the exam and the
+ * trainer all pick up whatever shape was actually trained. Only a FRESH random
+ * brain reads these numbers. */
+function setArch(a) {
+    if (a.trunk) NET_ARCH.trunk = a.trunk.slice();
+    if (a.guidance) NET_ARCH.guidance = a.guidance.slice();
+    if (a.control) NET_ARCH.control = a.control.slice();
+    return NET_ARCH;
+}
 const N_GUID_OUT = NET_ARCH.guidance[NET_ARCH.guidance.length - 1];
 const N_CTRL_OUT = NET_ARCH.control[NET_ARCH.control.length - 1];
 
@@ -236,6 +258,7 @@ class Brain {
             }
         }
         b.held.set(this.held);
+        b.resetP = this.resetP;      // the mutation operator is part of a lineage
         return b;
     }
 
@@ -251,14 +274,22 @@ class Brain {
      * through imitation learning has an output layer perhaps fifty times wider
      * than its init, and mutating it by a fraction of a spread it left behind
      * long ago makes the population look converged from generation one. */
-    mutate(rate, sigma, rng) {
+    mutate(rate, sigma, rng, resetP) {
+        /* THE RESET BRANCH IS OPTIONAL, AND IT MUST BE OFF ON A DISTILLED
+         * BRAIN. Redrawing a weight outright is survivable for a network that
+         * was SELECTED under this operator -- lineages that could not take the
+         * occasional reset died out long ago -- but a network fitted by
+         * gradient descent has never met it. At rate 0.12 over 75,000 weights
+         * that is 270 random numbers dropped into a converged solution, and the
+         * additive sigma is not what does the damage. Pass 0 after imitation. */
+        const rp = resetP != null ? resetP : (this.resetP != null ? this.resetP : 0.03);
         for (const k of ["trunk", "guid", "ctrl"]) {
             const st = this[k];
             for (let l = 0; l < st.weights.length; l++) {
                 const w = st.weights[l], s = sigma * st.scales[l];
                 for (let i = 0; i < w.length; i++) {
                     if (rng() < rate) {
-                        if (rng() < 0.03) w[i] = gaussRand(rng) * st.scales[l] * 4;
+                        if (rp > 0 && rng() < rp) w[i] = gaussRand(rng) * st.scales[l] * 4;
                         else w[i] += gaussRand(rng) * s;
                     }
                 }
@@ -369,5 +400,5 @@ class Brain {
 }
 
 if (typeof module !== "undefined") {
-    module.exports = { Brain, Stack, mulberry32, gaussRand, netSpec, NET_ARCH, N_GUID_OUT, N_CTRL_OUT };
+    module.exports = { Brain, Stack, mulberry32, gaussRand, netSpec, setArch, NET_ARCH, N_GUID_OUT, N_CTRL_OUT };
 }

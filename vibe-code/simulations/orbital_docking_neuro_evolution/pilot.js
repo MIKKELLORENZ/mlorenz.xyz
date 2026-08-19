@@ -70,7 +70,12 @@ class Pilot {
         this.phase = "far";
         this.lastCmd = new Float32Array(6);
         this.want = new Float64Array(6);
-        this.acc = new Float64Array(6);     // delta-sigma pulse accumulator
+        /* The pulse modulator now lives in craft.js, because the network needs
+         * exactly the same piece of hardware logic between its output and the
+         * thrusters (see PulseMod there). The behaviour is unchanged. */
+        this.mod = new PulseMod(6);
+        this.aim = [1, 0, 0];               // desired nose direction, LVLH
+        this.vDesLvlh = [0, 0, 0];
     }
 
     /* One control decision. `st` is the same truth bundle world.js builds for
@@ -240,6 +245,7 @@ class Pilot {
         const axisBlend = Math.max(0, Math.min(1, (PILOT.axisAlign - range) / 25));
         const toPort = range > 1e-3 ? V.mul(dPort, -1 / range) : V.mul(N, -1);
         const aim = V.unit(V.add(V.mul(toPort, 1 - axisBlend), V.mul(N, -axisBlend)));
+        this.aim = aim;                       // LVLH; imitate.js labels with it
         const qd = lookAt(fromLvlh(aim, B), fromLvlh(this.station.portUpLvlh(), B));
         const e = attitudeError(st.craft.q, qd);
         /* Damp toward the ORBIT RATE, not toward zero. The desired attitude is
@@ -267,7 +273,7 @@ class Pilot {
         const rateTol = range < 60 ? 5e-5 : 3e-4;       // rad/s
         if (V.len(e) < attTol && V.len(V.sub(st.craft.w, wDes)) < rateTol) {
             this.want[3] = this.want[4] = this.want[5] = 0;
-            this.acc[3] = this.acc[4] = this.acc[5] = 0;
+            this.mod.zero(3); this.mod.zero(4); this.mod.zero(5);
         }
 
         /* All six axes through the pulse modulator together. Attitude needs it
@@ -277,15 +283,7 @@ class Pilot {
          * capture limit is 4°, so without this the vehicle physically cannot
          * align well enough to dock, and the controller reports itself as
          * converged the whole time. */
-        for (let k = 0; k < 6; k++) {
-            this.acc[k] += this.want[k] * dtTick;
-            const c = clamp1(this.acc[k] / dtTick);
-            cmd[k] = c;
-            this.acc[k] -= Craft.quantise(c, dtTick) * dtTick;
-            // No wind-up past one tick of full authority: a saturated axis would
-            // otherwise keep firing long after the error it was chasing is gone.
-            this.acc[k] = Math.max(-dtTick, Math.min(dtTick, this.acc[k]));
-        }
+        this.mod.apply(this.want, dtTick, cmd);
 
         // Coasting means coasting: a vessel that keeps trimming its attitude
         // through a forty-minute drift spends more propellant on pointing than
@@ -295,10 +293,16 @@ class Pilot {
             const wr = V.len(V.sub(st.craft.w, wDes));
             if (wr < 0.0004 && V.len(e) < 0.25) {
                 cmd.fill(0);
-                this.acc.fill(0);
+                this.want.fill(0);
+                this.mod.reset();
             } else coast = false;
         }
-        return { cmd, coast, phase: this.phase, vDes };
+        /* `want` and `aim` are the pre-modulator, state-determined demand, and
+         * they are what imitate.js regresses the network onto — never `cmd`,
+         * which is a pulse train whose value depends on a hidden accumulator
+         * and not on the state the network is looking at. */
+        this.vDesLvlh = vDes;
+        return { cmd, coast, phase: this.phase, vDes, want: this.want, aim: this.aim };
     }
 
     /* Choose the time of flight for the big transfer by scanning, not by a

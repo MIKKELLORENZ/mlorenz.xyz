@@ -154,6 +154,25 @@ class World {
         this.coasts = 0;
         this.coastTotal = 0;
 
+        /* The network's six outputs are a CONTINUOUS duty demand and go to the
+         * thrusters through the same delta-sigma modulator the autopilot uses.
+         * Before this they were handed to commandWrench() raw, where anything
+         * under one minimum impulse bit -- 4% of full authority -- produced no
+         * thrust at all, so the policy had no trim authority whatsoever and the
+         * only way to make a fresh brain able to fire was to widen its output
+         * layer until it shouted. See PulseMod in craft.js. */
+        this.mod = new PulseMod(6);
+
+        /* Imitation mode. `opts.teacher` switches on a Pilot that is consulted
+         * at every decision and whose pre-modulator demand is recorded as a
+         * label; `opts.beta` is the DAgger mix -- the probability that the
+         * teacher's action is EXECUTED rather than merely recorded. beta = 1 is
+         * behaviour cloning, beta = 0 is a fully on-policy round. */
+        this.teacher = opts.teacher ? new Pilot(scenario, this.station) : null;
+        this.beta = opts.beta != null ? opts.beta : 0;
+        this.samples = opts.teacher ? [] : null;
+        this.tRng = mulberry32(((opts.noiseSeed != null ? opts.noiseSeed : scenario.seed) ^ 0x1f2e3d4c) >>> 0);
+
         this.record = opts.record ? [] : null;
         this.recordEvery = opts.recordEvery || 0.25;
         this.tNextRec = 0;
@@ -224,9 +243,30 @@ class World {
         } else if (this.agent) {
             const input = this.sensors.assemble(this.t);
             const latent = this.agent.trunkForward(input);
-            if (this.t >= this.tNextGuid) {
+            /* The teacher is asked for its advice from THE STATE THE STUDENT IS
+             * ACTUALLY IN, at every single decision -- never from a goal fixed
+             * once at the start of the episode. Under DAgger the student drives
+             * and wanders somewhere the original plan cannot be flown from, and
+             * a label computed against that stale plan is an action that cannot
+             * be executed: the network is then trained on contradictions and
+             * gets worse every round. Pilot.act() re-solves from the current
+             * state and re-plans its transfer on its own clock, so what comes
+             * back is always achievable from where the vessel now is. */
+            let lab = null;
+            const isGuid = this.t >= this.tNextGuid;
+            if (this.teacher) {
+                lab = this._label(this.teacher.act(this._bundle(), this._dtCtl()), isGuid);
+            }
+            const useTeacher = lab != null && this.tRng() < this.beta;
+            if (isGuid) {
                 const g = this.agent.guidance(latent);
                 this.lastGuid.set(g);
+                /* Teacher forcing follows the same coin as the action. If the
+                 * teacher is flying, the control head must see the guidance the
+                 * teacher would have emitted -- otherwise round 0 teaches it
+                 * that the guidance channel is noise, which is exactly what it
+                 * is while the guidance head is still random. */
+                if (useTeacher) this.lastGuid.set(lab.guid);
                 this.tNextGuid = this.t + GUID_PERIOD;
                 /* The slow head's outputs have real semantics — a velocity
                  * setpoint and a pointing direction, both in ECI — but nothing
@@ -236,19 +276,47 @@ class World {
                  * at all is that a pair of heads which agree docks and a pair
                  * which argues does not. `trackErr` is recorded so the UI can
                  * show how much the two ended up agreeing; it is not scored. */
+                /* THE GUIDANCE VELOCITY IS EXPRESSED IN LVLH, not in ECI.
+                 * It is a message from the slow head to the fast one and it is
+                 * held for four seconds, so it has to be something that changes
+                 * slowly -- and "where I want to be going with respect to the
+                 * station" does, while its ECI expression rotates with the orbit
+                 * and, at 100 km, is dominated by a 110 m/s frame-rotation term
+                 * that saturates the encoding completely. The quadratic map is
+                 * fine near zero (0.05 m/s of terminal creep is still resolved)
+                 * and reaches 15 m/s, which covers every transfer the scan
+                 * returns. */
+                const gv = this.lastGuid;
                 const q = (x) => x * Math.abs(x) * 15;      // quadratic: fine near zero
-                this.dvSetpoint = [q(g[0]), q(g[1]), q(g[2])];
-                this.pointCmd = V.len([g[3], g[4], g[5]]) > 0.1 ? V.unit([g[3], g[4], g[5]]) : null;
-                const c = (g[6] + 1) / 2;
+                this.dvLvlh = [q(gv[0]), q(gv[1]), q(gv[2])];
+                this.dvSetpoint = fromLvlh(this.dvLvlh, this.B);
+                this.pointCmd = V.len([gv[3], gv[4], gv[5]]) > 0.1 ? V.unit([gv[3], gv[4], gv[5]]) : null;
+                const c = (gv[6] + 1) / 2;
                 if (c > 0.5) {
                     coastReq = true;
                     coastDur = Math.max(COAST_MIN, Math.min(COAST_MAX, this.range / 6)) * (c - 0.5) * 2;
                 }
+                if (useTeacher) { coastReq = lab.coast; coastDur = lab.coast ? COAST_MAX : 0; }
             }
             const ctrl = this.agent.control(latent, this.lastGuid);
-            this.lastCtrl.set(ctrl);
-            this.cmd.set(ctrl);
-            this.trackErr = V.len(V.sub(this.dvSetpoint, this.rhoDot));
+            /* `lastCtrl` is fed back into the sensor vector as "what I commanded
+             * last tick", so under beta-mixing it must be what the VEHICLE
+             * actually did, not what the student would have done. Recording the
+             * student's own output while the teacher flies tells the network it
+             * commanded X on a tick the vessel executed Y — every proprioceptive
+             * channel then disagrees with the trajectory it is being asked to
+             * explain, and the disagreement is worst in exactly the rounds where
+             * the hand-over is happening. */
+            this.lastCtrl.set(useTeacher ? lab.ctrl : ctrl);
+            /* Continuous duty demand, then pulses. This is the only place the
+             * network's output reaches the hardware. */
+            this.mod.apply(useTeacher ? lab.ctrl : ctrl, this._dtCtl(), this.cmd);
+            if (lab) {
+                lab.held = Float32Array.from(this.lastGuid);
+                lab.input = Float32Array.from(input);
+                this.samples.push(lab);
+            }
+            this.trackErr = V.len(V.sub(this.dvLvlh || [0, 0, 0], this.vLvlh));
         } else {
             this.cmd.fill(0);          // the do-nothing baseline
         }
@@ -274,6 +342,34 @@ class World {
         this._afterStep(dt);
     }
 
+    /* Turn one teacher decision into a training target.
+     *
+     * The control target is the pre-modulator DEMAND, clamped to what a tanh
+     * unit can reach. Regressing onto the pulse train the modulator emits would
+     * be regressing onto a hidden accumulator, and its conditional mean is the
+     * sub-deadband duty that fires nothing at all.
+     *
+     * The guidance target is the three quantities that head is defined to
+     * carry: desired relative velocity in LVLH under the quadratic encoding,
+     * desired nose direction in LVLH, and the coast bit. */
+    _label(a, isGuid) {
+        const T = 0.98;                       // tanh cannot reach 1
+        const cl = (x) => x > T ? T : (x < -T ? -T : x);
+        const ctrl = new Float32Array(6);
+        for (let k = 0; k < 6; k++) ctrl[k] = cl(a.want[k]);
+        const guid = new Float32Array(7);
+        const inv = (v) => { const m = Math.min(15, Math.abs(v)); return cl(Math.sign(v) * Math.sqrt(m / 15)); };
+        const vd = a.vDes || [0, 0, 0];
+        guid[0] = inv(vd[0]); guid[1] = inv(vd[1]); guid[2] = inv(vd[2]);
+        const aim = a.aim || [1, 0, 0];
+        guid[3] = cl(aim[0]); guid[4] = cl(aim[1]); guid[5] = cl(aim[2]);
+        guid[6] = a.coast ? 0.9 : -0.9;
+        return {
+            ctrl, guid, isGuid: isGuid ? 1 : 0, coast: !!a.coast,
+            phase: a.phase, range: this.range, stage: this.sc.stage
+        };
+    }
+
     /* A granted coast: no thrust, no attitude control, long RK4 steps.
      *
      * The step is capped three ways — by range (never move more than a small
@@ -289,6 +385,7 @@ class World {
         if (dt <= 1e-6) { this.coasting = false; this.coastLeft = 0; return; }
         this.craft.firing.fill(0);
         this.craft.firingRcs.fill(0);
+        this.mod.reset();      // coasting means coasting: no piled-up demand survives it
         this._advance(dt, [0, 0, 0], [0, 0, 0]);
         this.coastLeft -= dt;
         this.coastTotal += dt;
@@ -563,6 +660,18 @@ function runEpisode(sc, agent, opts) {
     return w.result();
 }
 
+/* One DAgger episode: the student flies, the teacher annotates. Returns the
+ * episode result plus every (state, teacher action) pair it produced. */
+function runLabelled(sc, brain, opts) {
+    const w = new World(sc, brain, Object.assign({ teacher: true }, opts || {}));
+    let guard = 0;
+    while (!w.isOver() && guard++ < 400000) w.step();
+    if (!w.isOver()) w._end("timeout");
+    const r = w.result();
+    r.samples = w.samples;
+    return r;
+}
+
 /* ------------------------------------------------------------ audition */
 /* Score a scenario with the do-nothing policy and with the autopilot, and
  * decide whether it is fit to train on.
@@ -630,7 +739,7 @@ function calibratedBank(topStage, size, block, maxTries) {
 
 if (typeof module !== "undefined") {
     module.exports = {
-        World, runEpisode, calibrate, calibratedBank, advantageOf,
+        World, runEpisode, runLabelled, calibrate, calibratedBank, advantageOf,
         FIT, DOCK_ARRIVE, GUID_PERIOD
     };
 }
