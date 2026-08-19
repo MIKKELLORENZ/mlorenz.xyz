@@ -347,6 +347,36 @@ through every save and stamped into `default_brain.js`, because a header that
 claims "evolved, no gradients" on a distilled brain is a false claim in a file
 nobody will re-read.
 
+### What it bought
+
+Measured against the 260-generation GA champion on auditioned held-out banks
+with common random numbers, on three independent seed bases:
+
+| | GA champion | distilled (DAgger round 8) |
+|---|---|---|
+| stage 0 terminal, n=32 | 0.052 +/- 0.011 | **0.192 +/- 0.025** |
+| stage 0 contact rate | 0% | **9-25%** |
+| all six stages, n=48 | 0.012 +/- 0.005 | 0.030 +/- 0.018 |
+
+The stage-0 gap is 5.1 sigma and it is the one a viewer of the page actually
+watches. "Contact" means the vessel arrived at the docking ring and broke a
+capture limit - nothing evolved here had ever reached it at all.
+
+It still docks nothing, and stages 1 through 5 are flat for both. On stages 0/1
+the fit is good - training loss 1.1e-3, on-policy validation 7.5e-4, validation
+*below* training, no gap at all - so capacity, encoding and label consistency
+are all fine and the remaining failure is in the closed loop. The dominant
+outcome is `dry`: the brain flies the approach down to a few metres and runs the
+tank out, about 13 m/s of propellant against the autopilot's 1 to 2 on the same
+scenario. That was NOT the regression residual leaking through the pulse
+modulator - a demand deadzone swept from 0 to 0.15 left the propellant bill at
+13.0-15.3 m/s and the docking rate at zero, so it was reverted rather than kept
+as a constant that does not earn its place.
+
+The held-out score was still climbing when the budget ran out, and it peaked at
+round 8 of 10 - the endpoint was not the best point, which is why every round is
+snapshotted.
+
 ---
 
 ## Running it
