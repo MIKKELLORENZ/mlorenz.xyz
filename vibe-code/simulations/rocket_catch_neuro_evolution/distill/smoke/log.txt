@@ -1,0 +1,16 @@
+[dagger] 2 rounds x 24 episodes · stages 0 · arch std · 209 inputs · 4 workers · 4 epochs · lr 0.002 · fresh init
+
+round 0  beta 1.00  17051 new samples in 1s  ·  rollout caught 11/24  ·  labels catch 97.4% stranded 0.0% divert 2.6%  ·  dataset 17051
+   epoch  0  loss 0.59066   held-out MAE  thr 0.045  eng 0.050  gx 0.052  gy 0.053  commit 0.255
+   epoch  3  loss 0.01610   held-out MAE  thr 0.031  eng 0.017  gx 0.024  gy 0.023  commit 0.185
+   ON-POLICY (rank bank, 40 eps): caught 0/40  mean 0.124 +/- 0.053  ·  crash 22, tower strike 15, tumble 3
+
+round 1  beta 0.00  11334 new samples in 1s  ·  rollout caught 0/24  ·  labels catch 81.9% divert 17.6% stranded 0.5%  ·  dataset 28385
+   epoch  0  loss 0.50909   held-out MAE  thr 0.123  eng 0.071  gx 0.280  gy 0.291  commit 0.125
+   epoch  3  loss 0.06965   held-out MAE  thr 0.124  eng 0.073  gx 0.198  gy 0.204  commit 0.056
+   ON-POLICY (rank bank, 40 eps): caught 0/40  mean 0.152 +/- 0.079  ·  tower strike 32, crash 8
+
+BEST ROUND: 1 — caught 0/40 on the rank bank
+CONFIRMATION on an untouched bank (40 eps): caught 0/40  mean 0.319 +/- 0.073
+   tower strike 28, crash 12
+wrote distill\smoke\best.json

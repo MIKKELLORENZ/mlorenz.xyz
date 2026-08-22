@@ -79,6 +79,19 @@ const OUT_INIT = 0.08;
 /* Mutate one head per child rather than all three. See Brain.mutate. */
 let BRAIN_MODULAR = true;
 
+/* Probability that a mutated weight is REDRAWN OUTRIGHT rather than nudged.
+ *
+ * This is a knob and not a constant because a GA that starts from a
+ * GRADIENT-TRAINED brain cannot survive it. An evolved network tolerates the
+ * occasional reset only because it was SELECTED UNDER the operator — lineages
+ * that could not take a redrawn weight died out generations ago. A network
+ * fitted by backprop has never met one: its weights are a jointly-tuned
+ * solution, and replacing twenty of them at random is not a mutation, it is
+ * damage. Set it to 0 before evolving on top of a distilled brain, and measure
+ * rather than assume — the weight SCALES of an evolved and a distilled net here
+ * are nearly identical, so magnitude tells you nothing about robustness. */
+let MUT_RESET = 0.03;
+
 class Net {
     constructor(sizes, initRng, outAct) {
         this.sizes = sizes.slice();
@@ -130,7 +143,7 @@ class Net {
             const w = this.weights[l];
             for (let i = 0; i < w.length; i++) {
                 if (rng() < rate) {
-                    if (rng() < 0.03) w[i] = gaussRand(rng) * 0.5;   // rare full reset
+                    if (MUT_RESET > 0 && rng() < MUT_RESET) w[i] = gaussRand(rng) * 0.5;   // rare full reset
                     else w[i] += gaussRand(rng) * sigma;
                 }
             }
@@ -169,7 +182,12 @@ class Net {
 }
 
 /* ------------------------------------------------------- feature geometry */
-const MAX_BALLS = 6;
+/* Slots the ball selector scores. RAISING THIS IS FREE IN PARAMETERS: the
+ * selector net is run once per slot with SHARED weights, so 12 slots and 6
+ * slots are the same network — only the loop is longer. That is the payoff of
+ * the pointer design, and it is what lets the bench get crowded without the
+ * brain changing shape. */
+const MAX_BALLS = 12;
 const NBUCKET_SLOTS = 4;
 const BALL_FEATS = 16;
 const BUCKET_FEATS = 11;
@@ -329,8 +347,10 @@ class Brain {
 }
 
 function setModularMutation(on) { BRAIN_MODULAR = !!on; }
+function setMutationReset(p) { MUT_RESET = Math.max(0, Math.min(1, +p || 0)); }
+function getMutationReset() { return MUT_RESET; }
 
 if (typeof module !== "undefined") module.exports = {
-    Net, Brain, mulberry32, gaussRand, netSizes, setModularMutation,
+    Net, Brain, mulberry32, gaussRand, netSizes, setModularMutation, setMutationReset, getMutationReset,
     MAX_BALLS, NBUCKET_SLOTS, BALL_FEATS, BUCKET_FEATS, CTX_FEATS, MOTOR_FEATS, OUT_INIT
 };

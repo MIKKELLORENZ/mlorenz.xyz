@@ -28,7 +28,7 @@ const THEMES = {
          * like objects floating in a void. Nothing here is "the light colour" or
          * "the material colour" on its own — it is the product that has to land
          * below 1.0, and these two blocks have to be changed together. */
-        sky: 0xdbe3ec, floor: 0xb0bdcb, grid: 0x93a2b3,
+        sky: 0xdbe3ec, floor: 0xb0bdcb, grid: 0x93a2b3, eyeBorder: 0x5b6b7d,
         table: 0xe2e9f0, tableEdge: 0x7f8fa1, leg: 0x768393,
         hemiSky: 0xffffff, hemiGround: 0xb0bcc8, hemiIntensity: 0.55,
         sunColor: 0xffffff, sunIntensity: 0.50,
@@ -40,7 +40,7 @@ const THEMES = {
         bucketOpacity: 0.55, shadow: 0.26, spec: 0x2a3444
     },
     dark: {
-        sky: 0x0f1319, floor: 0x151b23, grid: 0x28313d,
+        sky: 0x0f1319, floor: 0x151b23, grid: 0x28313d, eyeBorder: 0x46566a,
         table: 0x2b3644, tableEdge: 0x0e131a, leg: 0x1d2530,
         hemiSky: 0x9fb2c9, hemiGround: 0x141a22, hemiIntensity: 0.48,
         sunColor: 0xdce8ff, sunIntensity: 0.50,
@@ -98,6 +98,19 @@ class Renderer {
         this.camera = new THREE.PerspectiveCamera(42, 1, 0.05, 60);
 
         this.orbit = { yaw: -0.5, pitch: 0.62, dist: 1.9, target: new THREE.Vector3(0, 0.1, 0) };
+
+        /* Eye-in-hand stereo preview. Two cameras rigidly attached to the wrist
+         * (geometry in ARM.eye, poses from Arm.eyes) rendered as insets over the
+         * main view. They are the arm's own point of view: what a hand camera
+         * would actually see while it reaches, jaws included. */
+        this.showEyes = false;
+        this._eyeCams = [0, 1].map(() => {
+            const c = new THREE.PerspectiveCamera(ARM.eye.fov, 1, ARM.eye.near, ARM.eye.far);
+            c.matrixAutoUpdate = false;
+            return c;
+        });
+        this._eyeM = new THREE.Matrix4();
+        this._eyeV = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
         this.benches = [];
         this.focus = 0;
         this.gridCols = 1;
@@ -114,8 +127,15 @@ class Renderer {
             // fingers running along the approach vector, and two rubber pads
             housing: new G.CylinderGeometry(0.019, 0.022, 0.05, 16),
             palm: new G.BoxGeometry(0.058, 0.016, 0.034),
-            finger: new G.BoxGeometry(0.011, 0.058, 0.026),
-            pad: new G.BoxGeometry(0.008, 0.024, 0.024),
+            /* Finger length is not a styling choice. The jaws have to END at the
+             * bottom of a ball they are holding: the grasp point is the ball's
+             * CENTRE, a ball on the bench has its centre one radius up, so
+             * fingertips that reach further than `graspOffset + BALL_R` past the
+             * wrist are fingertips that go through the table on every single
+             * pick-up. They used to reach 93 mm (38 mm past the ball centre) and
+             * the hand stabbed 13 mm into the bench each time it grasped. */
+            finger: new G.BoxGeometry(0.011, 0.038, 0.026),
+            pad: new G.BoxGeometry(0.008, 0.022, 0.024),
             plate: new G.CylinderGeometry(0.060, 0.068, 0.011, 24),
             column: new G.CylinderGeometry(0.034, 0.046, 1, 20),
             turret: new G.CylinderGeometry(0.038, 0.038, 0.028, 20)
@@ -349,6 +369,70 @@ class Renderer {
         }
         this._updateCamera(opts.soloView ? this.benches[Math.min(this.focus, show - 1)] : null);
         this.renderer.render(this.scene, this.camera);
+        if (this.showEyes) {
+            const which = Math.min(opts.soloView ? this.focus : (opts.leader === undefined ? this.focus : opts.leader), show - 1);
+            this._drawEyes(this.benches[Math.max(0, which)], stations[Math.max(0, which)]);
+        }
+    }
+
+    /* Render the wrist stereo pair as two insets in the bottom-left.
+     *
+     * Scissored viewports on the SAME canvas rather than render targets or extra
+     * canvases: the preview has to survive on a phone and inside the headless
+     * screenshot path, and both of those are far happier with one context.
+     *
+     * autoClear has to go off first. Left on, the second and third render calls
+     * would each wipe the whole framebuffer and the main view would vanish;
+     * clearing explicitly with the scissor set clears only the inset. */
+    _drawEyes(bench, station) {
+        if (!bench || !station) return;
+        const r = this.renderer;
+        const W = this.canvas.clientWidth || 800, H = this.canvas.clientHeight || 600;
+        // inset size: a readable fraction of the canvas, but never so large on a
+        // phone that it buries the bench it is a view of
+        const iw = Math.round(Math.max(84, Math.min(190, W * 0.20)));
+        const ih = Math.round(iw * 0.75);
+        const pad = Math.round(Math.max(6, W * 0.012)), gap = Math.round(pad * 0.6);
+        const eyes = station.arm.eyes();
+        const [X, Y, Z, P] = this._eyeV;
+
+        r.autoClear = false;
+        r.setScissorTest(true);
+        for (let k = 0; k < 2; k++) {
+            const e = eyes[k], cam = this._eyeCams[k];
+            // the FK is in BENCH-LOCAL space; the scene camera is not
+            P.set(e.origin.x, e.origin.y, e.origin.z);
+            bench.localToWorld(P);
+            // a three.js camera looks down its own -Z, so forward becomes -Z
+            X.set(e.right.x, e.right.y, e.right.z);
+            Y.set(e.up.x, e.up.y, e.up.z);
+            Z.set(-e.forward.x, -e.forward.y, -e.forward.z);
+            X.transformDirection(bench.matrixWorld);
+            Y.transformDirection(bench.matrixWorld);
+            Z.transformDirection(bench.matrixWorld);
+            this._eyeM.makeBasis(X, Y, Z);
+            this._eyeM.setPosition(P);
+            cam.matrix.copy(this._eyeM);
+            cam.matrixWorldNeedsUpdate = true;
+            cam.aspect = iw / ih;
+            cam.updateProjectionMatrix();
+
+            const x = pad + k * (iw + gap);
+            // a one-pixel surround, drawn by clearing a slightly larger rect to
+            // the border colour before the camera's own rect is cleared
+            r.setScissor(x - 1, pad - 1, iw + 2, ih + 2);
+            r.setClearColor(this.theme.eyeBorder, 1);
+            r.clear(true, false, false);
+            r.setViewport(x, pad, iw, ih);
+            r.setScissor(x, pad, iw, ih);
+            r.setClearColor(this.theme.sky, 1);
+            r.clear(true, true, false);
+            r.render(this.scene, cam);
+        }
+        r.setScissorTest(false);
+        r.setViewport(0, 0, W, H);
+        r.setClearColor(this.theme.sky, 1);
+        r.autoClear = true;
     }
 
     /* Lay a contact shadow on the table under a point. It shrinks and fades with
@@ -395,8 +479,14 @@ class Renderer {
          * the physics closes them on. `grasp` sits at ARM.graspOffset past the
          * tip, so the fingers have to straddle it — if they visibly did not,
          * the picture would be lying about where a ball gets captured. */
+        /* A real gripper closing on a ball STALLS on the ball — the commanded
+         * aperture keeps going to zero and the jaws stop at the object. Drawing
+         * the commanded aperture instead put the pads 6 mm inside every ball the
+         * arm was carrying. Holding one floors the drawn half-span at the ball's
+         * radius, which is the truth about where the jaws actually are. */
         const ap = s.arm.aperture();
-        const half = 0.010 + ap * (ARM.jawHalf - 0.010);
+        let half = 0.010 + ap * (ARM.jawHalf - 0.010);
+        if (s.held >= 0) half = Math.max(half, BALL_R + 0.001);
         const app = f.approach, tip = f.tip;
         const at = (dist) => ({
             x: tip.x + app.x * dist, y: tip.y + app.y * dist, z: tip.z + app.z * dist
@@ -407,16 +497,18 @@ class Renderer {
         housing.position.copy(at(-0.004));
         setBasis(housing, axis, app);
         const palm = arm.userData.palm;
-        palm.position.copy(at(0.028));
+        // sits so its far face meets the root of the fingers — a visible gap
+        // between the palm and the jaws reads as a broken model
+        palm.position.copy(at(ARM.graspOffset + BALL_R - 0.046));
         setBasis(palm, axis, app);
 
-        const fingerMid = at(0.064);
+        const fingerMid = at(ARM.graspOffset + BALL_R - 0.019);
         arm.userData.fingers.forEach((m, k) => {
             const p = side(fingerMid, k === 0 ? half : -half);
             m.position.set(p.x, p.y, p.z);
             setBasis(m, axis, app);
         });
-        const padMid = at(0.082);
+        const padMid = at(ARM.graspOffset + 0.004);
         arm.userData.pads.forEach((m, k) => {
             const p = side(padMid, (k === 0 ? 1 : -1) * (half - 0.007));
             m.position.set(p.x, p.y, p.z);

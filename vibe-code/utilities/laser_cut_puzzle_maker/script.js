@@ -556,7 +556,48 @@ function getVectorTraceOptions(quality, smoothRadiusVal) {
     };
 }
 
-function replaceWithVectorizedGroup(oldObj, svgstr, metadata) {
+// ImageTracer emits ONE <path> per traced blob (a blob's holes ride along as reversed
+// subpaths inside that same `d`). A thresholded photo is thousands of blobs, so the
+// vectorized image used to arrive as thousands of Fabric objects — sluggish here, and
+// lethal downstream: Laser Cutter Studio turned every one of them into its own canvas
+// object plus a layer-panel row and locked the browser up.
+//
+// Concatenate every contour into a single compound `d` and emit one
+// <path fill-rule="evenodd"> instead: one object here, one object after import, and the
+// same picture — nested holes stay hollow because a hole contour is one crossing deeper
+// than its parent and an island inside a hole is two, which even-odd gets right at any
+// nesting depth without relying on winding direction. The rule is stated explicitly so
+// the studio can read it back and both render and *burn* the counters as holes.
+// Geometry comes from ImageTracer.svgpathstring so hole winding/rounding stay byte-identical
+// to what getsvgstring would have produced.
+function buildMergedTraceSvg(td, traceOptions) {
+    const options = ImageTracer.checkoptions(Object.assign({}, traceOptions, {
+        scale: 1,
+        desc: false,
+        lcpr: 0,   // no control-point decorations
+        qcpr: 0
+    }));
+
+    const layer = td.layers[0] || [];
+    const parts = [];
+    for (let i = 0; i < layer.length; i++) {
+        if (layer[i].isholepath) continue; // holes are emitted with their parent contour
+        const one = ImageTracer.svgpathstring(td, 0, i, options);
+        const m = one && one.match(/\bd="([^"]*)"/);
+        const d = m && m[1].trim();
+        if (d) parts.push(d);
+    }
+    if (!parts.length) return null;
+
+    const w = td.width * options.scale;
+    const h = td.height * options.scale;
+    return `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" ` +
+           `width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+           `<path fill="#000000" fill-rule="evenodd" stroke="none" d="${parts.join(' ')}"/>` +
+           `</svg>`;
+}
+
+function replaceWithVectorizedPath(oldObj, svgstr, metadata) {
     const left = oldObj.left;
     const top = oldObj.top;
     const angle = oldObj.angle;
@@ -568,6 +609,9 @@ function replaceWithVectorizedGroup(oldObj, svgstr, metadata) {
     const originY = oldObj.originY;
 
     fabric.loadSVGFromString(svgstr, (objects, options) => {
+        // buildMergedTraceSvg emits exactly one <path>, and groupSVGElements returns a lone
+        // element as-is — so this is a single fabric.Path, not a Group. It keeps the same
+        // content bounding box the old group had, so the transform copy below is unchanged.
         const group = fabric.util.groupSVGElements(objects, options);
 
         group.set({
@@ -773,13 +817,14 @@ function applyImageProcessing(imgObj) {
                 height: tracedata.height
             };
 
-            const svgstr = ImageTracer.getsvgstring(td, Object.assign({}, traceOptions, {
+            const svgstr = buildMergedTraceSvg(td, Object.assign({}, traceOptions, {
                 strokewidth: 0,
                 linefilter: traceOptions.linefilter,
                 // Keep original pixel coordinate system; Fabric will handle transforms.
                 scale: 1,
                 viewbox: true
             }));
+            if (!svgstr) throw new Error('trace produced no contours');
 
             const metadata = {
                 thresholdType: type,
@@ -791,7 +836,7 @@ function applyImageProcessing(imgObj) {
                 originalSrcUrl: imgObj.originalSrcUrl || imgObj.src
             };
 
-            replaceWithVectorizedGroup(imgObj, svgstr, metadata);
+            replaceWithVectorizedPath(imgObj, svgstr, metadata);
             return;
         } catch (err) {
             // Fall back to raster if tracing fails

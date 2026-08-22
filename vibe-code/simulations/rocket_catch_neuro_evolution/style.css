@@ -1,0 +1,199 @@
+/* style.css — dark instrument panel around a bright sky. */
+:root {
+    --bg: #0d1117;
+    --panel: #151b23;
+    --panel2: #1b222c;
+    --line: #263140;
+    --ink: #d8e1ec;
+    --dim: #8a99ab;
+    --accent: #ff9a4d;
+    --ok: #5ad19a;
+    --warn: #ef7d6a;
+    color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.5 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+}
+
+#app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+
+/* ------------------------------------------------------------------ top */
+#topbar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 8px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--line); flex: 0 0 auto; flex-wrap: wrap;
+}
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 12px var(--accent);
+    align-self: center;
+}
+.brand h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+.brand-sub { font-size: 11px; color: var(--dim); letter-spacing: .3px; }
+
+#hud-strip { display: flex; gap: 14px; align-items: center; margin-left: auto; flex-wrap: wrap; }
+.tstat { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.tstat b { color: var(--ink); font-weight: 600; font-size: 13px; margin-left: 3px; }
+
+.badge {
+    font-size: 10px; letter-spacing: .8px; font-weight: 700;
+    padding: 3px 9px; border-radius: 999px;
+    background: #2a3342; color: var(--dim); border: 1px solid var(--line);
+}
+.badge.ok { background: rgba(90,209,154,.14); color: var(--ok); border-color: rgba(90,209,154,.4); }
+.badge.warn { background: rgba(239,125,106,.14); color: var(--warn); border-color: rgba(239,125,106,.4); }
+
+/* --------------------------------------------------------------- layout */
+#layout { display: flex; flex: 1 1 auto; min-height: 0; }
+
+aside {
+    flex: 0 0 250px; background: var(--panel);
+    border-right: 1px solid var(--line);
+    overflow-y: auto; padding: 12px;
+}
+/* Wider than the left panel: it carries the network view, and at 250 px a
+   200-unit input strip is unreadable. */
+#panel-right { flex: 0 0 288px; border-right: none; border-left: 1px solid var(--line); }
+
+aside section { margin-bottom: 18px; }
+aside h3 {
+    margin: 0 0 8px; font-size: 11px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--dim); font-weight: 700;
+}
+aside h3 small { text-transform: none; letter-spacing: 0; font-weight: 400; opacity: .7; }
+
+.fld { display: block; margin-bottom: 9px; }
+.fld > span { display: block; font-size: 11px; color: var(--dim); margin-bottom: 3px; }
+.fld > span small { opacity: .78; font-style: italic; }
+.fld[hidden] { display: none; }
+#sel-indiv { font-variant-numeric: tabular-nums; font-size: 12px; }
+select, button, input[type=range] {
+    width: 100%; font: inherit; font-size: 13px;
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+}
+/* Dark-mode <select> popups need both of these or the option list renders
+   as black text on a black sheet on Windows. */
+select { color-scheme: dark; background-color: var(--panel2); }
+select option { background: var(--panel2); color: var(--ink); }
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); color: #fff; }
+input[type=range] { padding: 0; height: 22px; accent-color: var(--accent); }
+
+.row { display: flex; gap: 6px; margin-bottom: 8px; }
+/* `display: flex` here outranks the user-agent's `[hidden] { display: none }`,
+   so a hidden .row stays on screen. Restate it. */
+.row[hidden] { display: none; }
+.row .wide { flex: 1 1 auto; }
+.row button { flex: 0 0 auto; }
+
+.desc { font-size: 11.5px; color: var(--dim); line-height: 1.55; margin: 6px 0 0; }
+.desc.small, .small { font-size: 10.8px; }
+
+/* Compact readout for the right panel. The long explanatory prose that used to
+   live there is in the README — a panel you have to scroll is a panel nobody
+   reads while a 40-second landing is happening in the middle of the screen. */
+.meta {
+    font-size: 11px; color: var(--dim); line-height: 1.5; margin: 0;
+    font-variant-numeric: tabular-nums;
+}
+.meta b { color: var(--fg); }
+.tiny { font-size: 10px; color: var(--dim); line-height: 1.45; margin: 5px 0 0; opacity: .85; }
+
+#netview {
+    display: block; width: 100%; height: 200px;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 5px;
+}
+
+/* the colour key dots in the sensor-overlay caption */
+.key {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--k, #fff); margin-right: 4px; vertical-align: baseline;
+}
+button.on { border-color: var(--accent); color: #fff; background: rgba(255,154,77,.16); }
+
+/* output bars */
+.bar { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.bar span { flex: 0 0 62px; font-size: 10px; color: var(--dim); }
+.bar i {
+    position: relative; flex: 1 1 auto; height: 9px;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 3px;
+    overflow: hidden;
+}
+.bar i::before {
+    content: ""; position: absolute; left: 50%; top: 0; bottom: 0;
+    width: 1px; background: var(--line);
+}
+.bar u { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; }
+
+/* ------------------------------------------------------------- viewport */
+#viewport { position: relative; flex: 1 1 auto; min-width: 0; background: #9fc4e0; }
+#view { display: block; width: 100%; height: 100%; }
+
+#corner {
+    position: absolute; left: 12px; top: 12px;
+    background: rgba(13,17,23,.62); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,.10); border-radius: 8px;
+    padding: 8px 11px; pointer-events: none;
+}
+.kv { display: flex; justify-content: space-between; gap: 18px; font-size: 11px; }
+.kv span { color: #a8b6c6; }
+.kv b { font-variant-numeric: tabular-nums; color: #eef4fb; }
+
+#drag-hint {
+    position: absolute; right: 12px; bottom: 10px; margin: 0;
+    font-size: 10px; color: rgba(255,255,255,.65); pointer-events: none;
+    text-shadow: 0 1px 3px rgba(0,0,0,.6);
+}
+
+#verdict {
+    position: absolute; left: 50%; top: 42%; transform: translate(-50%,-50%);
+    text-align: center; pointer-events: none;
+    background: rgba(13,17,23,.72); backdrop-filter: blur(8px);
+    border-radius: 12px; padding: 14px 26px; border: 1px solid rgba(255,255,255,.12);
+}
+#verdict span { display: block; font-size: 26px; font-weight: 800; letter-spacing: 2px; }
+#verdict small { display: block; font-size: 11.5px; color: #b9c6d6; margin-top: 4px; }
+#verdict.good span { color: var(--ok); text-shadow: 0 0 24px rgba(90,209,154,.5); }
+#verdict.bad span { color: var(--warn); text-shadow: 0 0 24px rgba(239,125,106,.4); }
+
+/* ---------------------------------------------------------------- intro */
+#intro {
+    position: fixed; inset: 0; z-index: 40;
+    background: rgba(8,11,16,.88); backdrop-filter: blur(5px);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+#intro[hidden] { display: none; }
+.intro-card {
+    max-width: 560px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 26px 28px;
+    box-shadow: 0 24px 70px rgba(0,0,0,.6);
+}
+.intro-dot {
+    display: block; width: 11px; height: 11px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 18px var(--accent); margin-bottom: 14px;
+}
+.intro-card h2 { margin: 0 0 12px; font-size: 24px; letter-spacing: -.2px; }
+.intro-card p { margin: 0 0 12px; color: #b7c4d3; font-size: 14px; }
+.intro-small { font-size: 12.8px !important; }
+.intro-note { font-size: 11px !important; color: var(--dim) !important; margin-top: 14px !important; }
+.intro-choice {
+    display: block; width: 100%; text-align: left; padding: 12px 15px;
+    border-radius: 9px; margin-top: 6px;
+}
+.intro-choice b { display: block; font-size: 14px; }
+.intro-choice small { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
+.intro-choice.primary { border-color: var(--accent); }
+.intro-choice.primary b { color: var(--accent); }
+
+/* --------------------------------------------------------------- mobile */
+@media (max-width: 900px) {
+    .brand-sub { display: none; }
+}

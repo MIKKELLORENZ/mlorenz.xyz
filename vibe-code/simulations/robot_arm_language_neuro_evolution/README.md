@@ -20,19 +20,148 @@ split measures, and it is the only number in this project worth arguing about.
 
 **The simulation, the referee, the language pipeline and the UI are finished and
 tested.** The scripted reference controller clears **73/73 balls across all
-seven goal kinds**; 47 headless tests and 22 browser checks pass.
+seven goal kinds**; 48 headless tests pass. (`test_ui.js` currently has 11
+failures: the shared `shared_assets/mobile.js` layer landed after that file's
+stub DOM was written and reparents elements, so its handler-binding assertions
+no longer hold. The page itself is fine.)
 
-**The population is not yet trained to a usable champion.** At the time of
-writing the best brain delivers on 2 of its 4 stage-1 training missions and 0 of
-8 unseen ones — real pick-and-place, no generalisation yet. There is no baked
-`default_brain.js`, so the page offers "evolve from scratch" and "scripted
-reference" but not "watch the trained champion".
+**What the arm reads, stated plainly, because the demo invites the wrong guess.**
+It is handed the position and colour of every ball and bucket by the simulator.
+It has **no vision**. The wrist stereo pair (`ARM.eye`, the "Arm eyes" panel) is
+a rendering of what such a camera would see and **nothing reads those pixels** —
+`probe_eyes.js` exists to measure whether they could ever be enough, and says a
+wrist camera sees all the candidate balls at only 28% of the moments the arm has
+to choose between them. What IS genuinely learned is the mapping from twelve
+numbers of sentence plus that structured state to a target choice and five servo
+commands, and it holds up on sentences never trained on. The perception problem
+is not solved here; it is not attempted here.
+
+**The arm now follows instructions, and it was not evolution that taught it.**
+The headline numbers, on phrasings held out of training entirely:
+
+| | balls delivered | tasks completed |
+|---|---|---|
+| stock GA, 21,058 generations | 0% | 0% |
+| behaviour cloning, PCA-16 projection | 66.6% | 50.4% |
+| behaviour cloning, centroid-12 projection | 85.7% | 67.3% |
+| \+ 2 DAgger rounds | 89.1% | 68.8% |
+| **the same, retrained for the crowded bench** | **82.1%** | **55.7%** |
+
+The first three rows are the old ~4-ball bench. The last is the shipped brain on
+the bench the page actually deals — about nine balls, a target of six rather
+than three — scored by `node eval_brain.js training/distilled_fullbench.json` on
+a bank with a seed base the trainer never touched, ±2.0 SE. It matches the
+trainer's own held-out figure (82.5% / 56.0%) almost exactly, so nothing was
+inflated by the checkpoint selection. On *trained* phrasings the same brain
+reaches 94.5% of balls and 80.2% of tasks.
+
+Do not read the drop from 68.8% to 55.7% as the arm getting worse: a "task" now
+means getting **six** balls right instead of three, and an all-or-nothing metric
+over twice as many decisions falls even when per-ball accuracy holds. Per-ball
+it is 82.1% against 89.1%. By goal kind, held out: SORT 82%, LEAVE_ONE 77%,
+COUNT 77%, ALTERNATE 76%, EXCLUDE 75%, ORDER 53%, ALL_TO_ONE 35%. The two weak
+kinds lean hardest on the bucket head, the least accurate of the three at ~86%.
+
+And the thing the crowded bench was really for — **0 balls knocked off the bench
+in 400 episodes**, 0.02 nudged more than 3 cm, and it leaves 3.2 balls standing
+where the scripted controller leaves 3.1. It works the bench down to exactly the
+balls the rule says to leave (`node probe_care.js`).
+
+The GA number is not a typo and it is not an early reading: 21,058 generations
+never left curriculum stage 1, with the best brain at 0.50 balls per episode the
+entire time. This project spent a long while treating that as a search problem.
+It is a **signal** problem — an episode makes roughly 900 control decisions and
+returns one scalar, spread across 392 sentences and 49 goal specs — and the fix
+is a per-decision teacher, not more generations. `distill.js` and
+`oracle_policy.js` are that fix, and the write-ups in both files are worth
+reading before changing anything there.
+
+**Two measurements that redirected the work, both cheap and both worth
+repeating before any long run:**
+
+- `probe_ceiling.js` — the brain completes 74% of tasks worded the way it was
+  trained and 54% worded a way it has not seen. Re-running the *same held-out
+  goals* re-worded with a training sentence recovers essentially the whole gap.
+  So the policy was never the limit; **identifying which goal it had been given
+  was**. That is an embedding problem, and no amount of trainer tuning touches it.
+- `probe_eyes.js` — the wrist stereo pair can see *all* the candidate balls at
+  only 28% of the moments the ball selector has to choose between them. Ample
+  for the motor head, not nearly enough for the pointer head.
+
+**One more thing that will bite anyone tuning this.** The supervised losses
+saturate long before training ends and then stop distinguishing anything, while
+closed-loop behaviour keeps moving underneath them. Five snapshots of a single
+round, at 6/10/14/18/24 epochs, scored 52.4/57.9/58.0/54.8/61.1% of held-out
+tasks with motor BCE spanning 0.401–0.413 and ball-selector accuracy 98.9–99.2%.
+A *separate* 18-epoch fit of byte-identical data, differing only in the order
+the shuffler produced minibatches, scored 67.1%. That is not overfitting — the
+curve is not monotonic and the two 18-epoch fits are twelve points apart. The
+supervised objective simply has many solutions it cannot tell apart and the task
+can. So `distill.js` snapshots and picks by playing the game, and `eval_brain.js`
+exists because the winner of that pick needs re-scoring on a bank that took no
+part in it.
+
+**DAgger needs more than one round here, and round 1 will talk you out of it.**
+Scored on a bank no brain was selected on:
+
+| | trained tasks | held-out balls | held-out tasks |
+|---|---|---|---|
+| cloning only | 88.4% | 85.7% | 67.3% |
+| + 1 DAgger round | 88.5% | 83.8% | 65.6% |
+| + 2 DAgger rounds | **96.4%** | **89.1%** | **68.8%** |
+
+Round 1 comes back flat-to-worse and looks like a dead end. Round 2 — the first
+one run fully on-policy, with beta at 0 — is where it pays. The temptation after
+round 1 is to conclude the teacher is too good for DAgger to add anything, and
+that conclusion is wrong; it just needs the student's own state distribution,
+undiluted, and one round of beta-mixing is still half the teacher's. Budget for
+at least three rounds at 15–30 minutes each before judging it.
+
+**The page is a playback, not a trainer.** It used to run the whole
+evolutionary loop in the browser across twelve simultaneous benches. Both halves
+of that were wrong once training moved offline: the loop was no longer the
+story, and twelve benches actively obscured it — every bench is a different
+noise draw of the *same* policy, which is a fine way to read a fleet's variance
+and a useless way to see whether the arm understood a sentence. It is now one
+bench and one arm, with the controls pointed at the instruction (pick a
+sentence, or type your own and have Ollama embed it) and at the bench (fill,
+noise, a seed you can re-deal or replay). Picking a new sentence re-deals the
+*same* seed on purpose, so "does the wording change what it does?" is asked on
+one table rather than on two different draws.
+
+**The bench used to be nearly empty.** Scenes averaged 4.0 balls no matter what
+the ball budget said, because `sceneRecipe` capped every colour at 1–2 — so a
+"sort the green ones" scene could be two greens and a distractor and the arm was
+done in three seconds. `sceneRecipe` now takes a `fill` multiplier and the
+selector's slot count went 6 → 12, which costs **nothing in parameters**: the
+selector is run once per slot with shared weights, so twelve slots and six slots
+are the same network. At the shipped fill of 2.0 a bench holds ~9 balls and the
+teacher still clears 99% of them. Two things had to move with it — the context
+features were normalised by a hard-coded 6 and would have saturated, and
+`distill.js` kept its own copy of the feature geometry, which went stale the
+instant the sim changed shape and killed the first run with `offset is out of
+bounds`. It died loudly, which was luck; a stale copy that still *fit* would
+have trained silently on garbage.
+
+**Knocking balls off the bench now costs.** `lost` was −100 against a +1400
+delivery — a ruined ball priced at 7% of a good one, cheap enough that barging
+through the clutter paid. It was also a cliff, paying nothing until the ball was
+already gone, so there was no gradient to climb away from. `lost` is now −400
+and a `shove` ratchet charges for displacing any ball the arm is *not* carrying,
+saturating at 12 cm, one-way and payable once per ball so it cannot be farmed by
+nudging something back and forth. It is deliberately worth less than a delivery:
+an arm that refuses to touch anything scores nothing, so the cost has to be a
+reason to be careful, not a reason to be still.
+
+**What is still open:** the GA fine-tune on top of the distilled brain (the
+teacher is a ceiling on imitation, not on evolution); a better projection still
+(the centroid basis below was a large win and is unlikely to be the last one);
+and the pixels-replace-sensors phase, which `probe_eyes.js` says needs a scan
+behaviour with spatial memory or a second camera, not just an image encoder.
 
 Everything in the sections below about *architecture and physics* is finished
-work. Everything about *training* is a live investigation, and the numbers
-quoted are measurements taken along the way, not final results. The five
-diagnosed blockers are written up honestly because each one looked exactly like
-"the GA needs more time" on a fitness curve, and none of them were.
+work. Where a number is quoted from training it is a measurement taken along the
+way, not a final result.
 
 ---
 
@@ -367,6 +496,222 @@ Every 25 generations the champion runs a matched-pair exam: the same goals, once
 in a *training* phrasing and once in a *held-out* one, on identical scenes. The
 gap between the two is the measurement. A held-out score on its own confounds
 "cannot read new wording" with "cannot do these particular goals".
+
+
+---
+
+## The bench is solid, and it was not
+
+Worth reading even if you only care about the learning, because the failure mode
+is general: **a correct renderer drawing a broken world looks exactly like a
+broken renderer.**
+
+The report was "the claw and the arm look poorly rendered". The renderer was
+innocent. It draws `f.shoulder / elbow / wrist / tip` straight from the forward
+kinematics, and the FK matches an independent recomputation to 0.0 across 2,000
+random poses (`audit_physics.js`). What it was faithfully drawing was an arm
+halfway through the furniture.
+
+`audit_solid.js`, over 40 episodes each:
+
+| driver | ticks with a link inside the bench | table punch-throughs | bucket-wall punch-throughs |
+|---|---|---|---|
+| scripted reference | 0.0% | 0 | 0 |
+| random brains | 0.0% | 0 | 0 |
+| gen-224 GA champion | **22.6%** | **393** | **117** |
+
+Deepest point: 97 mm *under* the table top. The reference controller and a fleet
+of random brains never leave free space, so nothing in ordinary testing showed
+it — but the GA had found the hole and moved in, because a workspace with no
+bench in it is easier. Every policy evolved before this fix was a policy for a
+world that was not the one being drawn.
+
+The constraint lives in `Arm.step`: take the step, and if the new pose
+penetrates a solid, **bisect back along the joint-space segment** to the last
+free pose. Four details carry the whole thing:
+
+- It is a **position constraint, not a reward**. A penalty for clipping is one
+  more term in the ledger, and the fleet prices every term in the ledger.
+- The solid regions are **volumes, not shells**. A joint moves up to 35 mm per
+  substep; a 7 mm wall is not an obstacle to that, it is a suggestion. The bench
+  is the entire half-space under the top and a bucket is a filled frustum, so
+  "the new pose is not inside anything" genuinely means the move was legal.
+- The start pose is always free — HOME is free and the arm only ever moves to
+  free poses — so the bisection always has a free end and the arm cannot wedge.
+- The **gripper joint is excluded**. Aperture is not in the FK, and freezing the
+  hand because the elbow touched the bench would make "let go" unreachable at
+  exactly the moment it matters.
+
+Buckets are solid only up to `rim − 20 mm`, leaving the mouth open, because the
+`release` rung pays from `g.y > rim − 0.02` upward. The check that the
+constraint bites only on the degenerate behaviour is that the reference
+controller is bit-identical afterwards: same 73/73, same 9,496 ticks.
+
+The gripper was lying too, in a smaller way. The fingers reached 93 mm past the
+wrist — 38 mm past the grasp point — so with a ball on the bench (centre 25 mm
+up) the fingertips were 13 mm *through the table* on every single pick-up.
+Finger length is not a styling choice; it is `graspOffset + BALL_R`. And a real
+gripper closing on a ball stalls on the ball, so the drawn jaw span is floored at
+the ball's radius while holding, instead of drawing pads 6 mm inside the object
+they are supposedly gripping.
+
+---
+
+## Teaching, because evolving did not work
+
+`train.js` ran **21,058 generations** and never left stage 1: best 0.50 balls per
+episode, held-out phrasings 0%. That is the end of the argument, not a snapshot
+of a bad afternoon.
+
+The diagnosis is signal, not search. An episode makes roughly 900 control
+decisions and about 20 selector decisions, and returns **one scalar**, spread
+over 392 sentences and 49 goal specs. Selection cannot see which decision was
+the good one. When the per-decision count sits three orders of magnitude above
+the per-episode signal, the answer is a teacher.
+
+### The teacher has to be memoryless
+
+`reference_policy.js` solves the task and **cannot be the teacher**. It is a
+latched state machine, so its action is a function of (world, which rung it
+happens to be on) — and that second argument is history. The student's motor
+head is a function of the world alone. Labelling with a latched teacher hands
+the network two different answers for the same input ("descend" and "hover" at
+the same pose, depending on what happened thirty ticks ago) and asks it to fit
+both.
+
+`oracle_policy.js` re-derives the same behaviour as a pure function of state.
+The reference controller's own header says this is impossible — a memoryless
+hover/descend rule oscillates, because the arm's response keeps re-crossing the
+threshold that selects the mode. That is true of any **threshold** and false of a
+**funnel**:
+
+```
+y* = ball.y + HOVER · min(1, (flat / ALIGN_R)²)
+```
+
+There is no mode to flip between; badly aligned is high, well aligned is low, and
+everything in between varies smoothly.
+
+**The funnel must be quadratic in the ERROR, not in the alignment**, and the
+first version got this backwards. Written as `HOVER·(1 − align²)` with
+`align = 1 − flat/ALIGN_R`, it is *linear* near the ball with slope 2.8, so the
+distance to the ball bottoms out at 2.97 × flat and never enters the 25 mm grasp
+radius unless the arm is already within 8.5 mm horizontally. That version scored
+46/73 and produced a different-looking failure every time. Squaring the error
+makes the residual hover 18.7 × flat²: **72/73, and faster than the latched
+controller** (4.3 s against 5.2 s).
+
+The rest of the machine's memory dissolves on inspection. `anchor` — the point to
+lift straight up from — is just where the hand already is, because the held ball
+*is* at the grasp point. The hover/lift/traverse/release ordering is recoverable
+from `held` plus height. The carry needs the same funnel treatment: blend the
+horizontal target by how much rim clearance the hand has, rather than switching
+on it.
+
+### One teacher is not enough, even a perfect one
+
+Ball positions are drawn fresh every episode and the controller re-solves from
+the live scene each tick, so spawn variety is free — it is a closed loop, not a
+replayed trajectory. That is not the problem. The problem is that one
+deterministic controller draws one *thread* through state space: same approach
+direction, same cruise height, same release radius. A student fitted to that
+thread has never seen the arm 4 cm off the approach line, which is precisely the
+situation it creates for itself the moment it is left to drive.
+
+Both halves of the answer are needed. **DAgger** supplies off-thread *states* —
+the student drives, gets into its own mess, and the teacher says what to do from
+there. **`makeOraclePolicy({rng})`** supplies off-thread *behaviour* — the
+approach geometry is re-drawn per episode and the servo command is jittered, so
+the student is fitted to a family of competent policies rather than one groove.
+Diversity has to stay inside the box where the teacher still *works*: a teacher
+that sometimes fails is not diversity, it is mislabelled data.
+
+### Three heads, three kinds of supervision
+
+- **`ballSel` and `bucketSel` get exact labels** from `Station.oracle()`, which
+  knows the legal next ball and its bucket. The language half of the project
+  stops being something inferred from a delivery count and becomes labelled
+  classification.
+- **`motor` is imitation** of the teacher's five servo commands.
+
+Two rules that are easy to get backwards, and both are the difference between
+DAgger working and DAgger going downhill:
+
+- **Label the motor against the SELECTED ball, never the oracle's.** The motor
+  head cannot see the instruction; all it sees is "there is a target at this
+  offset", so its job is "go to the target you were given", unconditionally. If
+  the selector points at the wrong ball and the motor is labelled toward a
+  different one, the network is being asked for two outputs from one input.
+- **A selector target is a SET.** When the right answer is "do nothing" — which
+  leave-one, count and exclude all need — *any* empty slot is correct, and there
+  are usually several. Demanding one particular empty slot asks the network to
+  tell identical all-zero inputs apart.
+
+And one that cost a whole round: **a teacher's "no opinion" must survive as no
+opinion.** `Station.oracle()` returns `bucket: -1` when idle or holding a ball it
+should not have. Coercing that to bucket 0 so the caller always has a number
+fabricates a label — "the right answer here is the red bin" — for every tick
+where there is no right answer. It is invisible while the teacher drives, which
+barely idles; the moment the student drives, episodes stretch from 66 control
+ticks to 151 and most of the extra ticks are exactly that dithering. Held-out
+task completion went 44.6% → 31.6% in one round and ALL_TO_ONE, decided by that
+head alone, fell 38% → 4%. It reads as "DAgger does not work here". It is one
+coerced `−1`.
+
+Relatedly: **episode length correlates with failure, so an uncapped buffer is
+biased toward it.** A confident policy finishes fast and contributes few samples;
+a confused one runs the clock out and contributes hundreds. Those states are
+worth learning — that is the point — but not at nine times the weight of a state
+on a successful delivery.
+
+---
+
+## The projection was the ceiling
+
+`probe_ceiling.js` asks a question worth asking of any conditioned policy: when
+it fails on an unseen instruction, did it not *understand* the instruction, or
+not *execute* it? Run the held-out sentences, then run the same held-out **goals**
+re-worded with a phrasing from the training split. Same scenes, same seeds, same
+brain; only the vector changes.
+
+```
+trained sentences, own vector                  83.5% balls   71.6% tasks
+HELD-OUT sentences, own vector                 74.7% balls   53.8% tasks
+HELD-OUT goals, worded from the train split    83.9% balls   74.0% tasks
+```
+
+Re-wording recovers the entire gap. **The policy was never the limit; telling the
+goals apart was.** And 53.8% sits right on the embedding's own held-out
+exact-spec recovery of 54%, which is the corroboration rather than a coincidence.
+
+Sweeping dims and whitening did not help — 16 dims was already the best PCA
+operating point available, and wider projections just trade colour recovery for
+rule-kind recovery. The problem is not the width, it is what the basis is fitted
+to. **PCA is unsupervised**: it keeps the directions along which *sentences* vary
+most, and most of the variance between two sentences is wording — the exact
+thing the arm is supposed to ignore.
+
+`--proj centroid` fits the basis to the **49 spec centroids** instead: the mean
+vector of each goal's training phrasings. Directions along which the centroids
+spread are directions that separate goals, and directions along which phrasings
+of one goal disagree get averaged away before the basis is fitted rather than
+competing for components. It is the between-class half of a linear discriminant —
+and the half that can be estimated honestly here, since a full LDA also wants a
+4096-dimensional within-class scatter out of 392 points, which is not a
+measurement but a wish.
+
+| projection | exact spec | rule kind | colours |
+|---|---|---|---|
+| PCA, 16 dims (the old default) | 53.7% | 63.3% | 86.2% |
+| **centroid, 12 dims** | **73.5%** | **81.6%** | **95.2%** |
+
+Every metric improves at once, which is unusual enough to be worth stating
+plainly — the dims/whiten sweep only ever bought one at another's expense. The
+held-out split is untouched by the change: centroids are built from training
+phrasings only, so recovering a held-out sentence is still a real generalisation
+test.
+
+---
 
 ## Dev
 

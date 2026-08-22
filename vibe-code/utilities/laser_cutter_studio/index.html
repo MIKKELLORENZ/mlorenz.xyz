@@ -66,6 +66,10 @@
                 <button class="tbtn icon-only" id="tb-dist-h" title="Distribute Horizontally"><i data-lucide="columns-3"></i></button>
                 <button class="tbtn icon-only" id="tb-dist-v" title="Distribute Vertically"><i data-lucide="rows-3"></i></button>
             </div>
+            <div class="toolbar-group">
+                <button class="tbtn icon-only" id="tb-group" title="Group selection (Ctrl+G)" disabled><i data-lucide="group"></i></button>
+                <button class="tbtn icon-only" id="tb-ungroup" title="Ungroup / split (Ctrl+Shift+G)" disabled><i data-lucide="ungroup"></i></button>
+            </div>
             <div class="toolbar-sep"></div>
             <div class="toolbar-group">
                 <button class="tbtn icon-only" id="tb-grid-toggle" title="Toggle Grid (G)"><i data-lucide="grid-3x3"></i></button>
@@ -374,10 +378,15 @@
                         <label>Travel feed (mm/min)</label>
                         <input type="number" id="m-travel" min="100" max="30000" value="3000">
                     </div>
-                    <div class="row">
-                        <label>Raster line interval (mm)</label>
-                        <input type="number" id="m-interval" min="0.05" max="2" step="0.05" value="0.1">
+                    <div class="row wide">
+                        <label for="m-res">Engrave resolution (scan-line spacing)</label>
+                        <select id="m-res"></select>
                     </div>
+                    <div class="row">
+                        <label for="m-interval">mm per line</label>
+                        <input type="number" id="m-interval" min="0.05" max="2" step="0.05" value="0.2">
+                    </div>
+                    <p class="field-note" id="m-res-note"></p>
                     <div class="row">
                         <label>Max S value</label>
                         <input type="number" id="m-smax" min="1" max="10000" value="1000">
@@ -421,6 +430,11 @@
                     <label for="export-comments">Include layer/comment headers</label>
                 </div>
                 <div class="row">
+                    <label>Engrave resolution</label>
+                    <select id="export-res"></select>
+                </div>
+                <p class="field-note" id="export-res-note"></p>
+                <div class="row">
                     <label>Preview (first 40 lines)</label>
                     <pre id="export-preview" class="gcode-preview"></pre>
                 </div>
@@ -446,6 +460,9 @@
             </div>
         </div>
     </div>
+
+    <!-- CANVAS CONTEXT MENU (populated by LCS.contextmenu) -->
+    <div class="ctx-menu" id="ctx-menu" role="menu" hidden></div>
 
     <script src="script.js"></script>
     <script src="../../shared_assets/mobile.js"></script>

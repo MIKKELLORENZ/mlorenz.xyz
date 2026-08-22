@@ -73,8 +73,15 @@ const CFG = {
     examTasks: parseInt(arg("exam-tasks", "16"), 10),
     out: arg("out", "training"),
     resume: arg("resume", null),
-    tag: arg("tag", "run")
+    tag: arg("tag", "run"),
+    /* --mut-reset 0 disables the "redraw this weight outright" branch in
+     * nn.js. Mandatory when resuming from a DISTILLED brain: a gradient-fitted
+     * network has never been selected under that operator and twenty random
+     * weights will undo it. Harmless-looking and it is not — see nn.js. */
+    mutReset: parseFloat(arg("mut-reset", "0.03")),
+    lineage: arg("lineage", null)
 };
+setMutationReset(CFG.mutReset);
 
 const outDir = path.isAbsolute(CFG.out) ? CFG.out : path.join(__dirname, CFG.out);
 fs.mkdirSync(outDir, { recursive: true });
@@ -107,6 +114,15 @@ if (CFG.resume) {
     evo.champion = seed.clone();
     evo.championFit = saved.fitness || 0;
     say(`resumed from ${CFG.resume} (gen ${saved.gen}, fitness ${(saved.fitness || 0).toFixed(0)})`);
+    if (saved.lineage) say(`  lineage in: ${saved.lineage}`);
+    /* Carry the provenance forward. Dropping it on resume is how a distilled
+     * brain ends up baked as "evolved from scratch" three runs later. */
+    CFG.lineage = CFG.lineage || (saved.lineage
+        ? `${saved.lineage} -> GA fine-tune (mut-reset ${CFG.mutReset}, rate ${CFG.mutRate}, sigma ${CFG.mutSigma})`
+        : null);
+    if (saved.lineage && CFG.mutReset > 0)
+        say(`  ! resuming a brain with a recorded lineage while mut-reset is ${CFG.mutReset}. ` +
+            `If that lineage involved gradients, pass --mut-reset 0.`);
 }
 
 /* ----------------------------------------------------------------- workers */
@@ -230,7 +246,7 @@ process.on("SIGINT", () => { stopping = true; say("\nstopping after this generat
                 gen: g, fitness: evo.championFit, championGen: evo.championGen,
                 stage: stage.id, embDim: Embedding.dim,
                 embModel: Embedding.meta ? Embedding.meta.model : "surrogate",
-                corpusHash: corpusHash(),
+                corpusHash: corpusHash(), lineage: CFG.lineage || undefined,
                 brain: evo.champion.toJSON()
             }));
             fs.writeFileSync(path.join(outDir, `${CFG.tag}_history.json`), JSON.stringify(evo.history));
@@ -241,7 +257,7 @@ process.on("SIGINT", () => { stopping = true; say("\nstopping after this generat
             gen: evo.gen - 1, fitness: evo.championFit, championGen: evo.championGen,
             stage: evo.stage, embDim: Embedding.dim,
             embModel: Embedding.meta ? Embedding.meta.model : "surrogate",
-            corpusHash: corpusHash(),
+            corpusHash: corpusHash(), lineage: CFG.lineage || undefined,
             brain: evo.champion.toJSON()
         }));
         const ex = await exam(evo.champion, evo.gen);

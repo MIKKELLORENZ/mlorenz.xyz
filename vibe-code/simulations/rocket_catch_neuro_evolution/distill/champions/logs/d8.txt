@@ -1,0 +1,133 @@
+[dagger] 20 rounds x 1100 episodes · winw 1 · stages 0,1,2 · arch tiny · 209 inputs · 12 workers · 10 epochs · lr 0.002 · fresh init
+
+round 0  beta 1.00  1096266 new samples in 5s  ·  rollout caught 653/1100  ·  labels catch 77.3% divert 22.0% stranded 0.7%  ·  dataset 1096266
+   dataset 1096266 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.491 0.466 0.224 0.246 0.283 0.143 0.295 0.001 0.001 0.838
+   eff weight 0.73 0.81 2.33 1.93 0.36 1.42 0.34 0.00 0.00 0.08
+   epoch  0  loss 0.03024   held-out MAE  thr 0.031  eng 0.025  gx 0.014  gy 0.021  commit 0.006
+   epoch  4  loss 0.01280   held-out MAE  thr 0.020  eng 0.017  gx 0.014  gy 0.022  commit 0.004
+   epoch  8  loss 0.01203   held-out MAE  thr 0.013  eng 0.011  gx 0.012  gy 0.012  commit 0.002
+   epoch  9  loss 0.01190   held-out MAE  thr 0.017  eng 0.014  gx 0.013  gy 0.010  commit 0.002
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean -0.239 +/- 0.024  ·  tumble 127, crash 73
+
+round 1  beta 0.95  1065853 new samples in 5s  ·  rollout caught 609/1100  ·  labels catch 79.1% divert 20.3% stranded 0.7%  ·  dataset 2162119
+   dataset 2162119 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.494 0.470 0.233 0.250 0.297 0.156 0.305 0.001 0.001 0.826
+   eff weight 0.77 0.85 2.30 2.00 0.36 1.29 0.34 0.00 0.00 0.09
+   epoch  0  loss 0.05891   held-out MAE  thr 0.031  eng 0.021  gx 0.030  gy 0.027  commit 0.009
+   epoch  4  loss 0.02127   held-out MAE  thr 0.021  eng 0.013  gx 0.019  gy 0.017  commit 0.003
+   epoch  8  loss 0.01914   held-out MAE  thr 0.019  eng 0.010  gx 0.017  gy 0.024  commit 0.003
+   epoch  9  loss 0.01875   held-out MAE  thr 0.021  eng 0.011  gx 0.013  gy 0.015  commit 0.003
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean 0.333 +/- 0.016  ·  crash 193, tower strike 7
+
+round 2  beta 0.89  1086576 new samples in 5s  ·  rollout caught 571/1100  ·  labels divert 21.2% catch 78.1% stranded 0.8%  ·  dataset 3248695
+   dataset 3248695 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.494 0.471 0.259 0.277 0.309 0.157 0.317 0.001 0.001 0.826
+   eff weight 0.86 0.95 2.09 1.84 0.37 1.43 0.35 0.00 0.00 0.10
+   epoch  0  loss 0.11801   held-out MAE  thr 0.039  eng 0.028  gx 0.040  gy 0.052  commit 0.018
+   epoch  4  loss 0.04861   held-out MAE  thr 0.036  eng 0.018  gx 0.028  gy 0.027  commit 0.012
+   epoch  8  loss 0.04034   held-out MAE  thr 0.027  eng 0.021  gx 0.025  gy 0.026  commit 0.009
+   epoch  9  loss 0.03915   held-out MAE  thr 0.027  eng 0.013  gx 0.034  gy 0.028  commit 0.009
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean 0.182 +/- 0.033  ·  crash 137, tumble 53, tower strike 9, missed catch 1
+
+round 3  beta 0.84  1029058 new samples in 6s  ·  rollout caught 529/1100  ·  labels divert 20.6% catch 78.6% stranded 0.8%  ·  dataset 4277753
+   dataset 4277753 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.498 0.474 0.270 0.284 0.306 0.157 0.314 0.001 0.001 0.825
+   eff weight 0.88 0.97 2.00 1.80 0.39 1.48 0.37 0.00 0.00 0.11
+   epoch  0  loss 0.14183   held-out MAE  thr 0.038  eng 0.027  gx 0.067  gy 0.062  commit 0.025
+   epoch  4  loss 0.06730   held-out MAE  thr 0.035  eng 0.022  gx 0.047  gy 0.036  commit 0.011
+   epoch  8  loss 0.05607   held-out MAE  thr 0.028  eng 0.018  gx 0.038  gy 0.037  commit 0.010
+   epoch  9  loss 0.05446   held-out MAE  thr 0.030  eng 0.017  gx 0.028  gy 0.035  commit 0.012
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean 0.323 +/- 0.032  ·  crash 145, tower strike 51, missed catch 4
+
+round 4  beta 0.79  1044964 new samples in 5s  ·  rollout caught 522/1100  ·  labels catch 74.8% divert 24.5% stranded 0.7%  ·  dataset 5322717
+   dataset 5322717 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.502 0.476 0.283 0.298 0.310 0.156 0.318 0.001 0.001 0.833
+   eff weight 0.91 1.01 1.91 1.72 0.40 1.56 0.38 0.00 0.00 0.11
+   epoch  0  loss 0.17333   held-out MAE  thr 0.045  eng 0.034  gx 0.064  gy 0.060  commit 0.023
+   epoch  4  loss 0.08864   held-out MAE  thr 0.038  eng 0.021  gx 0.049  gy 0.076  commit 0.015
+   epoch  8  loss 0.07551   held-out MAE  thr 0.031  eng 0.017  gx 0.044  gy 0.047  commit 0.014
+   epoch  9  loss 0.07397   held-out MAE  thr 0.049  eng 0.038  gx 0.043  gy 0.076  commit 0.011
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean 0.389 +/- 0.016  ·  crash 193, tower strike 6, missed catch 1
+
+round 5  beta 0.74  1168969 new samples in 7s  ·  rollout caught 472/1100  ·  labels catch 78.4% stranded 1.9% divert 19.6%  ·  dataset 6491686
+   dataset 6491686 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.497 0.473 0.315 0.330 0.334 0.167 0.336 0.001 0.001 0.833
+   eff weight 1.05 1.16 1.75 1.59 0.39 1.55 0.38 0.00 0.00 0.12
+   epoch  0  loss 0.22934   held-out MAE  thr 0.048  eng 0.035  gx 0.089  gy 0.093  commit 0.026
+   epoch  4  loss 0.12287   held-out MAE  thr 0.036  eng 0.024  gx 0.057  gy 0.061  commit 0.015
+   epoch  8  loss 0.10490   held-out MAE  thr 0.034  eng 0.022  gx 0.051  gy 0.050  commit 0.012
+   epoch  9  loss 0.10193   held-out MAE  thr 0.031  eng 0.018  gx 0.046  gy 0.052  commit 0.012
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean 0.238 +/- 0.032  ·  crash 95, tower strike 82, tumble 12, missed catch 11
+
+round 6  beta 0.68  1031028 new samples in 6s  ·  rollout caught 442/1100  ·  labels catch 76.4% divert 22.5% stranded 1.1%  ·  dataset 7522714
+   dataset 7522714 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.499 0.474 0.318 0.333 0.335 0.169 0.337 0.001 0.001 0.835
+   eff weight 1.06 1.18 1.73 1.58 0.39 1.55 0.39 0.00 0.00 0.13
+   epoch  0  loss 0.24469   held-out MAE  thr 0.050  eng 0.031  gx 0.107  gy 0.100  commit 0.024
+   epoch  4  loss 0.13940   held-out MAE  thr 0.036  eng 0.022  gx 0.071  gy 0.086  commit 0.012
+   epoch  8  loss 0.12225   held-out MAE  thr 0.037  eng 0.018  gx 0.066  gy 0.067  commit 0.012
+   epoch  9  loss 0.12087   held-out MAE  thr 0.038  eng 0.023  gx 0.066  gy 0.070  commit 0.011
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean 0.317 +/- 0.036  ·  crash 87, tower strike 77, missed catch 24, tumble 12
+
+round 7  beta 0.63  1043372 new samples in 6s  ·  rollout caught 395/1100  ·  labels catch 76.2% divert 22.8% stranded 1.0%  ·  dataset 8566086
+   dataset 8566086 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.501 0.475 0.325 0.337 0.335 0.168 0.337 0.001 0.001 0.836
+   eff weight 1.07 1.18 1.69 1.57 0.40 1.58 0.39 0.00 0.00 0.13
+   epoch  0  loss 0.27426   held-out MAE  thr 0.046  eng 0.036  gx 0.116  gy 0.105  commit 0.031
+   epoch  4  loss 0.16051   held-out MAE  thr 0.044  eng 0.025  gx 0.084  gy 0.094  commit 0.019
+   epoch  8  loss 0.14051   held-out MAE  thr 0.039  eng 0.019  gx 0.069  gy 0.071  commit 0.016
+   epoch  9  loss 0.13744   held-out MAE  thr 0.039  eng 0.025  gx 0.069  gy 0.106  commit 0.013
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean 0.331 +/- 0.031  ·  tower strike 92, crash 91, missed catch 17
+
+round 8  beta 0.58  1018185 new samples in 6s  ·  rollout caught 351/1100  ·  labels catch 77.0% divert 21.9% stranded 1.0%  ·  dataset 9584271
+   dataset 9584271 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.502 0.476 0.327 0.341 0.335 0.167 0.337 0.001 0.001 0.837
+   eff weight 1.07 1.19 1.68 1.54 0.40 1.60 0.40 0.00 0.00 0.13
+   epoch  0  loss 0.27074   held-out MAE  thr 0.048  eng 0.031  gx 0.107  gy 0.111  commit 0.030
+   epoch  4  loss 0.17365   held-out MAE  thr 0.041  eng 0.024  gx 0.085  gy 0.087  commit 0.020
+   epoch  8  loss 0.15203   held-out MAE  thr 0.040  eng 0.032  gx 0.074  gy 0.093  commit 0.018
+   epoch  9  loss 0.14827   held-out MAE  thr 0.039  eng 0.022  gx 0.078  gy 0.083  commit 0.018
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean 0.337 +/- 0.039  ·  tower strike 88, crash 78, missed catch 33, soft divert 1
+
+round 9  beta 0.53  972204 new samples in 6s  ·  rollout caught 326/1100  ·  labels catch 75.8% divert 23.1% stranded 1.1%  ·  dataset 10556475
+   dataset 10556475 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.504 0.479 0.329 0.342 0.333 0.168 0.336 0.001 0.001 0.839
+   eff weight 1.07 1.18 1.67 1.55 0.41 1.60 0.40 0.00 0.00 0.13
+   epoch  0  loss 0.28043   held-out MAE  thr 0.058  eng 0.037  gx 0.108  gy 0.112  commit 0.030
+   epoch  4  loss 0.17959   held-out MAE  thr 0.044  eng 0.028  gx 0.091  gy 0.094  commit 0.019
+   epoch  8  loss 0.15735   held-out MAE  thr 0.045  eng 0.022  gx 0.088  gy 0.097  commit 0.013
+   epoch  9  loss 0.15346   held-out MAE  thr 0.043  eng 0.023  gx 0.086  gy 0.087  commit 0.017
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean 0.406 +/- 0.046  ·  tower strike 97, crash 61, missed catch 38, soft divert 4
+
+round 10  beta 0.47  1041904 new samples in 7s  ·  rollout caught 296/1100  ·  labels catch 75.7% divert 23.5% stranded 0.9%  ·  dataset 11598379
+   dataset 11598379 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.505 0.479 0.333 0.347 0.333 0.168 0.334 0.001 0.001 0.842
+   eff weight 1.07 1.20 1.65 1.52 0.41 1.61 0.41 0.00 0.00 0.13
+   epoch  0  loss 0.29200   held-out MAE  thr 0.057  eng 0.033  gx 0.115  gy 0.130  commit 0.029
+   epoch  4  loss 0.19426   held-out MAE  thr 0.052  eng 0.027  gx 0.097  gy 0.103  commit 0.027
+   epoch  8  loss 0.17318   held-out MAE  thr 0.043  eng 0.020  gx 0.093  gy 0.092  commit 0.016
+   epoch  9  loss 0.16981   held-out MAE  thr 0.042  eng 0.024  gx 0.091  gy 0.098  commit 0.018
+   ON-POLICY (rank bank, 200 eps): caught 0/200  mean 0.526 +/- 0.049  ·  tower strike 87, crash 69, missed catch 38, soft divert 6
+
+round 11  beta 0.42  1005502 new samples in 7s  ·  rollout caught 278/1100  ·  labels catch 75.1% stranded 0.9% divert 23.9%  ·  dataset 12603881
+   dataset 12603881 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.507 0.480 0.338 0.350 0.332 0.167 0.334 0.001 0.001 0.843
+   eff weight 1.07 1.20 1.62 1.51 0.42 1.64 0.41 0.00 0.00 0.13
+   epoch  0  loss 0.30270   held-out MAE  thr 0.057  eng 0.039  gx 0.125  gy 0.122  commit 0.030
+   epoch  4  loss 0.20210   held-out MAE  thr 0.046  eng 0.025  gx 0.105  gy 0.110  commit 0.018
+   epoch  8  loss 0.17710   held-out MAE  thr 0.047  eng 0.030  gx 0.106  gy 0.096  commit 0.019
+r 0.046  eng 0.025  gx 0.105  gy 0.110  commit 0.018
+   epoch  8  loss 0.17710   held-out MAE  thr 0.047  eng 0.030  gx 0.106  gy 0.096  commit 0.019

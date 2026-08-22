@@ -438,43 +438,101 @@ class GoalEvaluator {
  * (not in world.js) because it is a property of the GOAL: a COUNT-2 task with
  * one ball of that colour is unsatisfiable, and an EXCLUDE task with no balls
  * of the excluded colour tests nothing. */
-function sceneRecipe(spec, rng) {
+/* How many balls of each colour a scene starts with.
+ *
+ * `fill` scales the bench WITHOUT touching the rules. At fill = 1 this is the
+ * original sparse bench, which averaged 4.0 balls and looked half-empty: a
+ * "sort the green ones" scene could be two greens and one distractor, and the
+ * arm was done in three seconds. The point of the sim is an arm working a
+ * cluttered bench until it is clear, so the default is now higher.
+ *
+ * Every branch below has a rule buried in it that scaling must not break, which
+ * is why this is a per-kind multiplier and not one global number:
+ *
+ *   COUNT      needs STRICTLY MORE of the colour than the instruction asks for,
+ *              or "move two green" is satisfied by moving everything and the
+ *              rule stops testing anything.
+ *   LEAVE_ONE  needs at least one spare of the named colour to leave behind.
+ *   ALTERNATE  needs EQUAL counts of its two colours, or the alternation runs
+ *              out on one side and the rest of the episode has no legal move.
+ *   EXCLUDE    needs at least one ball that is not the forbidden colour, or
+ *              there is nothing to do but sit still.
+ *
+ * `buildScene` still trims to the slot budget afterwards and still raises the
+ * cap rather than cutting into a required colour, so a high fill with a low
+ * budget degrades to the old behaviour instead of producing a vacuous goal. */
+function sceneRecipe(spec, rng, fill) {
+    const f = fill === undefined ? 1 : Math.max(0.5, fill);
     const p = spec.params;
     const n = new Array(NCOLORS).fill(0);
-    const some = () => 1 + ((rng() * 2) | 0);           // 1..2
+    // a "handful" of a named colour, and how many distractors of an unnamed one
+    const some = () => Math.max(1, Math.round((1 + rng() * 1.6) * f));
+    const few = () => Math.max(1, Math.round((0.6 + rng() * 1.0) * f));
     switch (spec.kind) {
         case "SORT":
             p.colors.forEach(c => { n[c] = some(); });
             // distractors of colours NOT named — the whole test of "the green ones"
             for (let c = 0; c < NCOLORS; c++)
-                if (!p.colors.includes(c) && rng() < 0.7) n[c] = 1;
+                if (!p.colors.includes(c) && rng() < 0.8) n[c] = few();
             break;
-        case "ALTERNATE":
-            n[p.colors[0]] = 2; n[p.colors[1]] = 2;
-            for (let c = 0; c < NCOLORS; c++) if (!p.colors.includes(c) && rng() < 0.4) n[c] = 1;
+        case "ALTERNATE": {
+            // equal counts, or the alternation strands itself
+            const each = Math.max(2, Math.round(2 * f));
+            n[p.colors[0]] = each; n[p.colors[1]] = each;
+            for (let c = 0; c < NCOLORS; c++) if (!p.colors.includes(c) && rng() < 0.5) n[c] = few();
             break;
+        }
         case "LEAVE_ONE":
-            for (let c = 0; c < NCOLORS; c++) n[c] = rng() < 0.6 ? 1 : 0;
+            for (let c = 0; c < NCOLORS; c++) n[c] = rng() < 0.7 ? few() : 0;
             n[p.spare] = Math.max(1, n[p.spare]);         // there must BE a spare
             if (n.reduce((s, k) => s + k, 0) < 3) n[(p.spare + 1) % NCOLORS] += 1;
             break;
         case "COUNT":
-            n[p.color] = p.n + 1;                         // strictly more than asked
-            for (let c = 0; c < NCOLORS; c++) if (c !== p.color && rng() < 0.6) n[c] = 1;
+            // strictly more than asked, and the surplus grows with the bench so
+            // the count stays a real decision rather than "take them all"
+            n[p.color] = p.n + Math.max(1, Math.round(f));
+            for (let c = 0; c < NCOLORS; c++) if (c !== p.color && rng() < 0.7) n[c] = few();
             break;
         case "ORDER":
             n[p.colors[0]] = some(); n[p.colors[1]] = some();
-            for (let c = 0; c < NCOLORS; c++) if (!p.colors.includes(c) && rng() < 0.35) n[c] = 1;
+            for (let c = 0; c < NCOLORS; c++) if (!p.colors.includes(c) && rng() < 0.45) n[c] = few();
             break;
         case "EXCLUDE":
-            n[p.skip] = 1 + ((rng() * 2) | 0);
-            for (let c = 0; c < NCOLORS; c++) if (c !== p.skip) n[c] = rng() < 0.75 ? 1 : 0;
+            n[p.skip] = Math.max(1, Math.round((1 + rng() * 1.4) * f));
+            for (let c = 0; c < NCOLORS; c++) if (c !== p.skip) n[c] = rng() < 0.8 ? few() : 0;
             if (n.reduce((s, k, i) => s + (i === p.skip ? 0 : k), 0) === 0) n[(p.skip + 1) % NCOLORS] = 1;
             break;
         case "ALL_TO_ONE":
-            for (let c = 0; c < NCOLORS; c++) n[c] = rng() < 0.65 ? 1 : 0;
+            for (let c = 0; c < NCOLORS; c++) n[c] = rng() < 0.75 ? few() : 0;
             if (n.reduce((s, k) => s + k, 0) < 2) { n[0] += 1; n[2] += 1; }
             break;
+    }
+
+    /* A FLOOR, because two of the rules build their scene out of independent
+     * coin flips per colour and can therefore roll almost nothing.
+     * ALL_TO_ONE and LEAVE_ONE include each colour with probability ~0.7, so
+     * about one bench in eleven came out with two or three balls on it even at
+     * fill 2.0 — which is not "variety", it is the sparse bench this knob
+     * exists to get rid of, reappearing at random.
+     *
+     * The top-up goes to colours that no rule is counting. ALTERNATE needs its
+     * two named colours to stay EQUAL, and COUNT needs a known surplus of its
+     * named one, so adding to either would quietly change the goal rather than
+     * the scenery. Everything else is fair game: an extra ball of an unnamed
+     * colour is a distractor, which is the thing a crowded bench is for. */
+    const floor = Math.round(2.5 * f);
+    const sacred = new Set();
+    if (spec.kind === "ALTERNATE") p.colors.forEach(c => sacred.add(c));
+    if (spec.kind === "COUNT") sacred.add(p.color);
+    let guard = 0;
+    while (n.reduce((s, k) => s + k, 0) < floor && guard++ < 40) {
+        let picked = -1;
+        for (let c = 0; c < NCOLORS; c++) {
+            const cand = (c + guard) % NCOLORS;
+            if (!sacred.has(cand)) { picked = cand; break; }
+        }
+        if (picked < 0) break;
+        n[picked]++;
     }
     return n;
 }

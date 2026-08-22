@@ -1,0 +1,11 @@
+[dagger] 20 rounds x 1100 episodes · winw 1 · stages 0,1 · arch tiny · 209 inputs · 12 workers · 12 epochs · lr 0.002 · fresh init
+
+round 0  beta 1.00  1045506 new samples in 5s  ·  rollout caught 676/1100  ·  labels catch 81.9% divert 17.8% stranded 0.3%  ·  dataset 1045506
+   dataset 1045506 -> 900000 by uniform sample over the union
+   constant channels, excluded from the loss: 7,8
+   channel sd 0.492 0.464 0.234 0.232 0.244 0.163 0.262 0.001 0.001 0.770
+   eff weight 0.73 0.82 2.15 2.19 0.49 1.10 0.43 0.00 0.00 0.10
+   epoch  0  loss 0.02895   held-out MAE  thr 0.020  eng 0.031  gx 0.016  gy 0.017  commit 0.006
+   epoch  4  loss 0.01213   held-out MAE  thr 0.060  eng 0.024  gx 0.012  gy 0.012  commit 0.004
+0.020  eng 0.031  gx 0.016  gy 0.017  commit 0.006
+   epoch  4  loss 0.01213   held-out MAE  thr 0.060  eng 0.024  gx 0.012  gy 0.012  commit 0.004

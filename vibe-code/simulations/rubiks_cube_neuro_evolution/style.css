@@ -1,0 +1,292 @@
+/* style.css — same visual language as the other neuroevolution sims in this
+   folder (shared tokens, #app / #topbar / #layout / panels / cards), so the
+   gallery reads as one thing and the shared mobile layer in
+   ../../shared_assets/mobile.{css,js} finds the structure it expects. */
+
+:root {
+    --bg: #0a0f1a;
+    --panel: #111a2a;
+    --panel-2: #17243a;
+    --line: #22334d;
+    --text: #d9e4f2;
+    --muted: #7b8fa8;
+    --accent: #7c5cff;
+    --accent-2: #35c8ff;
+    --gold: #ffc94d;
+    --danger: #ff5f6b;
+    --good: #4fe0a8;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+}
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ---------------------------------------------------------- intro modal */
+#intro {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    background: rgba(4, 8, 16, 0.74); backdrop-filter: blur(3px);
+    overflow: auto;
+}
+.intro-card {
+    width: 100%; max-width: 460px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px 26px 20px; text-align: center;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+.intro-dot {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 14px var(--accent); margin-bottom: 10px;
+}
+.intro-card h2 { font-size: 22px; margin-bottom: 8px; }
+.intro-card > p { color: var(--muted); font-size: 13.5px; line-height: 1.55; margin-bottom: 12px; }
+.intro-card > p b { color: var(--text); font-weight: 600; }
+.intro-card > p.intro-sub { font-size: 12.5px; margin-bottom: 18px; color: #6d8099; }
+.intro-choices { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.intro-choice {
+    display: block; text-align: left; cursor: pointer;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+    transition: border-color .12s, background .12s;
+}
+.intro-choice:hover { border-color: var(--accent); background: #1d2b46; }
+.intro-choice b { display: block; font-size: 15px; margin-bottom: 2px; }
+.intro-choice small { color: var(--muted); font-size: 12px; }
+.intro-choice.primary { border-color: var(--accent); background: #1e1c46; }
+.intro-choice.primary:hover { background: #262159; }
+.intro-dismiss {
+    background: none; border: 0; color: var(--muted); cursor: pointer;
+    font-size: 12.5px; padding: 6px; text-decoration: underline; text-underline-offset: 2px;
+}
+.intro-dismiss:hover { color: var(--text); }
+
+/* --------------------------------------------------------------- topbar */
+#topbar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 9px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--line); flex: none;
+}
+.brand { display: flex; align-items: baseline; gap: 9px; }
+.brand-dot {
+    width: 9px; height: 9px; border-radius: 50%; align-self: center;
+    background: var(--accent); box-shadow: 0 0 10px var(--accent);
+}
+.brand h1 { font-size: 15px; font-weight: 650; letter-spacing: .1px; }
+.brand-sub { color: var(--muted); font-size: 11.5px; }
+
+#top-stats { display: flex; gap: 14px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+.tstat { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.tstat b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 650; }
+.tstat.badge {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
+    padding: 2px 10px; color: var(--text); font-size: 11px;
+}
+.tstat.badge.good { border-color: var(--good); color: var(--good); }
+.tstat.badge.bad { border-color: var(--danger); color: var(--danger); }
+
+#top-actions { display: flex; gap: 8px; }
+
+/* -------------------------------------------------------------- buttons */
+.btn {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 12px; font-size: 12.5px; cursor: pointer;
+    transition: border-color .12s, background .12s;
+    font-family: inherit;
+}
+.btn:hover { border-color: var(--accent-2); }
+.btn.primary { border-color: var(--accent); background: #1e1c46; }
+.btn.primary:hover { background: #262159; }
+.btn.danger { border-color: var(--danger); color: var(--danger); }
+.btn.wide { width: 100%; margin-top: 8px; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn-row { display: flex; gap: 8px; }
+.btn-row .btn { flex: 1; }
+
+/* --------------------------------------------------------------- layout */
+#layout { display: flex; flex: 1; min-height: 0; }
+
+#panel-left, #panel-right {
+    flex: 0 0 268px; overflow-y: auto;
+    background: var(--panel); padding: 12px;
+    display: flex; flex-direction: column; gap: 12px;
+}
+#panel-left { border-right: 1px solid var(--line); }
+#panel-right { border-left: 1px solid var(--line); flex-basis: 292px; }
+
+.card {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 10px; padding: 11px 12px;
+}
+.card h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--muted); margin-bottom: 9px; font-weight: 650;
+}
+
+.slider-row { display: block; margin-bottom: 10px; }
+.slider-row > span { display: block; font-size: 12px; margin-bottom: 4px; color: var(--muted); }
+.slider-row > span b { color: var(--text); font-variant-numeric: tabular-nums; }
+.slider-row input[type=range] { width: 100%; accent-color: var(--accent); }
+
+.check-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; font-size: 12px; cursor: pointer; }
+.check-row input { accent-color: var(--accent); margin-top: 2px; }
+.check-row span { color: var(--muted); }
+.check-row span b { color: var(--text); font-weight: 600; }
+
+.hint { color: var(--muted); font-size: 11.5px; line-height: 1.5; margin-top: 7px; }
+.kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 3px 0; }
+.kv span { color: var(--muted); }
+.kv b { font-variant-numeric: tabular-nums; text-align: right; word-break: break-word; }
+
+/* ---------------------------------------------------------------- stage */
+#stage {
+    flex: 1; min-width: 0; display: flex; flex-direction: column;
+    padding: 14px; gap: 10px;
+    background:
+        radial-gradient(circle at 50% 34%, rgba(124, 92, 255, 0.10), transparent 62%),
+        var(--bg);
+}
+
+#views { flex: 1; min-height: 0; display: flex; gap: 12px; align-items: stretch; }
+.view-col { display: flex; flex-direction: column; gap: 12px; flex: 0 0 clamp(150px, 26%, 250px); }
+
+.view-box {
+    position: relative; flex: 1; min-height: 0;
+    background: #060a12; border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden;
+}
+.view-box.big { flex: 1 1 auto; min-width: 0; }
+.view-box canvas { display: block; width: 100%; height: 100%; }
+.view-box.big canvas { cursor: grab; touch-action: none; }
+.view-box.big canvas:active { cursor: grabbing; }
+.view-tag {
+    position: absolute; left: 8px; bottom: 6px;
+    font-size: 10px; letter-spacing: .04em; color: var(--muted);
+    background: rgba(6, 10, 18, 0.78); padding: 2px 7px; border-radius: 999px;
+    pointer-events: none;
+}
+/* The pixel inset: crisp, never smoothed — the point is to see single inputs.
+   Its canvas is sized in script to an exact multiple of the 32×16 observation and
+   centred here, so it is never stretched to the box's aspect. */
+.view-box.eyes { flex: 0 0 auto; aspect-ratio: 2 / 1; display: flex; align-items: center; justify-content: center; }
+.view-box.eyes canvas { image-rendering: pixelated; width: auto; height: auto; }
+#views.emphasise-input .view-box.eyes { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+
+#movebar {
+    flex: none; display: flex; gap: 5px; flex-wrap: wrap; align-items: center;
+    min-height: 26px;
+}
+.chip {
+    font: 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 7px; color: var(--text);
+}
+.chip.dim { color: var(--muted); background: transparent; border-color: transparent; }
+.chip.good { border-color: var(--good); color: var(--good); }
+.chip.bad { border-color: var(--danger); color: var(--danger); }
+
+/* ------------------------------------------------------------- outputs */
+.obar { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+.obar-name {
+    flex: 0 0 24px; font: 11px/1 ui-monospace, Consolas, monospace;
+    color: var(--muted); text-align: right;
+}
+.obar-track {
+    flex: 1; height: 9px; background: #0d1524;
+    border: 1px solid var(--line); border-radius: 999px; overflow: hidden;
+}
+.obar-track i { display: block; height: 100%; width: 0; background: var(--accent-2); transition: width .09s linear; }
+.obar-val {
+    flex: 0 0 42px; font: 10.5px/1 ui-monospace, Consolas, monospace;
+    color: var(--muted); text-align: right; font-variant-numeric: tabular-nums;
+}
+.obar.win .obar-name { color: var(--gold); font-weight: 700; }
+.obar.win .obar-track i { background: var(--gold); }
+.obar.win .obar-val { color: var(--gold); }
+
+/* Height is set from script (see drawDistChart) so the backing store matches the
+   box at the device pixel ratio; width comes from here. */
+#chart-dist { width: 100%; margin-top: 8px; display: block; }
+
+/* ----------------------------------------------------------- turn keys */
+#manual-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.keybtn {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 7px 0; cursor: pointer;
+    font: 12px/1 ui-monospace, Consolas, monospace;
+}
+.keybtn:hover { border-color: var(--accent-2); background: #1d2b46; }
+.keybtn:active { background: var(--accent); border-color: var(--accent); }
+
+/* ------------------------------------------------------------ benchmark */
+table.bench { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+table.bench th {
+    text-align: right; font-size: 10px; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted); font-weight: 600;
+    padding: 3px 4px; border-bottom: 1px solid var(--line);
+}
+table.bench th:first-child { text-align: left; }
+table.bench td { padding: 3px 4px; font-variant-numeric: tabular-nums; }
+table.bench td.num { text-align: right; }
+table.bench td.dim { color: var(--muted); }
+table.bench td.good { color: var(--good); font-weight: 650; }
+
+/* ------------------------------------------------------------------ log */
+#log { display: flex; flex-direction: column; gap: 3px; max-height: 210px; overflow-y: auto; }
+.log-head { font-size: 11px; color: var(--muted); padding-bottom: 4px; }
+.log-row {
+    display: flex; gap: 8px; align-items: baseline;
+    font: 11px/1.4 ui-monospace, Consolas, monospace;
+    padding: 2px 6px; border-radius: 5px; background: #0d1524;
+}
+.log-row span:first-child { flex: 0 0 44px; color: var(--muted); }
+.log-row.good { border-left: 2px solid var(--good); }
+.log-row.bad { border-left: 2px solid var(--danger); }
+.log-row .tag { color: var(--gold); font-size: 10px; }
+.log-row.hint { background: none; }
+
+#selftest { display: none; }
+
+/* --------------------------------------------------- narrow desktop trim
+   The shared mobile layer takes over below 860px. Between there and ~1180px
+   there is still a real desktop layout but not enough width for two 270px
+   panels plus a cube, so the right-hand panel loses its fixed basis first. */
+@media (max-width: 1180px) {
+    #panel-right { flex-basis: 250px; }
+    #panel-left { flex-basis: 246px; }
+    .view-col { flex-basis: clamp(120px, 22%, 200px); }
+}
+
+/* mobile.js moves the panels into a bottom sheet; these are the bits of this
+   app's own furniture that need to know about it. Keyed on mob-shell, not mob,
+   so a small-but-not-phone screen is untouched (see the shared layer's notes). */
+@media (max-width: 860px) {
+    /* Big cube on top with the screen's width, then the far side and the pixel
+       inset side by side under it. Both of the small ones keep a fixed height
+       rather than a share of the leftover space — a phone in portrait has a lot of
+       leftover space and a 2:1 inset stretched into it is unreadable. */
+    body.mob-shell #stage { padding: 8px; gap: 7px; }
+    body.mob-shell #views { flex-direction: column; gap: 7px; }
+    body.mob-shell .view-box.big { flex: 1 1 auto; min-height: 200px; }
+    body.mob-shell .view-col { flex: 0 0 auto; flex-direction: row; gap: 7px; height: 108px; }
+    body.mob-shell .view-col .view-box { flex: 1 1 0; min-width: 0; height: 100%; }
+    body.mob-shell .view-box.eyes { aspect-ratio: auto; }
+    body.mob-shell #panel-left,
+    body.mob-shell #panel-right { flex: 1 1 auto !important; display: flex !important; }
+    body.mob-shell #top-stats { gap: 9px; font-size: 11px; }
+    /* one line of move chips, scrolled sideways — it must not eat the cube */
+    body.mob-shell #movebar {
+        flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+        min-height: 24px; padding-bottom: 2px;
+    }
+    body.mob-shell .chip { white-space: nowrap; flex: none; }
+    body.mob-shell #manual-keys { grid-template-columns: repeat(4, 1fr); gap: 7px; }
+}

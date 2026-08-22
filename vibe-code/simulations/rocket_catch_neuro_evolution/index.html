@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Learning to be Caught — Starship Landing Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
+</head>
+<body>
+
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Learning to be Caught</h2>
+        <p>A 250&nbsp;tonne steel cylinder falls out of the sky with no landing legs,
+           and its only acceptable ending is to be plucked out of the air by two arms
+           on a tower, 120&nbsp;metres up, at walking pace, inside a metre and a
+           half. Nothing here is scripted and there is <b>no gradient descent</b>:
+           the controller was bred.</p>
+        <p class="intro-small">The network flies <b>both stages</b> — the booster,
+           which falls tail-first on three grid fins, and the Ship, which falls flat
+           on its back at 70&nbsp;m/s and has to rotate ninety degrees in the last
+           kilometre. One genome, told which vehicle it is in, and told each flight
+           whether the tower is cleared or whether it has to go somewhere else.</p>
+        <button id="intro-go" class="intro-choice primary">
+            <b>▶&nbsp; Watch it fly</b>
+            <small>Seven scenarios, from a 400&nbsp;m settle onto the rails to a 12&nbsp;km supersonic return</small>
+        </button>
+        <p class="intro-note">Training happens on a 128-core machine, not in this tab.
+           This page only replays what came out.</p>
+    </div>
+</div>
+
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Learning to be Caught</h1>
+            <span class="brand-sub">starship &amp; super heavy · neuroevolution · no gradients</span>
+        </div>
+        <div id="hud-strip">
+            <span class="tstat">T+ <b id="hud-clock">0.0</b></span>
+            <span class="tstat">alt <b id="hud-alt">—</b></span>
+            <span class="tstat">vel <b id="hud-vel">—</b></span>
+            <span class="tstat">tilt <b id="hud-tilt">—</b></span>
+            <span class="tstat">eng <b id="hud-eng">—</b></span>
+            <span class="tstat">prop <b id="hud-prop">—</b></span>
+            <span class="badge" id="badge-mode">CATCH</span>
+            <span class="badge outcome" id="badge-outcome" hidden>—</span>
+        </div>
+    </header>
+
+    <div id="layout">
+        <aside id="panel-left" data-mob-label="Flight">
+            <section>
+                <h3>Scenario</h3>
+                <label class="fld">
+                    <span>Stage</span>
+                    <select id="sel-stage"></select>
+                </label>
+                <div class="row">
+                    <button id="btn-new" class="wide">New seed</button>
+                    <button id="btn-replay">Replay</button>
+                </div>
+                <p id="scen-desc" class="desc">—</p>
+            </section>
+
+            <section>
+                <h3>Pilot</h3>
+                <label class="fld">
+                    <span>Flown by</span>
+                    <select id="sel-pilot">
+                        <option value="brain">Evolved network</option>
+                        <option value="random">Random network (untrained)</option>
+                        <option value="auto">Scripted autopilot</option>
+                        <option value="inert">Nothing at all</option>
+                    </select>
+                </label>
+                <label class="fld" id="fld-indiv">
+                    <span>Individual <small>— best held-out score first</small></span>
+                    <select id="sel-indiv"></select>
+                </label>
+                <p id="pilot-desc" class="desc">—</p>
+                <div class="row" id="row-reroll" hidden>
+                    <button id="btn-reroll" class="wide">Draw another random brain</button>
+                </div>
+            </section>
+
+            <section>
+                <h3>Playback</h3>
+                <div class="row">
+                    <button id="btn-play" class="wide">⏸ Pause</button>
+                </div>
+                <label class="fld">
+                    <span>Speed <b id="lbl-speed">1.0×</b></span>
+                    <input id="rng-speed" type="range" min="-2" max="2" step="0.25" value="0">
+                </label>
+                <label class="fld">
+                    <span>View</span>
+                    <select id="sel-cam">
+                        <option value="chase">Chase</option>
+                        <option value="orbit">Orbit (drag)</option>
+                        <option value="tower">From the tower</option>
+                        <option value="pad">From the ground</option>
+                    </select>
+                </label>
+                <div class="row">
+                    <button id="btn-night" class="wide">🌙 Night</button>
+                </div>
+                <div class="row">
+                    <button id="btn-sensors" class="wide">👁 Show what it senses</button>
+                </div>
+                <p id="sensor-desc" class="desc" hidden>—</p>
+            </section>
+        </aside>
+
+        <main id="viewport">
+            <canvas id="view"></canvas>
+            <div id="corner">
+                <div class="kv"><span>mach</span><b id="hud-mach">—</b></div>
+                <div class="kv"><span>dyn. pressure</span><b id="hud-q">—</b></div>
+                <div class="kv"><span>angle of attack</span><b id="hud-aoa">—</b></div>
+                <div class="kv"><span>to the gate</span><b id="hud-gate">—</b></div>
+                <div class="kv"><span>throttle</span><b id="hud-thr">—</b></div>
+            </div>
+            <div id="verdict" hidden><span id="verdict-text"></span><small id="verdict-sub"></small></div>
+            <p id="drag-hint">drag to orbit · wheel to zoom</p>
+        </main>
+
+        <aside id="panel-right" data-mob-label="Brain">
+            <section>
+                <h3>The controller</h3>
+                <p id="brain-meta" class="meta">—</p>
+            </section>
+            <section>
+                <h3>Firing <small>live</small></h3>
+                <canvas id="netview"></canvas>
+                <p id="net-legend" class="tiny">—</p>
+            </section>
+            <section>
+                <h3>Outputs <small>20 Hz</small></h3>
+                <div id="bars"></div>
+            </section>
+            <section>
+                <h3>Score</h3>
+                <p id="score-live" class="meta">—</p>
+            </section>
+        </aside>
+    </div>
+</div>
+
+<script src="three.min.js"></script>
+<script src="mathx.js"></script>
+<script src="atmosphere.js"></script>
+<script src="vehicle.js"></script>
+<script src="aero.js"></script>
+<script src="sensors.js"></script>
+<script src="nn.js"></script>
+<script src="world.js"></script>
+<script src="scenarios.js"></script>
+<script src="golden_test.js"></script>
+<script src="distill/teacher.js"></script>
+<script src="autopilot.js"></script>
+<script src="render.js"></script>
+<script src="brain_library.js"></script>
+<script src="main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
+</body>
+</html>

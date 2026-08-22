@@ -122,12 +122,34 @@ if (val.pieces <= ctrl.pieces * 1.15 && val.lines <= ctrl.lines) {
     console.log("\nWARNING: this champion is not meaningfully better than untrained noise.");
 }
 
+/* The provenance line is a claim about how these numbers were found, and it has
+ * to be true. Every brain up to round 5 came from the GA, so the header said so
+ * and said "no gradients". Round 6 brains are fitted by Adam to a placement
+ * oracle's keystrokes (training/round6/), which is a different claim entirely —
+ * the network and the actuator are unchanged, but the weights are not evolved.
+ * Baking one of those under the old sentence would put a false statement in the
+ * one file a reader checks first. */
+const imit = saved.imitation || (saved.lineage && saved.lineage.imitation);
+const distilled = imit
+    ? ` * First distilled by supervised gradient descent (Adam) on ${imit.samples.toLocaleString()} decisions
+ * labelled by a Dellacherie placement oracle, DAgger-aggregated over the network's own play.
+ * The oracle is scaffolding and ships nowhere: at play time this is ${desc.params.toLocaleString()} weights
+ * and seven sigmoids driving the same keyboard, with no search of any kind.`
+    : null;
+const prov = distilled && saved.gen
+    ? `${distilled}
+ * Then evolved a further ${saved.gen} generations by train_headless.js, which is where
+ * the last of its skill was *discovered* rather than copied from the oracle.`
+    : distilled
+        ? distilled
+        : ` * Evolved to generation ${saved.gen || "?"} by train_headless.js — no gradients.`;
+
 const body = `/* default_brain.js — the built-in champion.
  *
  * Written by \`node bake_brain.js\`; do not hand-edit.
  * Config: ${saved.configName || "default"} — ${desc.profile} sensor profile, ${desc.inputs} inputs.
- * Contract: ${desc.contract} (${desc.params.toLocaleString()} evolved numbers).
- * Evolved to generation ${saved.gen || "?"} by train_headless.js — no gradients.
+ * Contract: ${desc.contract} (${desc.params.toLocaleString()} numbers).
+${prov}
  *
  * Validated on ${N} piece sequences it never trained on, against untrained brains
  * played on those same sequences:

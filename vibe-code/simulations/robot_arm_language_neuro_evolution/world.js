@@ -105,16 +105,103 @@ const REWARD = {
      * banked, holding on forever strictly dominated any release that might miss.
      * A fumble now costs 15; four extra seconds of holding costs 28. Letting go
      * badly has to beat not letting go at all. */
-    drop: -15, lost: -100, violation: -600,
+    /* KNOCKING A BALL OFF THE BENCH.
+     *
+     * `lost` used to be -100 against a +1400 delivery, which prices a ruined
+     * ball at 7% of a good one — cheap enough that barging through a crowded
+     * bench to reach the far ball was worth it. It is also a CLIFF: it pays
+     * nothing at all until the ball is already gone, so there is no gradient to
+     * climb away from and the fleet cannot learn "that was close" from it. Both
+     * halves are fixed: the cliff is now serious, and `shove` gives it a slope
+     * (see the note in shape) so a policy feels the edge coming. */
+    drop: -15, lost: -400, shove: -70, violation: -600,
     // per second of carrying beyond holdGrace seconds; see the note in shape()
     hold: -7, holdGrace: 4,
     effort: -0.02, idle: -0.02
 };
 const CLOCK = { start: 15, perDeliver: 7, cap: 48 };
 
+/* ------------------------------------------------------------------ solids
+ *
+ * The bench and the buckets are solid. This is enforced as a POSITION
+ * CONSTRAINT on the arm (see `Arm.step`), not as a penalty in the ledger.
+ *
+ * It had to be added because it was missing, and the cost of its absence was
+ * invisible on every curve. The forward kinematics were exact and the renderer
+ * drew exactly what the FK reported — so when the picture showed the arm
+ * halfway through the table, the picture was telling the truth. Measured over
+ * 40 episodes: the scripted reference controller and a fleet of random brains
+ * never left the free space at all, but the gen-224 GA champion spent 22.6% of
+ * its ticks with a link inside the bench (deepest point 97 mm under the top),
+ * crossed the table surface 393 times and passed through a bucket wall 117
+ * times. The GA had found the hole and moved in. Nothing in the fitness could
+ * see it, and any policy evolved through it is a policy for a world that is not
+ * the one being drawn.
+ *
+ * Both regions are VOLUMES rather than surfaces, which is what makes the
+ * one-sided test in `Arm.step` tunnel-proof: the bench is the whole half-space
+ * under the table top, and a bucket is a filled frustum. A joint moving at the
+ * fastest speed ever measured (2.13 m/s, i.e. 35 mm per 60 Hz substep) cannot
+ * jump across a 120 mm bucket, so "the new pose is not inside anything" really
+ * does mean the move was legal.
+ *
+ * A bucket is modelled solid only up to `BUCKET.rim - RELEASE_DIP`, leaving the
+ * top 20 mm of the mouth open. That is not a shortcut, it is the release
+ * window: the `release` rung pays from `g.y > BUCKET.rim - 0.02` upward and the
+ * reference controller lets go above the rim, so nothing that has to happen
+ * needs the arm deeper than this — while a fully open mouth would be a 6 cm
+ * hole the arm could park a link in and then rotate out through the wall. */
+const RELEASE_DIP = 0.02;
+const BUCKET_TOP_R = BUCKET.r, BUCKET_BOT_R = BUCKET.r * 0.82;
+const BUCKET_SOLID_H = BUCKET.rim - RELEASE_DIP;
+
+/* Radius of the bucket wall at height y. */
+function bucketRadiusAt(y) {
+    const f = Math.max(0, Math.min(1, y / BUCKET.rim));
+    return BUCKET_BOT_R + (BUCKET_TOP_R - BUCKET_BOT_R) * f;
+}
+
+/* Is a point of the given radius inside something solid?
+ *
+ * `clear` is the radius of the arm part being tested, so the link rests ON the
+ * bench instead of burying its centreline in it. */
+function pointSolid(x, y, z, clear) {
+    if (y < clear && x > TABLE.x0 && x < TABLE.x1 && z > TABLE.z0 && z < TABLE.z1) return true;
+    if (y < BUCKET_SOLID_H) {
+        for (let i = 0; i < BUCKET.xs.length; i++) {
+            const dx = x - BUCKET.xs[i], dz = z - BUCKET.z;
+            if (dx * dx + dz * dz < Math.pow(bucketRadiusAt(y) + clear, 2)) return true;
+        }
+    }
+    return false;
+}
+
+/* Does this arm pose put any part of the arm inside a solid?
+ *
+ * The chain is sampled rather than swept: the two long links are thick tubes
+ * and get a 18 mm radius, the wrist stack and the hand are slimmer and get
+ * 10 mm. The sampling stops at the grasp point on purpose. The jaws reach
+ * `BALL_R` past it, and they are SUPPOSED to touch down — a ball resting on the
+ * table has its centre 25 mm up, so a hand that has the ball between its pads
+ * has its fingertips exactly at table level. Testing the fingertips would make
+ * picking a ball off the bench impossible, which is the whole task. */
+function armSolid(fk) {
+    const seg = (a, b, n, clear) => {
+        for (let i = 1; i <= n; i++) {
+            const t = i / n;
+            if (pointSolid(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, clear)) return true;
+        }
+        return false;
+    };
+    return seg(fk.shoulder, fk.elbow, 6, 0.018)
+        || seg(fk.elbow, fk.wrist, 6, 0.018)
+        || seg(fk.wrist, fk.tip, 3, 0.010)
+        || seg(fk.tip, fk.grasp, 2, 0.010);
+}
+
 /* ------------------------------------------------------------------ scene */
 function buildScene(task, spec, rng, opts) {
-    const recipe = sceneRecipe(spec, rng);
+    const recipe = sceneRecipe(spec, rng, opts && opts.fill);
     let counts = recipe.slice();
     let cap = (opts && opts.maxBalls) || MAX_BALLS;
 
@@ -204,7 +291,7 @@ class Station {
         this.spec = spec;
         this.opts = opts;
         this.rng = mulberry32(opts.noiseSeed || 1);
-        this.arm = new Arm({ noise: opts.noise || 0, rng: this.rng });
+        this.arm = new Arm({ noise: opts.noise || 0, rng: this.rng, solid: armSolid });
         this.balls = balls.map(b => Object.assign({}, b));
         this.evalr = new GoalEvaluator(spec, this.balls);
         this.bucketFill = [0, 0, 0, 0];
@@ -219,6 +306,13 @@ class Station {
         this.held = -1;                 // ball index held, or -1
         this.lastAction = new Float32Array(5);
         this.lastDeliveredColor = -1;
+        /* What the arm could HONESTLY know about its own history: how many balls
+         * it has put in a bin and the colour of the most recent one, whether or
+         * not the referee approved. `delivered` / `lastDeliveredColor` next to
+         * these are the REFEREE's tally and must never reach the observation —
+         * see sense(). */
+        this.placed = 0;
+        this.lastPlacedColor = -1;
         this.holdT = 0;              // seconds the current ball has been carried
 
         /* PER-BALL progress ledger, keyed by ball id, never reset inside an
@@ -324,18 +418,37 @@ class Station {
             K[o + 0] = dx / 0.7; K[o + 1] = dy / 0.7; K[o + 2] = dz / 0.7;
             K[o + 3] = Math.min(Math.hypot(dx, dy, dz) / 0.7, 2);
             K[o + 4 + i] = 1;
-            K[o + 8] = this.bucketFill[i] / 6;
+            K[o + 8] = this.bucketFill[i] / MAX_BALLS;
             K[o + 9] = 1;
             K[o + 10] = held && held.color === i ? 1 : 0;
         }
 
         const C = this.ctx; C.fill(0);
         if (held) { C[held.color] = 1; C[4] = 1; }
-        if (this.lastDeliveredColor >= 0) C[5 + this.lastDeliveredColor] = 1;
-        C[9] = this.delivered / 6;
+        /* DELIVERY HISTORY, FROM WHAT THE ARM CAN SEE — NOT FROM THE REFEREE.
+         *
+         * These two used to read `lastDeliveredColor` and `delivered`, both of
+         * which only move when the evaluator judges a drop CORRECT. That handed
+         * the arm a per-delivery verdict it has no way to earn: a real
+         * manipulator can watch a ball land in a bin, it cannot watch the
+         * rulebook agree. It mattered most exactly where the rules are hardest,
+         * since ORDER and ALTERNATE both turn on "what did I deliver last".
+         *
+         * `placed` / `lastPlacedColor` count every ball that reached a bin,
+         * right or wrong. Measured across 800 episodes the swap is worth 0.0
+         * points of task completion in either split — this policy mis-delivers
+         * so rarely that the two tallies almost never diverge — so nothing was
+         * lost by telling the truth. The history itself is load-bearing though:
+         * zeroing both features costs 15.5 points on trained phrasings and 10.3
+         * held out (`probe_leak.js`). */
+        if (this.lastPlacedColor >= 0) C[5 + this.lastPlacedColor] = 1;
+        // normalised by the SLOT COUNT, not by a hard-coded 6 — these saturate
+        // and stop carrying information the moment a bench holds more than the
+        // divisor, which is exactly what raising MAX_BALLS does
+        C[9] = this.placed / MAX_BALLS;
         C[10] = Math.min(1, this.t / CLOCK.cap);
         const rem = this.onTableCounts();
-        C[11] = rem.reduce((s, k) => s + k, 0) / 6;
+        C[11] = rem.reduce((s, k) => s + k, 0) / MAX_BALLS;
     }
 
     /* Assemble the 66 motor inputs from the current selection. */
@@ -421,7 +534,20 @@ class Station {
         // Without that check, a population that never learns is ambiguous
         // between "the GA is struggling" and "the grasp radius is 4 mm too
         // small and nothing could ever succeed".
-        const out = this.policy ? this.policy(this) : this.brain.act(this.buildMotorInput());
+        /* buildMotorInput() is called UNCONDITIONALLY, even when a scripted
+         * policy is driving and its result is thrown away. It is not a pure
+         * read: it pushes this tick's channels onto `this.hist`, which is what
+         * the brain's temporal window is made of. Calling it only on the brain
+         * path meant a scripted policy left the history frozen, so any code that
+         * swapped drivers mid-episode — the distillation recorder below, and the
+         * UI's reference-vs-champion comparison — read a stale window. */
+        const motorIn = this.buildMotorInput();
+        const out = this.policy ? this.policy(this) : this.brain.act(motorIn);
+        /* Distillation hook: `(station, motorInput)` at every control tick, with
+         * the input vector the station is about to act on. It has to be here
+         * rather than in the caller because the input cannot be rebuilt after
+         * the fact — see above. */
+        if (this.recorder) this.recorder(this, motorIn);
         this.arm.setCommand(out, dt);
         for (let j = 0; j < 5; j++) this.lastAction[j] = out[j];
         this.tick++;
@@ -602,6 +728,9 @@ class Station {
         this.bucketFill[bucketIdx]++;
         if (this.held >= 0 && this.balls[this.held] === ball) this.held = -1;
 
+        this.placed++;
+        this.lastPlacedColor = ball.color;
+
         const r = this.evalr.deliver(ball.color, bucketIdx, remBefore);
         if (r.correct) {
             this.delivered++;
@@ -635,9 +764,41 @@ class Station {
         return p;
     }
 
+    /* MOVING SOMETHING YOU WERE NOT ASKED TO MOVE COSTS.
+     *
+     * The bench is crowded now, and the honest version of that is an arm that
+     * works around the clutter instead of through it. `lost` alone cannot teach
+     * that: it fires only once a ball is over the edge and already unrecoverable,
+     * so it is a lottery ticket, not shaping — the same objection this file
+     * makes to every other threshold reward.
+     *
+     * So displacement itself is charged, ratcheted per ball against how far that
+     * ball has been shifted from where it spawned, saturating at 12 cm. It is
+     * one-way and payable once per ball, so it cannot be farmed by nudging
+     * something back and forth, and it is charged only while the ball is NOT
+     * held — otherwise carrying a ball to its bucket would be the single most
+     * expensive thing the arm can do.
+     *
+     * Deliberately worth less than a delivery: an arm that refuses to touch
+     * anything scores nothing, so the cost has to be a reason to be careful, not
+     * a reason to be still. */
+    shoveCharge() {
+        for (const b of this.balls) {
+            if (b.lost || b.inBucket >= 0 || b.held) continue;
+            if (b.sx === undefined) { b.sx = b.x; b.sz = b.z; b.shove = 0; }
+            const moved = Math.hypot(b.x - b.sx, b.z - b.sz);
+            const v = Math.max(0, Math.min(1, (moved - 0.02) / 0.10));
+            if (v > b.shove) {
+                this.fitness += REWARD.shove * (v - b.shove);
+                b.shove = v;
+            }
+        }
+    }
+
     /* ------------------------------------------------------ shaping ratchets */
     shape(dt) {
         if (this.done) return;
+        this.shoveCharge();
         const o = this.oracle();
         const g = this.arm.graspPoint();
 
@@ -867,5 +1028,6 @@ class World {
 }
 
 if (typeof module !== "undefined") module.exports = {
-    World, Station, TABLE, BALL_R, BUCKET, BALL_AREA, REWARD, CLOCK, buildScene, GRASP_R, CLOSE_T, OPEN_T
+    World, Station, TABLE, BALL_R, BUCKET, BALL_AREA, REWARD, CLOCK, buildScene, GRASP_R, CLOSE_T, OPEN_T,
+    armSolid, pointSolid, bucketRadiusAt, BUCKET_SOLID_H
 };

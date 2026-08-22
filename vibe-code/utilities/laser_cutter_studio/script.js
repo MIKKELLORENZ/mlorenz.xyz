@@ -48,8 +48,29 @@ const LCS = (window.LCS = {});
     // gap is the engrave-feed crossing slow enough that a rapid wins. 4 mm is a sane middle.
     const GAP_RAPID_MM = 4;
 
+    // SVG import merges same-styled paths into one compound path (see LCS.importers), and
+    // Ctrl+Shift+G splits one back apart. Above this many subpaths the split is refused
+    // rather than offered: turning a traced photo back into 20k canvas objects is precisely
+    // the thing that locks the browser up. Also gates whether the import toast mentions it.
+    const MAX_SPLIT_SUBPATHS = 2000;
+
+    // Engrave scan-line spacing presets, in mm between rows. Emitted line count scales
+    // inversely with this number, so it is by far the most effective control over G-code
+    // size — which is why it is offered in the export dialog (where the line count is
+    // staring at you) and not only in the Machine panel. Coarsest first, so the list reads
+    // cheap → expensive. Anything not in this list still works; the picker says "Custom".
+    const RASTER_PRESETS = [
+        { mm: 0.40, name: 'Draft' },
+        { mm: 0.30, name: 'Fast' },
+        { mm: 0.20, name: 'Normal' },
+        { mm: 0.15, name: 'Fine' },
+        { mm: 0.10, name: 'Photo' },
+        { mm: 0.08, name: 'Maximum' },
+    ];
+
     LCS.config = { DPI, MM_PER_INCH, PX_PER_MM, MM_PER_PX, DEFAULT_LAYERS, PALETTE,
-                   MAX_GCODE_LINES, MIN_FEATURE_MM, GAP_RAPID_MM };
+                   MAX_GCODE_LINES, MIN_FEATURE_MM, GAP_RAPID_MM, MAX_SPLIT_SUBPATHS,
+                   RASTER_PRESETS };
 })();
 
 // ============================================================
@@ -186,11 +207,17 @@ const LCS = (window.LCS = {});
             bedWidth: 400, bedHeight: 400, units: 'mm',
             origin: 'bottom-left', dialect: 'grbl',
             dpi: 96, travelFeed: 3000, smax: 1000,
-            // 0.1 mm/line: close to the S10 Pro's 0.08 mm spot, so ordinary engraves stay
-            // crisp (a coarse global default would visibly stripe every small job). The
-            // huge-file problem is specific to filling one large detailed image and is solved
-            // per-job by the MAX_GCODE_LINES cap, not by degrading this default. See generate().
-            rasterInterval: 0.1,
+            // Engrave scan-line spacing, in mm. This is THE knob that decides file size: line
+            // count scales inversely with it, so halving the interval doubles the job.
+            //
+            // It used to default to 0.1 mm (254 dpi) on the theory that matching the S10 Pro's
+            // 0.08 mm spot keeps every engrave crisp. In practice that spends two scan rows on
+            // detail a diode laser's kerf smears together anyway, and it is why ordinary jobs
+            // kept landing over MAX_GCODE_LINES. 0.2 mm (127 dpi) is the standard diode-laser
+            // engrave resolution, halves every job, and is visually indistinguishable on
+            // anything but a photo. Drop to 0.1 for photo-realistic dithered work — the
+            // Engrave resolution picker in the export dialog and the Machine panel both set it.
+            rasterInterval: 0.2,
             gridSpacing: 10, snapTolerance: 6,
         },
         layers: [],
@@ -229,6 +256,9 @@ const LCS = (window.LCS = {});
     let panStart = null;
     let viewportStart = null;
     let spaceHeld = false;
+    // Right button does double duty: drag = pan, click = context menu. This records whether
+    // the pointer actually travelled, so the menu doesn't pop up at the end of a pan.
+    let dragMoved = false;
 
     function init() {
         const wrap = $('#canvas-wrap');
@@ -380,12 +410,15 @@ const LCS = (window.LCS = {});
                             LCS.state.get().tool === 'hand';
             if (wantPan) {
                 isPanning = true;
+                dragMoved = false;
                 panStart = { x: e.clientX, y: e.clientY };
                 viewportStart = canvas.viewportTransform.slice();
                 canvas.setCursor('grabbing');
                 canvas.selection = false;
-                // prevent Fabric from starting selection box
-                if (opt.target) canvas.discardActiveObject();
+                // prevent Fabric from starting selection box. Right button is exempt: it may
+                // turn out to be a context-menu click, and that menu acts on the selection —
+                // clearing it here would leave every entry greyed out.
+                if (opt.target && e.button !== 2) canvas.discardActiveObject();
             }
         });
         canvas.on('mouse:move', opt => {
@@ -393,6 +426,7 @@ const LCS = (window.LCS = {});
             const e = opt.e;
             const dx = e.clientX - panStart.x;
             const dy = e.clientY - panStart.y;
+            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
             const vpt = canvas.viewportTransform;
             vpt[4] = viewportStart[4] + dx;
             vpt[5] = viewportStart[5] + dy;
@@ -444,6 +478,11 @@ const LCS = (window.LCS = {});
         drawBedBackground,
         get fabric() { return canvas; },
         get overlay() { return overlay; },
+        // A function, not a getter: Object.assign copies getters by *reading* them, so a
+        // getter here would freeze into a one-time `false`. (That is also why init()
+        // re-assigns LCS.canvas.fabric by hand.) Returns true when the last mouse gesture
+        // travelled — the context menu uses it to stay closed at the end of a right-drag pan.
+        lastDragMoved: () => dragMoved,
     });
 })();
 
@@ -804,13 +843,20 @@ const LCS = (window.LCS = {});
         render();
     }
 
+    // Cap on object rows drawn per layer. Each row is a DOM node plus two Lucide icons, and
+    // lucide.createIcons() re-walks the whole panel on every render — so a design with
+    // thousands of objects in one layer used to hang the tab, not just make it long. The
+    // list is a navigation aid; past a few hundred rows it stops being one anyway.
+    const MAX_OBJ_ROWS = 300;
+
     function render() {
         const host = $('#layer-list');
         if (!host) return;
         host.innerHTML = '';
         const state = LCS.state.get();
+        const allObjs = userObjects();   // one canvas scan for the whole panel
         state.layers.forEach(layer => {
-            const objs = userObjects().filter(o => o.layerId === layer.id).reverse(); // topmost first
+            const objs = allObjs.filter(o => o.layerId === layer.id).reverse(); // topmost first
             const item = el('div', { class: 'layer-item' + (layer.id === state.activeLayerId ? ' active' : '') + (layer.locked ? ' locked' : '') });
             item.title = 'Right-click to ' + (layer.locked ? 'unlock' : 'lock');
             const swatch = el('div', { class: 'layer-color', style: `background:${layer.color}` });
@@ -839,7 +885,13 @@ const LCS = (window.LCS = {});
 
             if (objs.length && !layer.objectsCollapsed) {
                 const listEl = el('div', { class: 'layer-objects' });
-                objs.forEach(o => listEl.appendChild(objRow(o, layer)));
+                objs.slice(0, MAX_OBJ_ROWS).forEach(o => listEl.appendChild(objRow(o, layer)));
+                if (objs.length > MAX_OBJ_ROWS) {
+                    listEl.appendChild(el('div', {
+                        class: 'obj-more',
+                        text: `… ${(objs.length - MAX_OBJ_ROWS).toLocaleString()} more object${objs.length - MAX_OBJ_ROWS > 1 ? 's' : ''} not listed`,
+                    }));
+                }
                 wireObjDnD(listEl, layer);
                 host.appendChild(listEl);
             }
@@ -1036,6 +1088,74 @@ const LCS = (window.LCS = {});
         return baseToObject.call(this, [...(extra || []), ...customProps]);
     };
 
+    // ===== Groups render live, never through a cache =====
+    // Fabric rasterises a group to an offscreen bitmap and reuses it. The bitmap is capped
+    // at fabric.perfLimitSizeTotal (~2.1 Mpx), so a group the size of a real design gets
+    // rendered at a fraction of its true resolution and stretched back up: a full-bed group
+    // measured a 697x638 cache for 1420x1300 of content, i.e. 49%. Solid black turns into
+    // semi-transparent grey and kerf-width cut lines fade out — the "everything went
+    // transparent when I grouped it" report.
+    //
+    // Turning group caching off makes children draw directly at full resolution. It costs
+    // little: each child still keeps its own cache (Fabric only skips a child's cache when
+    // the *parent* is on one), so this trades a single downscaled composite for a handful of
+    // correctly-sized ones. Set on the prototype so it also covers groups arriving from a
+    // project file or an undo restore, not just ones made via LCS.selection.group().
+    fabric.Group.prototype.objectCaching = false;
+
+    // ===== On-screen-only stroke boost for cut lines =====
+    // A cut path is a kerf-width hairline: 0.1 mm of real geometry, which at any sane zoom
+    // is a sub-pixel line you cannot see, let alone click. Every laser CAD tool draws these
+    // fatter than they are.
+    //
+    // The boost is applied *only while the stroke is painted* — `strokeWidth` itself is
+    // never changed. That matters, because strokeWidth is not just a look: it feeds SVG
+    // export, project files, the properties panel and the object's bounding box. Wrapping
+    // _renderStroke keeps all of those reading the real number; only the pixels change.
+    // (G-code is immune either way — toolpaths come from geometry, not stroke width.)
+    // How thick a cut line should look, in screen px. Enough to see and click, not enough to
+    // read as a design element — the line is 0.1 mm of real kerf, so anything heavier
+    // overstates it. Below ~1 it stops surviving antialiasing at low zoom.
+    const CUT_MIN_SCREEN_PX = 1.15;
+
+    // Resolved once per layer edit, not once per object per frame — this runs inside the
+    // render loop, and a linear layer scan for every object of a big design adds up.
+    let layerOpCache = null;
+    LCS.state.on('layers:changed', () => { layerOpCache = null; });
+    function isCutObject(o) {
+        if (o.opType) return o.opType === 'cut';
+        if (!layerOpCache) {
+            layerOpCache = new Map();
+            LCS.state.layers().forEach(l => layerOpCache.set(l.id, l.opType));
+        }
+        return layerOpCache.get(o.layerId) === 'cut';
+    }
+
+    function boostedStrokeWidth(o) {
+        if (!o.stroke || o.stroke === 'none' || o.stroke === 'transparent') return null;
+        // A filled shape with no stroke weight is artwork, not an outline — leave it alone
+        // rather than drawing an outline it never had.
+        const hasFill = o.fill && o.fill !== 'none' && o.fill !== 'transparent';
+        if (!o.strokeWidth && hasFill) return null;
+        if (!isCutObject(o)) return null;
+        const zoom = (LCS.canvas.fabric && LCS.canvas.fabric.getZoom()) || 1;
+        // Undo whatever scaling the stroke is about to go through, so the result is a
+        // constant apparent thickness at every zoom level and object scale.
+        const objScale = o.strokeUniform ? 1 : Math.max(Math.abs(o.scaleX || 1), Math.abs(o.scaleY || 1)) || 1;
+        const minLocal = CUT_MIN_SCREEN_PX / (zoom * objScale);
+        return Math.max(o.strokeWidth || 0, minLocal);
+    }
+
+    const baseRenderStroke = fabric.Object.prototype._renderStroke;
+    fabric.Object.prototype._renderStroke = function (ctx) {
+        const boosted = boostedStrokeWidth(this);
+        if (boosted == null) return baseRenderStroke.call(this, ctx);
+        const real = this.strokeWidth;
+        this.strokeWidth = boosted;
+        try { baseRenderStroke.call(this, ctx); }
+        finally { this.strokeWidth = real; }
+    };
+
     LCS.objects = { attach, addToCanvas };
 })();
 
@@ -1058,6 +1178,13 @@ const LCS = (window.LCS = {});
         fab.defaultCursor = t === 'select' ? 'default' : 'crosshair';
         fab.hoverCursor = t === 'select' ? 'move' : 'crosshair';
         fab.selection = t === 'select';
+        // A drawing tool must not also hit-test the existing art. Fabric runs its own
+        // mouse:down before ours, and if it finds a target under the press it selects it and
+        // starts a move transform — so starting a line on top of something grabbed that
+        // something and dragged it around while the new line was drawn underneath. Killing
+        // target finding makes a press mean "start drawing here" and nothing else. 'node'
+        // keeps it, because its entire job is dragging the handle objects it just added.
+        fab.skipTargetFind = t !== 'select' && t !== 'node';
         fab.discardActiveObject();
         fab.requestRenderAll();
         // exit pen/node mode
@@ -1074,6 +1201,40 @@ const LCS = (window.LCS = {});
         document.querySelectorAll('.tool[data-tool]').forEach(b => {
             b.addEventListener('click', () => setTool(b.dataset.tool));
         });
+        // Shift is read on every pointer move, but people also press or release it while
+        // holding still — so react to the key itself too, or the line appears stuck.
+        window.addEventListener('keydown', onShiftToggle);
+        window.addEventListener('keyup', onShiftToggle);
+    }
+
+    // Shift constrains a line to the nearest 45°: horizontal, vertical or diagonal, whichever
+    // the drag is closest to. The endpoint is the drag *projected* onto that axis, not the
+    // raw drag length rotated onto it — so a horizontal line grows with sideways movement
+    // and ignores vertical wobble, which is how every other vector editor behaves.
+    const SNAP_RAD = Math.PI / 4;
+    function constrainToAxis(start, p) {
+        const dx = p.x - start.x, dy = p.y - start.y;
+        if (Math.hypot(dx, dy) < 1e-6) return p;
+        const a = Math.round(Math.atan2(dy, dx) / SNAP_RAD) * SNAP_RAD;
+        const ux = Math.cos(a), uy = Math.sin(a);
+        const proj = dx * ux + dy * uy;      // >= 0, since a is the nearest axis
+        return { x: start.x + ux * proj, y: start.y + uy * proj };
+    }
+
+    function updateLineEnd() {
+        if (!drawState || drawState.type !== 'line' || !drawState.last) return;
+        const { obj, start, last, shift } = drawState;
+        const end = shift ? constrainToAxis(start, last) : last;
+        obj.set({ x2: end.x, y2: end.y });
+        obj.setCoords();
+        LCS.canvas.fabric.requestRenderAll();
+    }
+
+    function onShiftToggle(e) {
+        if (e.key !== 'Shift') return;
+        if (!drawState || drawState.type !== 'line') return;
+        drawState.shift = e.type === 'keydown';
+        updateLineEnd();
     }
 
     function pointer(opt) { return LCS.canvas.fabric.getPointer(opt.e); }
@@ -1138,7 +1299,10 @@ const LCS = (window.LCS = {});
             const l = Math.min(start.x, p.x), t = Math.min(start.y, p.y);
             obj.set({ left: l, top: t, rx: Math.abs(p.x - start.x) / 2, ry: Math.abs(p.y - start.y) / 2 });
         } else if (type === 'line') {
-            obj.set({ x2: p.x, y2: p.y });
+            drawState.last = p;
+            drawState.shift = !!(opt.e && opt.e.shiftKey);
+            updateLineEnd();
+            return;                       // updateLineEnd already re-rendered
         }
         obj.setCoords();
         LCS.canvas.fabric.requestRenderAll();
@@ -1841,6 +2005,182 @@ const LCS = (window.LCS = {});
         reader.readAsText(file);
     }
 
+    // ---- merging ------------------------------------------------------------
+    // Vector-trace output (our own Puzzle Maker, Inkscape's tracer, a traced PDF page…)
+    // is one <path> per blob — routinely thousands of them for a photo. Adding each as
+    // its own Fabric object used to melt the browser: thousands of canvas objects, a
+    // layer-panel row plus two Lucide icons each, and a history snapshot on top.
+    //
+    // So: bake each path's transform into absolute SVG-space coordinates, then
+    // concatenate every path that shares a style into ONE compound fabric.Path. The
+    // object count collapses to one-per-colour and the import is "one merged figure"
+    // like every other vector editor. Ctrl+Shift+G splits it again.
+    //
+    // The fill rule is grouped on and carried through, never forced: merging under
+    // even-odd would turn two overlapping same-colour shapes into a hole, and merging a
+    // declared-even-odd path under non-zero would fill its counters. Subpaths that were
+    // separate objects keep meaning what they meant.
+    const MERGEABLE = { path: 1, polyline: 1, polygon: 1, line: 1 };
+
+    // Coordinate precision for the merged `d`. Absolute decimals would be a trap: an SVG
+    // authored in a 0..1 viewBox and blown up to bed size needs far more of them than one
+    // authored in mm. So quantise relative to the drawing — 1/20000 of its diagonal, which
+    // is invisible at any scale and keeps the string (and every history snapshot holding
+    // it) far smaller than raw float output.
+    function precisionFor(diag) {
+        if (!(diag > 0)) return 2;
+        return Math.min(6, Math.max(1, Math.ceil(-Math.log10(diag / 20000))));
+    }
+
+    // Absolute-space path commands for one parsed SVG object. Fabric has already baked
+    // the SVG's transform chain into the object, so calcTransformMatrix() is all we need.
+    function toAbsPathD(o, decimals) {
+        // Callers merging a whole import pass one shared precision; a lone caller (the
+        // split command) gets one sized to this object.
+        let dp = decimals;
+        if (dp == null) {
+            const b = o.getBoundingRect(true, true);
+            dp = precisionFor(Math.hypot(b.width, b.height));
+        }
+        const k = Math.pow(10, dp);
+        const num = v => Math.round(v * k) / k;
+        const mat = o.calcTransformMatrix();
+        const off = o.pathOffset || { x: 0, y: 0 };
+        const P = (x, y) => {
+            const p = fabric.util.transformPoint({ x: x - off.x, y: y - off.y }, mat);
+            return num(p.x) + ' ' + num(p.y);
+        };
+        const out = [];
+
+        if (o.type === 'path') {
+            // fabric 5 stores paths already simplified to M/L/C/Q/Z; H/V handled defensively
+            let cx = 0, cy = 0;
+            for (const seg of o.path) {
+                switch (seg[0]) {
+                    case 'M': cx = seg[1]; cy = seg[2]; out.push('M ' + P(cx, cy)); break;
+                    case 'L': cx = seg[1]; cy = seg[2]; out.push('L ' + P(cx, cy)); break;
+                    case 'H': cx = seg[1]; out.push('L ' + P(cx, cy)); break;
+                    case 'V': cy = seg[1]; out.push('L ' + P(cx, cy)); break;
+                    case 'Q': out.push('Q ' + P(seg[1], seg[2]) + ' ' + P(seg[3], seg[4])); cx = seg[3]; cy = seg[4]; break;
+                    case 'C': out.push('C ' + P(seg[1], seg[2]) + ' ' + P(seg[3], seg[4]) + ' ' + P(seg[5], seg[6])); cx = seg[5]; cy = seg[6]; break;
+                    case 'Z': case 'z': out.push('Z'); break;
+                    default: return null; // arcs or anything unexpected: leave this one alone
+                }
+            }
+        } else if (o.type === 'polyline' || o.type === 'polygon') {
+            const pts = o.points || [];
+            if (pts.length < 2) return null;
+            pts.forEach((p, i) => out.push((i ? 'L ' : 'M ') + P(p.x, p.y)));
+            if (o.type === 'polygon') out.push('Z');
+        } else if (o.type === 'line') {
+            // calcLinePoints() gives the endpoints in centre-relative local space, which is
+            // what the matrix expects. (Not calcACoords — those are bbox corners and carry
+            // half the stroke width, which would shift the line by half its own weight.)
+            if (!o.calcLinePoints) return null;
+            const lp = o.calcLinePoints();
+            out.push('M ' + P(lp.x1, lp.y1));
+            out.push('L ' + P(lp.x2, lp.y2));
+        } else {
+            return null;
+        }
+        return out.length ? out.join(' ') : null;
+    }
+
+    // Objects merge only when they'd burn identically: same paint, same stroke weight.
+    // A gradient/pattern fill is an object, not a string — it has no single colour to merge
+    // under, so those are left alone rather than silently collapsed together.
+    function styleKey(o) {
+        if ((o.fill && typeof o.fill !== 'string') || (o.stroke && typeof o.stroke !== 'string')) return null;
+        const fill = (o.fill || 'none').toLowerCase();
+        const stroke = (o.stroke || 'none').toLowerCase();
+        const sw = o.strokeWidth ? Math.round(o.strokeWidth * 100) / 100 : 0;
+        return `${fill}|${stroke}|${sw}|${o.fillRule || 'nonzero'}`;
+    }
+
+    function mergeParsedObjects(objects) {
+        const buckets = new Map();   // styleKey -> { proto, ds: [] }
+        const passthrough = [];
+        let mergedFrom = 0, mergedInto = 0;
+
+        // One precision for the whole import, sized to the drawing (see precisionFor)
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        objects.forEach(o => {
+            const b = o.getBoundingRect(true, true);
+            minX = Math.min(minX, b.left); minY = Math.min(minY, b.top);
+            maxX = Math.max(maxX, b.left + b.width); maxY = Math.max(maxY, b.top + b.height);
+        });
+        const decimals = precisionFor(Math.hypot(maxX - minX, maxY - minY));
+
+        for (const o of objects) {
+            const key = MERGEABLE[o.type] ? styleKey(o) : null;
+            if (!key) { passthrough.push(o); continue; }
+            const d = toAbsPathD(o, decimals);
+            if (!d) { passthrough.push(o); continue; }
+            let b = buckets.get(key);
+            if (!b) { b = { proto: o, ds: [] }; buckets.set(key, b); }
+            b.ds.push(d);
+        }
+
+        const out = [];
+        for (const b of buckets.values()) {
+            if (b.ds.length === 1) { out.push(b.proto); continue; }   // nothing gained by rebuilding
+            const p = b.proto;
+            const merged = new fabric.Path(b.ds.join(' '), {
+                fill: p.fill,
+                stroke: p.stroke,
+                strokeWidth: p.strokeWidth || 0,
+                strokeUniform: true,
+                strokeLineCap: p.strokeLineCap,
+                strokeLineJoin: p.strokeLineJoin,
+                fillRule: p.fillRule || 'nonzero',   // grouped on, so the whole bucket agrees
+                originX: 'left',
+                originY: 'top',
+            });
+            // The `d` is already in absolute SVG space, and fabric.Path derives left/top from
+            // the path's own bbox — so the merged path lands exactly where the pieces were.
+            merged.setCoords();
+            mergedFrom += b.ds.length;
+            mergedInto++;
+            out.push(merged);
+        }
+        return { objects: out.concat(passthrough), mergedFrom, mergedInto };
+    }
+
+    // Imported colours carry intent, not just a hue: pure red means "cut" to every laser
+    // tool on earth, black means "engrave". Without this, a Puzzle Maker export (#ff0000
+    // cut lines) landed 97 units away from the default Cut layer's #ef4444 and span up a
+    // duplicate "Imported #ff0000" layer next to the perfectly good one.
+    function intentForColor(hex) {
+        const { r, g, b } = LCS.util.hexToRgb(hex);
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        const sat = max === 0 ? 0 : (max - min) / max;
+        if (max < 70 && sat < 0.4) return 'engrave';                  // black / near-black
+        if (sat > 0.5 && r === max && g < max * 0.6 && b < max * 0.6) return 'cut';   // red
+        if (sat > 0.5 && b === max && r < max * 0.6) return 'score';  // blue
+        return null;
+    }
+
+    function layerForColor(hex) {
+        const state = LCS.state.get();
+        const exact = LCS.layers.getLayerByColor(hex);
+        if (exact) return { layer: exact, created: false };
+        const intent = intentForColor(hex);
+        if (intent) {
+            const match = state.layers.find(l => l.opType === intent && intentForColor(l.color) === intent);
+            if (match) return { layer: match, created: false };
+        }
+        const layer = {
+            id: LCS.util.uid('layer'),
+            name: `Imported ${hex}`,
+            color: hex,
+            opType: intent || 'engrave',
+            power: 50, speed: 1000, passes: 1,
+            airAssist: false, visible: true, locked: false, zOrder: state.layers.length,
+        };
+        state.layers.push(layer);
+        return { layer, created: true };
+    }
+
     function isNearWhite(c) {
         if (!c || c === 'none' || c === 'transparent') return false;
         const hex = normalizeHex(c);
@@ -1855,19 +2195,47 @@ const LCS = (window.LCS = {});
         return fillInvisible && strokeInvisible;
     }
 
-    function importSvgString(str) {
-        fabric.loadSVGFromString(str, (objects, opts) => {
-            if (!objects || !objects.length) { toast('No SVG paths found', 'warn'); return; }
-            const fab = LCS.canvas.fabric;
-            const state = LCS.state.get();
+    function parseSvg(str) {
+        return new Promise(resolve => fabric.loadSVGFromString(str, (objects, opts) => resolve({ objects, opts })));
+    }
 
-            // Filter out invisible / near-white-background elements
-            const kept = objects.filter(o => !isEffectivelyInvisible(o));
-            if (!kept.length) { toast('SVG had no visible paths', 'warn'); return; }
+    async function importSvgString(str) {
+        // Parsing a traced SVG can mean tens of thousands of elements. Yield once so the
+        // progress overlay actually paints before the main thread disappears into fabric.
+        progress('Importing SVG', 'Parsing…', 0.15);
+        await new Promise(r => setTimeout(r, 20));
 
+        let parsed;
+        try {
+            parsed = await parseSvg(str);
+        } catch (e) {
+            progress('', '', false);
+            console.error(e);
+            toast('SVG import failed: ' + e.message, 'danger');
+            return;
+        }
+        const objects = parsed.objects;
+        if (!objects || !objects.length) { progress('', '', false); toast('No SVG paths found', 'warn'); return; }
+
+        const fab = LCS.canvas.fabric;
+
+        // Filter out invisible / near-white-background elements
+        const kept = objects.filter(o => !isEffectivelyInvisible(o));
+        if (!kept.length) { progress('', '', false); toast('SVG had no visible paths', 'warn'); return; }
+
+        progress('Importing SVG', `Merging ${kept.length.toLocaleString()} paths…`, 0.5);
+        await new Promise(r => setTimeout(r, 20));
+        const { objects: shapes, mergedFrom, mergedInto } = mergeParsedObjects(kept);
+
+        progress('Importing SVG', 'Placing…', 0.85);
+        await new Promise(r => setTimeout(r, 20));
+
+        // One history entry for the whole import, not one per object added
+        LCS.history.setSuppress(true);
+        try {
             // Compute combined bounding box in SVG-local space
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            kept.forEach(o => {
+            shapes.forEach(o => {
                 const b = o.getBoundingRect(true, true);
                 minX = Math.min(minX, b.left);
                 minY = Math.min(minY, b.top);
@@ -1882,9 +2250,9 @@ const LCS = (window.LCS = {});
             const offsetX = bedW / 2 - (contentW * scale) / 2 - minX * scale;
             const offsetY = bedH / 2 - (contentH * scale) / 2 - minY * scale;
 
-            // Per-path: reposition, auto-assign layer, add as individual object
+            // Per shape: reposition, auto-assign layer, add
             let newLayers = 0;
-            kept.forEach(o => {
+            shapes.forEach(o => {
                 o.set({
                     left: (o.left || 0) * scale + offsetX,
                     top: (o.top || 0) * scale + offsetY,
@@ -1901,27 +2269,28 @@ const LCS = (window.LCS = {});
                 const colorKey = strokeUsable ? stroke : (fillUsable ? fill : '#000000');
                 const hex = normalizeHex(colorKey);
 
-                let layer = LCS.layers.getLayerByColor(hex);
-                if (!layer) {
-                    layer = {
-                        id: LCS.util.uid('layer'),
-                        name: `Imported ${hex}`,
-                        color: hex,
-                        opType: hex === '#ff0000' || hex === '#f00' ? 'cut' : 'engrave',
-                        power: 50, speed: 1000, passes: 1,
-                        airAssist: false, visible: true, locked: false, zOrder: state.layers.length,
-                    };
-                    state.layers.push(layer);
-                    newLayers++;
-                }
+                const { layer, created } = layerForColor(hex);
+                if (created) newLayers++;
                 o.sourceType = 'svg';
                 LCS.objects.attach(o, layer);
                 fab.add(o);
             });
             LCS.state.emit('layers:changed');
             fab.requestRenderAll();
-            toast(`Imported ${kept.length} path${kept.length > 1 ? 's' : ''}${newLayers ? ` (+${newLayers} new layer${newLayers > 1 ? 's' : ''})` : ''}`, 'success');
-        });
+
+            const parts = [`Imported ${shapes.length} shape${shapes.length > 1 ? 's' : ''}`];
+            if (mergedFrom) {
+                // Only advertise the split when it would actually be allowed (see MAX_SPLIT_SUBPATHS)
+                const splittable = mergedFrom <= LCS.config.MAX_SPLIT_SUBPATHS;
+                parts.push(`(${mergedFrom.toLocaleString()} paths merged into ${mergedInto}${splittable ? ' — Ctrl+Shift+G to split' : ''})`);
+            }
+            if (newLayers) parts.push(`+${newLayers} new layer${newLayers > 1 ? 's' : ''}`);
+            toast(parts.join(' '), 'success');
+        } finally {
+            progress('', '', false);
+            LCS.history.setSuppress(false);
+            LCS.history.snapshot();
+        }
     }
 
     function normalizeHex(c) {
@@ -1987,15 +2356,15 @@ const LCS = (window.LCS = {});
         // Decide which result is better — prefer the one with more paths, or combine if both found content
         if (opPathCount === 0 && tracePathCount === 0) return false;
         if (opPathCount >= 3 && tracePathCount < opPathCount * 0.5) {
-            LCS.importers.importSvgString(opSvg);
+            await LCS.importers.importSvgString(opSvg);
             return true;
         }
         if (tracePathCount > 0) {
-            LCS.importers.importSvgString(traceSvg);
+            await LCS.importers.importSvgString(traceSvg);
             return true;
         }
         if (opPathCount > 0) {
-            LCS.importers.importSvgString(opSvg);
+            await LCS.importers.importSvgString(opSvg);
             return true;
         }
         return false;
@@ -2156,7 +2525,8 @@ const LCS = (window.LCS = {});
         LCS.image.addImageFromDataUrl(url, `${fileName}_p${pageNum}.png`);
     }
 
-    LCS.importers = { importSvgFile, importSvgString, importPdfFile };
+    // absPathD is shared with LCS.selection so "split" can undo a merge
+    LCS.importers = { importSvgFile, importSvgString, importPdfFile, absPathD: toAbsPathD };
 })();
 
 // ============================================================
@@ -2242,34 +2612,201 @@ const LCS = (window.LCS = {});
         fab.requestRenderAll();
     }
 
+    // Group = "move these together". It deliberately does NOT re-home the members onto one
+    // layer: each child keeps its own layerId so it still burns with its own power/speed/op
+    // (LCS.gcode.generate flattens groups back out for exactly this reason). So you can
+    // group a cut outline with the engraving that belongs inside it and drag them as one.
     function group() {
         const fab = LCS.canvas.fabric;
         const act = fab.getActiveObject();
         if (!act) { LCS.util.toast('Select items first', 'warn'); return; }
-        if (act.type !== 'activeSelection') { LCS.util.toast('Select 2+ items to group', 'warn'); return; }
+        if (act.type !== 'activeSelection' || fab.getActiveObjects().length < 2) {
+            LCS.util.toast('Select 2 or more objects to group', 'warn'); return;
+        }
+        const members = fab.getActiveObjects().length;
+        const layerCount = new Set(fab.getActiveObjects().map(o => o.layerId)).size;
         // Fabric 5: activeSelection.toGroup() merges into a fabric.Group
         const g = act.toGroup();
         g.objectId = LCS.util.uid('grp');
-        const layer = LCS.state.activeLayer();
-        g.layerId = g.layerId || layer.id;
+        // The group's own layer only decides which panel row it sits under; children keep theirs.
+        g.layerId = g.layerId || LCS.state.activeLayer().id;
         g.sourceType = 'group';
         fab.setActiveObject(g);
         fab.requestRenderAll();
         LCS.state.emit('object:modified');
+        LCS.state.emit('layers:changed');
+        LCS.util.toast(`Grouped ${members} objects` +
+            (layerCount > 1 ? ` — each keeps its own layer (${layerCount} layers)` : ''), 'success');
     }
 
     function ungroup() {
         const fab = LCS.canvas.fabric;
         const act = fab.getActiveObject();
-        if (!act || act.type !== 'group') { LCS.util.toast('Select a group to ungroup', 'warn'); return; }
-        // Fabric 5: group.toActiveSelection() reverses toGroup()
-        const sel = act.toActiveSelection();
-        fab.setActiveObject(sel);
-        fab.requestRenderAll();
-        LCS.state.emit('object:modified');
+        if (act && act.type === 'group') {
+            // Fabric 5: group.toActiveSelection() reverses toGroup()
+            const n = act._objects ? act._objects.length : 0;
+            const sel = act.toActiveSelection();
+            fab.setActiveObject(sel);
+            fab.requestRenderAll();
+            LCS.state.emit('object:modified');
+            LCS.state.emit('layers:changed');
+            LCS.util.toast(`Ungrouped ${n} objects`, 'success');
+            return;
+        }
+        if (act && act.type === 'path') { splitPath(act); return; }
+        LCS.util.toast('Select a group or a merged path to split', 'warn');
     }
 
-    LCS.selection = { selectAll, group, ungroup, isUserObject };
+    // The other half of the import-time merge: break a compound path back into one object
+    // per subpath. Note this is not loss-free by nature — a hole is just a subpath, so once
+    // split it becomes its own filled shape rather than a counter in its parent.
+    function splitPath(path) {
+        const fab = LCS.canvas.fabric;
+        const cap = LCS.config.MAX_SPLIT_SUBPATHS;
+        const d = LCS.importers.absPathD(path);
+        const subs = d ? d.split(/(?=M )/).map(s => s.trim()).filter(s => s.length > 2) : [];
+        if (subs.length < 2) { LCS.util.toast('This path is a single shape — nothing to split', 'warn'); return; }
+        if (subs.length > cap) {
+            LCS.util.toast(`Too many subpaths to split (${subs.length.toLocaleString()}, limit ${cap.toLocaleString()}) — this would freeze the canvas`, 'danger');
+            return;
+        }
+        if (subs.length > 200 && !window.confirm(`Split this path into ${subs.length.toLocaleString()} separate objects?\n\nHoles will become separate filled shapes, and a large object count slows the canvas down.`)) return;
+
+        const layer = LCS.state.layers().find(l => l.id === path.layerId) || LCS.state.activeLayer();
+        LCS.history.setSuppress(true);
+        const created = [];
+        try {
+            subs.forEach(sub => {
+                const p = new fabric.Path(sub, {
+                    fill: path.fill, stroke: path.stroke, strokeWidth: path.strokeWidth || 0,
+                    strokeUniform: true, fillRule: path.fillRule || 'nonzero',
+                    originX: 'left', originY: 'top',
+                });
+                p.sourceType = path.sourceType;
+                LCS.objects.attach(p, layer);
+                p.opType = path.opType;   // attach() clears the override; keep the original
+                fab.add(p);
+                created.push(p);
+            });
+            fab.remove(path);
+            fab.discardActiveObject();
+            fab.setActiveObject(new fabric.ActiveSelection(created, { canvas: fab }));
+            fab.requestRenderAll();
+        } finally {
+            LCS.history.setSuppress(false);
+            LCS.history.snapshot();
+        }
+        LCS.util.toast(`Split into ${created.length.toLocaleString()} objects`, 'success');
+    }
+
+    LCS.selection = { selectAll, group, ungroup, splitPath, isUserObject };
+})();
+
+// ============================================================
+// LCS.clipboard — copy/paste with a cascading paste offset
+// ============================================================
+(() => {
+    // How far a paste lands from the thing it was pasted from. Big enough to be visibly its
+    // own object at a working zoom, small enough to stay next to the original.
+    const PASTE_STEP_MM = 4;
+
+    // Extras the toObject patch in LCS.objects doesn't already append — same list the
+    // project/history serializers add, so a pasted copy round-trips identically.
+    const CLIP_PROPS = ['lcsName', '_cornerRadiusMm'];
+
+    // Slack when deciding "is this still where I put it", in canvas px (~0.01 mm).
+    const MOVED_EPS = 0.05;
+
+    let clip = null;    // plain-object snapshots of the copied objects, in absolute coords
+
+    // The paste cascade. `dx/dy` is the offset the previous paste landed at relative to the
+    // clipboard's own coordinates, and `marks` records where each of those objects was put.
+    // The next paste steps on from there — but only while that paste is still sitting
+    // untouched (see chainIsIntact). Move one of the copies and it stops being the thing the
+    // cascade is stacking on: the next paste restarts one step from the original, filling
+    // the hole the moved copy left instead of drifting off across the bed.
+    let chain = null;
+
+    const step = () => PASTE_STEP_MM * LCS.config.PX_PER_MM;
+
+    // Absolute canvas position, valid whether or not the object currently sits inside an
+    // ActiveSelection (children of one carry group-relative left/top).
+    function absPos(o) {
+        const m = o.calcTransformMatrix();
+        return { x: m[4], y: m[5] };
+    }
+
+    function chainIsIntact() {
+        const fab = LCS.canvas.fabric;
+        if (!chain || !chain.marks.length || !fab) return false;
+        const live = fab.getObjects();
+        return chain.marks.every(m => {
+            // Deleted, grouped, or replaced wholesale by an undo — either way it's gone.
+            if (live.indexOf(m.obj) < 0) return false;
+            const p = absPos(m.obj);
+            return Math.abs(p.x - m.x) < MOVED_EPS && Math.abs(p.y - m.y) < MOVED_EPS;
+        });
+    }
+
+    function has() { return !!(clip && clip.length); }
+
+    function copy() {
+        const fab = LCS.canvas.fabric;
+        if (!fab) return false;
+        const objs = fab.getActiveObjects().filter(LCS.selection.isUserObject);
+        if (!objs.length) { LCS.util.toast('Nothing selected to copy', 'warn'); return false; }
+
+        // Children of an ActiveSelection carry group-relative coordinates; dropping the
+        // selection restores absolute left/top so the snapshot stands on its own. The
+        // selection is put straight back, so this is invisible.
+        const act = fab.getActiveObject();
+        const multi = !!(act && act.type === 'activeSelection');
+        if (multi) fab.discardActiveObject();
+        clip = objs.map(o => o.toObject(CLIP_PROPS));
+        if (multi) fab.setActiveObject(new fabric.ActiveSelection(objs, { canvas: fab }));
+        fab.requestRenderAll();
+
+        chain = null;   // a fresh copy starts the cascade over
+        LCS.util.toast(`Copied ${objs.length} object${objs.length > 1 ? 's' : ''}`, 'success');
+        return true;
+    }
+
+    function paste() {
+        const fab = LCS.canvas.fabric;
+        if (!fab) return;
+        if (!has()) { LCS.util.toast('Clipboard is empty', 'warn'); return; }
+
+        const s = step();
+        const intact = chainIsIntact();
+        const dx = (intact ? chain.dx : 0) + s;
+        const dy = (intact ? chain.dy : 0) + s;
+
+        const sources = clip;
+        fabric.util.enlivenObjects(sources, revived => {
+            const added = [];
+            revived.forEach((obj, i) => {
+                if (!obj) return;
+                const src = sources[i];
+                const layer = LCS.state.layers().find(l => l.id === src.layerId) || LCS.state.activeLayer();
+                obj.objectId = null;    // attach() mints a fresh one; the source's would collide
+                obj.set({ left: (src.left || 0) + dx, top: (src.top || 0) + dy });
+                LCS.objects.attach(obj, layer);
+                obj.opType = src.opType || null;   // attach() clears the per-object override
+                obj.setCoords();
+                fab.add(obj);
+                added.push(obj);
+            });
+            if (!added.length) return;
+            fab.discardActiveObject();
+            fab.setActiveObject(added.length === 1
+                ? added[0]
+                : new fabric.ActiveSelection(added, { canvas: fab }));
+            fab.requestRenderAll();
+            chain = { dx, dy, marks: added.map(o => Object.assign({ obj: o }, absPos(o))) };
+        });
+    }
+
+    LCS.clipboard = { copy, paste, has };
 })();
 
 // ============================================================
@@ -2342,7 +2879,21 @@ const LCS = (window.LCS = {});
         const state = LCS.state.get();
         const m = state.machine;
 
-        const objects = fab.getObjects().filter(o => !o._lcsBed && !o._lcsGrid && !o._lcsPreview && !o._lcsNodeHandle && !o._lcsPenWorking && o.visible !== false);
+        // A group is a *selection* convenience, not a burn unit — its children can sit on
+        // different layers, and each one has to burn on its own layer's settings. Flatten
+        // groups so bucketing sees the real leaves; without this, grouping a cut outline
+        // with an engrave fill would silently cut the engraving. Every geometry helper
+        // downstream already handles a child correctly, because Fabric composes the parent
+        // group's matrix into child.calcTransformMatrix().
+        const objects = [];
+        const collect = o => {
+            if (o.visible === false) return;
+            if (o.type === 'group' && o._objects && o._objects.length) { o._objects.forEach(collect); return; }
+            objects.push(o);
+        };
+        fab.getObjects()
+            .filter(o => !o._lcsBed && !o._lcsGrid && !o._lcsPreview && !o._lcsNodeHandle && !o._lcsPenWorking)
+            .forEach(collect);
         if (!objects.length) { LCS.util.toast('Nothing on canvas', 'warn'); return null; }
 
         // Group by op order: engrave -> score -> cut
@@ -2422,8 +2973,9 @@ const LCS = (window.LCS = {});
             const suggestInterval = Math.ceil(rawSuggest / 0.05) * 0.05;
             const estAtSuggest = Math.round(stats.totalLines * m.rasterInterval / suggestInterval);
             const intervalTip = hasEngrave
-                ? `  • Set "Raster line interval" to ~${suggestInterval.toFixed(2)} mm ` +
-                  `(≈${estAtSuggest.toLocaleString()} lines for this image — coarser spacing will look more lined)\n`
+                ? `  • Set "Engrave resolution" to ~${suggestInterval.toFixed(2)} mm/line ` +
+                  `(≈${estAtSuggest.toLocaleString()} lines for this image — coarser spacing will look more lined).\n` +
+                  `    It's in the export dialog, and in the Machine tab of the right-hand panel.\n`
                 : '';
             LCS.util.toast(
                 `Job is ${stats.totalLines.toLocaleString()} lines (${sizeStr}) — above the ` +
@@ -2432,7 +2984,7 @@ const LCS = (window.LCS = {});
                 `This job is ${stats.totalLines.toLocaleString()} lines (${sizeStr}) — above the ` +
                 `${cap.toLocaleString()}-line limit for offline TF-card loading on the S10 Pro.\n\n` +
                 (hasEngrave
-                    ? `At the current ${m.rasterInterval} mm interval it likely won't load.\n\n`
+                    ? `At the current ${m.rasterInterval} mm/line engrave resolution it likely won't load.\n\n`
                     : `\n`) +
                 `To bring it under the limit:\n` +
                 intervalTip +
@@ -2636,20 +3188,27 @@ const LCS = (window.LCS = {});
         const polys = flattenToPolylines(obj);
         if (!polys.length) return { lines: [], burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } };
 
-        // Closed edge list in world px (modulo wraps open contours shut; zero-length
-        // closing edges are ignored by the straddle test below)
+        // Closed edge list in world px (modulo wraps open contours shut). Each edge carries
+        // its own y-span: the straddle test below is true exactly when yLo <= y < yHi, which
+        // is what lets the sweep keep an active list instead of re-testing every edge on
+        // every row. Horizontal (and degenerate closing) edges can never straddle, so they
+        // are dropped here rather than tested thousands of times.
         const edges = [];
         let minY = Infinity, maxY = -Infinity;
         for (const poly of polys) {
             if (poly.length < 3) continue;
             for (let i = 0; i < poly.length; i++) {
                 const a = poly[i], b = poly[(i + 1) % poly.length];
-                edges.push([a, b]);
                 if (a.y < minY) minY = a.y;
                 if (a.y > maxY) maxY = a.y;
+                if (a.y === b.y) continue;
+                // dir is the winding contribution used by the non-zero rule below
+                edges.push({ a, b, yLo: Math.min(a.y, b.y), yHi: Math.max(a.y, b.y), dir: b.y > a.y ? 1 : -1 });
             }
         }
         if (!edges.length) return { lines: [], burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } };
+        // Sweep order: cheapest way to know which edges have started by row y
+        edges.sort((p, q) => p.yLo - q.yLo);
 
         const stepPx = m.rasterInterval * PX_PER_MM;
         const passes = layer.passes || 1;
@@ -2658,20 +3217,45 @@ const LCS = (window.LCS = {});
         // (binary — every span burns at full power S). Span cleanup (sub-feature coalesce/
         // drop), boustrophedon ordering and the optimized S/S0 sweep all live in the shared
         // backend, so this path now matches the image path's encoding line-for-line.
+        //
+        // "Interior" follows the object's own fill rule, so what burns is what the canvas
+        // shows. The two rules agree on properly nested contours (the usual traced-art case)
+        // and diverge only where subpaths OVERLAP: even-odd cancels the overlap to a hole,
+        // non-zero keeps it solid. That matters now that imports merge many shapes into one
+        // compound path — guessing the rule would silently burn holes into overlapping art.
+        const evenOdd = (obj.fillRule || 'nonzero') === 'evenodd';
         const rows = [];
+        let next = 0;            // edges[0..next) have started at or before the current row
+        let active = [];         // edges straddling the current row
         for (let y = minY + stepPx / 2; y <= maxY; y += stepPx) {
+            while (next < edges.length && edges[next].yLo <= y) active.push(edges[next++]);
+            // Retire the edges we've swept past (in place — this runs once per row)
+            let w = 0;
+            for (let i = 0; i < active.length; i++) if (active[i].yHi > y) active[w++] = active[i];
+            active.length = w;
+
             const xs = [];
-            for (const [a, b] of edges) {
-                // half-open straddle test keeps vertex hits from double-counting
-                if ((a.y <= y) !== (b.y <= y)) {
-                    xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
-                }
+            for (let i = 0; i < active.length; i++) {
+                // active membership IS the half-open straddle test, so every one of these crosses
+                const e = active[i], a = e.a, b = e.b;
+                xs.push({ x: a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x), dir: e.dir });
             }
             if (xs.length < 2) continue;
-            xs.sort((p, q) => p - q);
-            // Pair crossings into interior spans (even-odd fill rule).
+            xs.sort((p, q) => p.x - q.x);
+
             const spans = [];
-            for (let k = 0; k + 1 < xs.length; k += 2) spans.push({ x0: xs[k], x1: xs[k + 1], s: S });
+            if (evenOdd) {
+                for (let k = 0; k + 1 < xs.length; k += 2) spans.push({ x0: xs[k].x, x1: xs[k + 1].x, s: S });
+            } else {
+                // Non-zero: inside wherever the accumulated winding is non-zero
+                let wind = 0, start = 0;
+                for (let k = 0; k < xs.length; k++) {
+                    const was = wind;
+                    wind += xs[k].dir;
+                    if (was === 0 && wind !== 0) start = xs[k].x;
+                    else if (was !== 0 && wind === 0) spans.push({ x0: start, x1: xs[k].x, s: S });
+                }
+            }
             if (spans.length) rows.push({ y, spans });
         }
 
@@ -2735,14 +3319,16 @@ const LCS = (window.LCS = {});
             return [pts];
         }
         if (obj.type === 'line') {
-            // Line stored as x1,y1,x2,y2 but left/top/width/height drive transforms
-            // Use path of line from its left,top to left+width/height? Use original vertices.
-            const p1 = fabric.util.transformPoint({ x: obj.x1 - obj.pathOffset?.x || 0, y: obj.y1 - obj.pathOffset?.y || 0 }, mat);
-            const p2 = fabric.util.transformPoint({ x: obj.x2 - obj.pathOffset?.x || 0, y: obj.y2 - obj.pathOffset?.y || 0 }, mat);
-            // Fallback: if pathOffset not present use (0,0) and (width,height)
-            // Simpler: compute via aCoords
-            const c = obj.calcACoords();
-            return [[c.tl, c.tr]];
+            // Endpoints, not bbox corners. calcACoords() returns the corners of the bounding
+            // box, so tl→tr is the box's TOP EDGE — right for a horizontal line and silently
+            // wrong for every other one: a 45° diagonal used to burn as a horizontal cut the
+            // width of its bounding box. calcLinePoints() gives the true endpoints in
+            // centre-relative local space, which is exactly what the matrix expects.
+            const lp = obj.calcLinePoints();
+            return [[
+                fabric.util.transformPoint({ x: lp.x1, y: lp.y1 }, mat),
+                fabric.util.transformPoint({ x: lp.x2, y: lp.y2 }, mat),
+            ]];
         }
         if (obj.type === 'polyline' || obj.type === 'polygon') {
             const pts = obj.points.map(p => fabric.util.transformPoint({ x: p.x - obj.pathOffset.x, y: p.y - obj.pathOffset.y }, mat));
@@ -2952,9 +3538,15 @@ const LCS = (window.LCS = {});
         const interval = m.rasterInterval; // mm between scan lines
         const lines = []; // only referenced by the early-return guards below
 
-        // Project object to bitmap at the scan resolution
-        const widthMm = obj.getScaledWidth() * MM_PER_PX;
-        const heightMm = obj.getScaledHeight() * MM_PER_PX;
+        // Project object to bitmap at the scan resolution. Read placement through the
+        // object's composed matrix rather than obj.left/top/getScaledWidth(): those are
+        // group-relative, so an image nested in a group would otherwise rasterize at the
+        // wrong spot and the wrong size. For a top-level object this is the same numbers.
+        const mat = obj.calcTransformMatrix();
+        const dec = fabric.util.qrDecompose(mat);
+        const worldTL = fabric.util.transformPoint({ x: -obj.width / 2, y: -obj.height / 2 }, mat);
+        const widthMm = obj.width * Math.abs(dec.scaleX) * MM_PER_PX;
+        const heightMm = obj.height * Math.abs(dec.scaleY) * MM_PER_PX;
         if (!isFinite(widthMm) || !isFinite(heightMm) || widthMm <= 0 || heightMm <= 0) {
             console.warn('Rasterize: invalid image dimensions', { widthMm, heightMm });
             return { lines, burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } };
@@ -2988,7 +3580,7 @@ const LCS = (window.LCS = {});
         try { data = ctx.getImageData(0, 0, bw, bh).data; }
         catch (e) { console.error('getImageData failed (canvas tainted?)', e); return { lines, burnMm: 0, travelMm: 0, lastPt: { x: 0, y: 0 } }; }
 
-        const worldLeft = obj.left;
+        const worldLeft = worldTL.x;
         const yieldEvery = Math.max(1, Math.round(bh / 200)); // ~200 progress ticks over the image
         console.log(`[raster] ${bw}x${bh} px, interval ${(1/pxPerMm).toFixed(3)} mm`);
 
@@ -2999,7 +3591,7 @@ const LCS = (window.LCS = {});
         const em = makeScanEmitter(layer);
         for (let row = 0; row < bh; row++) {
             const yMmLocal = (row + 0.5) / pxPerMm;
-            const yPx = obj.top + yMmLocal * PX_PER_MM;
+            const yPx = worldTL.y + yMmLocal * PX_PER_MM;
             const grp = [];
             let cur = null;
             for (let x = 0; x < bw; x++) {
@@ -3517,9 +4109,11 @@ const LCS = (window.LCS = {});
         wireToolbar();
         wireProperties();
         wireMachine();
+        wireResControls();
         wirePreview();
         wireExportModal();
         wireShortcuts();
+        wireContextMenu();
     }
 
     function wireTabs() {
@@ -3531,6 +4125,18 @@ const LCS = (window.LCS = {});
                 document.querySelector(`.panel-pane[data-pane="${tab.dataset.tab}"]`).classList.add('active');
             });
         });
+    }
+
+    function updateGroupButtons() {
+        const fab = LCS.canvas.fabric;
+        const g = $('#tb-group'), u = $('#tb-ungroup');
+        if (!fab || !g || !u) return;
+        const act = fab.getActiveObject();
+        const sel = fab.getActiveObjects();
+        g.disabled = !(act && act.type === 'activeSelection' && sel.length > 1);
+        // Ungroup covers both a real group and a merged compound path (see LCS.selection)
+        u.disabled = !(act && (act.type === 'group' ||
+            (act.type === 'path' && act.path && act.path.filter(c => c[0] === 'M').length > 1)));
     }
 
     function wireToolbar() {
@@ -3550,6 +4156,13 @@ const LCS = (window.LCS = {});
         });
         $('#tb-undo').addEventListener('click', LCS.history.undo);
         $('#tb-redo').addEventListener('click', LCS.history.redo);
+        $('#tb-group').addEventListener('click', () => LCS.selection.group());
+        $('#tb-ungroup').addEventListener('click', () => LCS.selection.ungroup());
+        // Both buttons only make sense for particular selections, so let the button state
+        // say so instead of letting the user click into a warning toast.
+        LCS.state.on('selection:change', updateGroupButtons);
+        LCS.state.on('object:modified', updateGroupButtons);
+        updateGroupButtons([]);
         $('#tb-zoom-in').addEventListener('click', () => LCS.canvas.setZoomCentered(LCS.canvas.getZoom() * 1.2));
         $('#tb-zoom-out').addEventListener('click', () => LCS.canvas.setZoomCentered(LCS.canvas.getZoom() / 1.2));
         $('#tb-zoom-fit').addEventListener('click', () => LCS.canvas.fitToBed());
@@ -3595,6 +4208,131 @@ const LCS = (window.LCS = {});
         });
         fab.discardActiveObject();
         fab.requestRenderAll();
+    }
+
+    function duplicateSelection() {
+        const fab = LCS.canvas.fabric;
+        fab.getActiveObjects().forEach(o => {
+            o.clone(clone => {
+                clone.set({ left: o.left + 10, top: o.top + 10 });
+                LCS.objects.addToCanvas(clone, LCS.state.layers().find(l => l.id === o.layerId) || LCS.state.activeLayer());
+            }, ['objectId', 'layerId', 'opType', 'sourceType', '_imgParams', '_origSrc']);
+        });
+    }
+
+    // ===== Canvas context menu =====
+    // Every entry here is also a keyboard shortcut. The menu is the discoverable half:
+    // "select two things and group them" shouldn't require knowing a key combo, and
+    // right-click is where people look for it.
+    function ctxEntries() {
+        const fab = LCS.canvas.fabric;
+        const act = fab.getActiveObject();
+        const sel = fab.getActiveObjects();
+        const subpaths = act && act.type === 'path' && act.path
+            ? act.path.filter(c => c[0] === 'M').length : 0;
+        const isCompound = subpaths > 1;
+        const canUngroup = !!(act && (act.type === 'group' || isCompound));
+        return [
+            { icon: 'group', label: 'Group', key: 'Ctrl+G',
+              enabled: !!(act && act.type === 'activeSelection' && sel.length > 1),
+              run: () => LCS.selection.group() },
+            { icon: 'ungroup', label: isCompound && (!act || act.type !== 'group') ? 'Split path' : 'Ungroup',
+              key: 'Ctrl+Shift+G', enabled: canUngroup, run: () => LCS.selection.ungroup() },
+            { sep: true },
+            { icon: 'copy', label: 'Copy', key: 'Ctrl+C', enabled: sel.length > 0,
+              run: () => LCS.clipboard.copy() },
+            // Only offered once there is something to paste — an always-present, always-grey
+            // Paste is just noise on a right-click over empty bed.
+            { icon: 'clipboard-paste', label: 'Paste', key: 'Ctrl+V', enabled: true,
+              hidden: !LCS.clipboard.has(), run: () => LCS.clipboard.paste() },
+            { icon: 'copy-plus', label: 'Duplicate', key: 'Ctrl+D', enabled: sel.length > 0, run: duplicateSelection },
+            { icon: 'trash-2', label: 'Delete', key: 'Del', enabled: sel.length > 0, danger: true, run: deleteSelection },
+            { sep: true },
+            { icon: 'box-select', label: 'Select all', key: 'Ctrl+A', enabled: true, run: () => LCS.selection.selectAll() },
+        ];
+    }
+
+    let ctxOpen = false;
+    function closeContextMenu() {
+        const menu = $('#ctx-menu');
+        if (!menu || !ctxOpen) return;
+        ctxOpen = false;
+        menu.hidden = true;
+        menu.innerHTML = '';
+        window.removeEventListener('pointerdown', onCtxDismiss, true);
+        window.removeEventListener('blur', closeContextMenu);
+        window.removeEventListener('resize', closeContextMenu);
+        window.removeEventListener('wheel', closeContextMenu, true);
+    }
+    function onCtxDismiss(e) {
+        if (!e.target.closest || !e.target.closest('#ctx-menu')) closeContextMenu();
+    }
+
+    function openContextMenu(ev) {
+        const menu = $('#ctx-menu');
+        if (!menu) return;
+        const fab = LCS.canvas.fabric;
+        closeContextMenu();
+
+        // Act on what the pointer is over: right-clicking an object outside the current
+        // selection selects it first; right-clicking bare bed clears the selection. Anything
+        // else and the menu would operate on something the user isn't pointing at.
+        const target = fab.findTarget(ev, false);
+        if (target && !fab.getActiveObjects().includes(target)) {
+            fab.discardActiveObject();
+            fab.setActiveObject(target);
+            fab.requestRenderAll();
+        } else if (!target && fab.getActiveObjects().length) {
+            fab.discardActiveObject();
+            fab.requestRenderAll();
+        }
+
+        ctxEntries().filter(item => !item.hidden).forEach(item => {
+            if (item.sep) { menu.appendChild(LCS.util.el('div', { class: 'ctx-sep' })); return; }
+            const btn = LCS.util.el('button', { class: 'ctx-item' + (item.danger ? ' danger' : '') });
+            btn.type = 'button';
+            btn.disabled = !item.enabled;
+            btn.innerHTML = `<i data-lucide="${item.icon}"></i>` +
+                `<span class="ctx-label"></span><span class="ctx-key"></span>`;
+            btn.querySelector('.ctx-label').textContent = item.label;
+            btn.querySelector('.ctx-key').textContent = item.key || '';
+            btn.addEventListener('click', () => { closeContextMenu(); item.run(); });
+            menu.appendChild(btn);
+        });
+
+        menu.hidden = false;
+        ctxOpen = true;
+        if (window.lucide) lucide.createIcons();
+
+        // Keep it on screen: flip/clamp against the viewport rather than overflowing it
+        const r = menu.getBoundingClientRect();
+        const pad = 6;
+        let x = ev.clientX, y = ev.clientY;
+        if (x + r.width + pad > window.innerWidth) x = Math.max(pad, x - r.width);
+        if (y + r.height + pad > window.innerHeight) y = Math.max(pad, y - r.height);
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+
+        window.addEventListener('pointerdown', onCtxDismiss, true);
+        window.addEventListener('blur', closeContextMenu);
+        window.addEventListener('resize', closeContextMenu);
+        window.addEventListener('wheel', closeContextMenu, true);
+    }
+
+    function wireContextMenu() {
+        const wrap = $('#canvas-wrap');
+        if (!wrap) return;
+        // Capture phase on purpose: Fabric binds its own contextmenu handler to the upper
+        // canvas and stops the event there, so a bubble-phase listener on the wrapper never
+        // runs. Capture gets us in front of it.
+        wrap.addEventListener('contextmenu', ev => {
+            ev.preventDefault();               // no browser menu over the canvas, ever
+            // Right-drag pans; only a right *click* opens the menu.
+            if (LCS.canvas.lastDragMoved()) return;
+            openContextMenu(ev);
+        }, true);
+        // Escape closes it (the global shortcut handler also runs, which is harmless here)
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeContextMenu(); });
     }
 
     function wireProperties() {
@@ -3785,10 +4523,94 @@ const LCS = (window.LCS = {});
         bind('#m-origin', 'origin');
         bind('#m-dialect', 'dialect');
         bind('#m-travel', 'travelFeed', v => +v, false);
-        bind('#m-interval', 'rasterInterval', v => +v, false);
         bind('#m-smax', 'smax', v => +v, false);
         bind('#m-grid', 'gridSpacing', v => +v);
         bind('#m-snap', 'snapTolerance', v => +v, false);
+        // #m-interval is not a plain bind — it has to keep the two resolution pickers and
+        // the explanatory note in step. See wireResControls.
+    }
+
+    // ===== Engrave resolution (raster scan-line spacing) =====
+    // One value, surfaced in two places: the Machine panel, where it lives, and the export
+    // dialog, where its consequence — the line count — is on screen. Touching either one
+    // re-syncs the other, and the export dialog re-runs the generator so the count updates
+    // in place. Previously this only existed as "Raster line interval (mm)" six rows down a
+    // settings tab, which is effectively nowhere.
+    const RES_MIN = 0.05, RES_MAX = 2;
+    // +1e-6 because 25.4/0.4 lands at 63.4999999999 in binary floating point, and "63 dpi"
+    // next to a round 0.40 mm reads like an arithmetic bug.
+    const dpiOf = mm => Math.round(LCS.config.MM_PER_INCH / mm + 1e-6);
+    const resKey = mm => (+mm).toFixed(2);
+
+    function fillResSelect(sel) {
+        if (!sel) return;
+        sel.innerHTML = '';
+        LCS.config.RASTER_PRESETS.forEach(p => {
+            // Kept short deliberately: the Machine panel's select is ~150 px wide and
+            // truncates anything longer. The mm/line unit is spelled out by the row below it.
+            sel.appendChild(LCS.util.el('option', { value: resKey(p.mm) },
+                [`${p.name} — ${p.mm.toFixed(2)} mm (${dpiOf(p.mm)} dpi)`]));
+        });
+        sel.appendChild(LCS.util.el('option', { value: 'custom' }, ['Custom…']));
+    }
+
+    function syncResControls() {
+        const mm = LCS.state.machine().rasterInterval;
+        const known = LCS.config.RASTER_PRESETS.some(p => resKey(p.mm) === resKey(mm));
+        ['m-res', 'export-res'].forEach(id => {
+            const s = document.getElementById(id);
+            if (s) s.value = known ? resKey(mm) : 'custom';
+        });
+        // Only write the number field when it actually disagrees, or typing into it fights
+        // this function on every keystroke.
+        const num = $('#m-interval');
+        if (num && +num.value !== mm) num.value = mm;
+        const note = $('#m-res-note');
+        if (note) note.textContent =
+            `${mm} mm between scan lines ≈ ${dpiOf(mm)} dpi. Halving this doubles both the ` +
+            `engrave time and the G-code line count.`;
+    }
+
+    function setRasterInterval(mm) {
+        const m = LCS.state.machine();
+        m.rasterInterval = LCS.util.clamp(+mm || m.rasterInterval, RES_MIN, RES_MAX);
+        syncResControls();
+    }
+
+    async function regenerateForExport() {
+        // The user is deliberately turning this dial while looking at the line count, so
+        // force past the safety cap instead of stacking a confirm() on top of the open
+        // modal — openExportModal already renders an over-cap count in red.
+        const res = await LCS.gcode.generate({ force: true });
+        if (res) openExportModal(res);
+    }
+
+    // Null-guarded throughout: init() is one unbroken chain, so a missing element here would
+    // take the keyboard shortcuts and the context menu down with it.
+    function wireResControls() {
+        const mres = $('#m-res'), xres = $('#export-res'), num = $('#m-interval');
+        fillResSelect(mres);
+        fillResSelect(xres);
+        if (mres) mres.addEventListener('change', e => {
+            if (e.target.value === 'custom') { syncResControls(); if (num) num.focus(); return; }
+            setRasterInterval(e.target.value);
+        });
+        if (xres) xres.addEventListener('change', async e => {
+            if (e.target.value === 'custom') { syncResControls(); return; }
+            setRasterInterval(e.target.value);
+            await regenerateForExport();
+        });
+        if (num) {
+            // 'input' tracks typing without clamping (clamping mid-keystroke fights the
+            // caret); 'change' commits and clamps once the field is left.
+            num.addEventListener('input', () => {
+                const m = LCS.state.machine();
+                m.rasterInterval = +num.value || m.rasterInterval;
+                syncResControls();
+            });
+            num.addEventListener('change', () => setRasterInterval(num.value));
+        }
+        syncResControls();
     }
 
     function wirePreview() {
@@ -3827,6 +4649,21 @@ const LCS = (window.LCS = {});
         // predict whether the controller will choke before the user sends the job.
         const over = stats.totalLines > LCS.config.MAX_GCODE_LINES;
         const sizeStr = LCS.util.fmtBytes(stats.estBytes ?? (LCS.state.get().gcode || '').length);
+        // The resolution picker sits right above the line count on purpose: when a job comes
+        // out too big, the fix is almost always one step coarser, and the number below
+        // updates the moment you change it.
+        syncResControls();
+        const mm = LCS.state.machine().rasterInterval;
+        const note = $('#export-res-note');
+        if (note) {
+            note.classList.toggle('warn', over);
+            note.textContent = over
+                ? `Over the ${LCS.config.MAX_GCODE_LINES.toLocaleString()}-line offline limit. ` +
+                  `Engrave fills scan at ${mm} mm/line — one step coarser roughly halves the ` +
+                  `line count. Cut and score paths are unaffected by this setting.`
+                : `Scan-line spacing for engrave fills — the main lever on file size. ` +
+                  `Cut and score paths are unaffected.`;
+        }
         $('#export-stats').innerHTML = `
             <div${over ? ' style="color:var(--danger,#ef4444)"' : ''}>Lines: ${stats.totalLines.toLocaleString()}${over ? ' ⚠' : ''}</div>
             <div${over ? ' style="color:var(--danger,#ef4444)"' : ''}>Size: ${sizeStr}</div>
@@ -3854,6 +4691,7 @@ const LCS = (window.LCS = {});
         set('m-origin', m.origin); set('m-dialect', m.dialect);
         set('m-travel', m.travelFeed); set('m-interval', m.rasterInterval);
         set('m-smax', m.smax); set('m-grid', m.gridSpacing); set('m-snap', m.snapTolerance);
+        syncResControls();   // keeps both resolution pickers and the note on the loaded value
     }
 
     // Reflect restored grid/snap state on their toolbar toggle buttons.
@@ -3863,10 +4701,30 @@ const LCS = (window.LCS = {});
         const sn = $('#tb-snap-toggle'); if (sn) sn.classList.toggle('active', s.snapEnabled);
     }
 
+    // Only a field you can actually *type* into owns the browser's native undo/select-all.
+    // A range slider, dropdown, checkbox or colour swatch has no text to undo — and this
+    // panel is full of them, so treating every focused control as "hands off" is what made
+    // Ctrl+Z look broken: click the Power slider or the Operation dropdown and every
+    // shortcut went dead until you clicked back on the canvas.
+    const TEXT_INPUT_TYPES = /^(text|number|search|url|email|password|tel|date|time|datetime-local|month|week)$/;
+    function isTextEntry(t) {
+        if (!t) return false;
+        if (t.isContentEditable) return true;
+        if (t.tagName === 'TEXTAREA') return true;   // includes Fabric's hidden IText textarea
+        if (t.tagName !== 'INPUT') return false;
+        return TEXT_INPUT_TYPES.test((t.type || 'text').toLowerCase());
+    }
+    function isFormControl(t) {
+        return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+    }
+
     function wireShortcuts() {
         document.addEventListener('keydown', e => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+            // Ctrl/Cmd combos are app commands wherever focus is, except inside real text
+            // entry. Bare keys and arrows still belong to any focused control (type-ahead in
+            // a <select>, arrow-nudging a slider), so those keep the wider guard below.
             if (e.ctrlKey || e.metaKey) {
+                if (isTextEntry(e.target)) return;
                 const k = e.key.toLowerCase();
                 if (k === 's' && !e.shiftKey) { e.preventDefault(); LCS.project.save(); }
                 else if (k === 'o') { e.preventDefault(); $('#project-input').click(); }
@@ -3875,18 +4733,13 @@ const LCS = (window.LCS = {});
                 else if (k === 'a') { e.preventDefault(); LCS.selection.selectAll(); }
                 else if (k === 'g' && !e.shiftKey) { e.preventDefault(); LCS.selection.group(); }
                 else if (k === 'g' &&  e.shiftKey) { e.preventDefault(); LCS.selection.ungroup(); }
-                else if (k === 'd') {
-                    e.preventDefault();
-                    const fab = LCS.canvas.fabric;
-                    fab.getActiveObjects().forEach(o => {
-                        o.clone(clone => {
-                            clone.set({ left: o.left + 10, top: o.top + 10 });
-                            LCS.objects.addToCanvas(clone, LCS.state.layers().find(l => l.id === o.layerId) || LCS.state.activeLayer());
-                        }, ['objectId', 'layerId', 'opType', 'sourceType', '_imgParams', '_origSrc']);
-                    });
-                }
+                else if (k === 'd') { e.preventDefault(); duplicateSelection(); }
+                else if (k === 'c') { e.preventDefault(); LCS.clipboard.copy(); }
+                else if (k === 'v') { e.preventDefault(); LCS.clipboard.paste(); }
                 return;
             }
+            // Bare keys: a focused control gets them (slider arrows, <select> type-ahead)
+            if (isFormControl(e.target) || isTextEntry(e.target)) return;
             if (e.key.startsWith('Arrow')) {
                 const fab = LCS.canvas.fabric;
                 const sel = fab.getActiveObject();

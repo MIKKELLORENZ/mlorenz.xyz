@@ -164,18 +164,27 @@ textarea { resize: vertical; }
 
 /* Responsive toolbar: progressively shed text as the window narrows so every control stays
    visible (matters on high-DPI / scaled displays where the CSS viewport is small). Order of
-   sacrifice: brand wordmark → secondary button labels → primary button label. Icons remain. */
-@media (max-width: 1550px) {
+   sacrifice: brand wordmark → secondary button labels → primary button label. Icons remain.
+   Each breakpoint moved up ~90px when the Group/Ungroup cluster was added — that cluster is
+   ~85px wide, and without the shift the primary Generate button fell off the right edge
+   between roughly 1440 and 1600. */
+@media (max-width: 1640px) {
     .brand span { display: none; }          /* keep just the zap icon */
     .brand { margin-right: 4px; }
 }
-@media (max-width: 1450px) {
+@media (max-width: 1540px) {
     .tbtn:not(.primary) span { display: none; }
     .tbtn:not(.primary) { padding: 6px; gap: 0; }
 }
-@media (max-width: 1180px) {
+@media (max-width: 1270px) {
     .tbtn.primary span { display: none; }   /* last resort: Generate becomes its play icon */
     .tbtn.primary { padding: 6px 8px; }
+    /* Nothing left to shed but chrome: tighten the icon clusters so the ~14 icon buttons
+       claw back the width the Group/Ungroup pair costs, instead of pushing Generate into
+       the scroll region. */
+    .tbtn.icon-only { padding: 4px; }
+    .toolbar-group { padding: 2px; gap: 1px; }
+    .toolbar-sep { margin: 0 1px; }
 }
 
 /* LEFT TOOLS */
@@ -388,6 +397,9 @@ textarea { resize: vertical; }
 .obj-row.dragging { opacity: 0.35; }
 .obj-row.drop-above { border-top-color: var(--accent); }
 .obj-row.drop-below { border-bottom-color: var(--accent); }
+/* "…N more" note when a layer holds more objects than the panel lists (see MAX_OBJ_ROWS).
+   Deliberately NOT an .obj-row so the drag-and-drop wiring skips it. */
+.obj-more { padding: 4px 6px 4px 10px; font-size: 11px; font-style: italic; color: var(--text-muted); }
 .obj-grip { opacity: 0.25; cursor: grab; display: inline-flex; flex-shrink: 0; }
 .obj-grip i, .obj-icon i { width: 12px; height: 12px; }
 .obj-icon { color: var(--text-muted); display: inline-flex; flex-shrink: 0; }
@@ -421,11 +433,24 @@ textarea { resize: vertical; }
 }
 .row label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
 .row input, .row select, .row textarea { width: 100%; }
+/* Label above the control instead of beside it, for a select whose option text won't fit
+   the 96px-label grid — the resolution picker's "Normal — 0.20 mm (127 dpi)" truncates. */
+.row.wide { grid-template-columns: 1fr; gap: 4px; }
+
 .row.check {
     display: flex; align-items: center; gap: 6px;
 }
 .row.check input { width: auto; }
 .row.check label { color: var(--text); font-size: 12px; }
+
+/* Explanatory line under a .row — sits in the value column, not the label column. */
+.field-note {
+    font-size: 10px;
+    line-height: 1.45;
+    color: var(--text-muted);
+    margin: -4px 0 10px 104px;   /* 96px label column + 8px gap */
+}
+.field-note.warn { color: var(--warn, #f59e0b); }
 
 .slider-group {
     display: flex; align-items: center; gap: 8px;
@@ -520,6 +545,40 @@ textarea { resize: vertical; }
 .muted { color: var(--text-muted); font-size: 11px; }
 
 /* TOAST */
+/* CANVAS CONTEXT MENU */
+.ctx-menu {
+    position: fixed;
+    z-index: 300;                /* above the toasts, below nothing else */
+    min-width: 190px;
+    padding: 4px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    font-size: 12px;
+    user-select: none;
+}
+.ctx-menu[hidden] { display: none; }
+.ctx-item {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0; border-radius: 5px;
+    background: transparent;
+    color: var(--text);
+    font: inherit; text-align: left;
+    cursor: pointer;
+}
+.ctx-item i { width: 14px; height: 14px; flex-shrink: 0; color: var(--text-muted); }
+.ctx-item:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.ctx-item:hover:not(:disabled) i,
+.ctx-item:hover:not(:disabled) .ctx-key { color: #fff; }
+.ctx-item:disabled { opacity: 0.35; cursor: default; }
+.ctx-item.danger:hover:not(:disabled) { background: var(--danger, #ef4444); }
+.ctx-label { flex: 1; white-space: nowrap; }
+.ctx-key { font-family: var(--mono); font-size: 10.5px; color: var(--text-muted); }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+
 .toast-stack {
     position: fixed; bottom: 16px; right: 16px;
     display: flex; flex-direction: column; gap: 8px;
@@ -605,6 +664,8 @@ body.mob-shell .topbar .tbtn { padding: 6px 8px; }
    pretending to be a 300px column. */
 body.mob-shell .mob-sheet .panel-body { padding: 10px 2px 20px; }
 body.mob-shell .mob-sheet .row { grid-template-columns: 110px 1fr; }
+body.mob-shell .mob-sheet .row.wide { grid-template-columns: 1fr; }
+body.mob-shell .mob-sheet .field-note { margin-left: 118px; }   /* 110px label + 8px gap */
 body.mob-shell .mob-sheet .toast-stack { display: none; }
 
 /* Toasts land under the bottom bar otherwise. */

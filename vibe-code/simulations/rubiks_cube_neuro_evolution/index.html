@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rubik's Cube Neuroevolution — a brain that solves by looking</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
+</head>
+<body>
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Rubik's Cube Neuroevolution</h2>
+        <p>A neural network that solves a Rubik's cube <b>by looking at it</b>. Its
+           only input is a 32&times;16 pixel rendering of the cube from two corners —
+           no facelet list, no colour counts, no solver. It answers with one of eight
+           quarter turns, gets a fresh picture, and answers again.</p>
+        <p class="intro-sub">No solver and no move search — just the picture and eight
+           buttons. Two brains ship: the one that solves depth 7 was trained by gradient
+           descent, and the genetic-algorithm champion this project is named for is one
+           click away in the Brain panel.</p>
+        <div class="intro-choices">
+            <button id="intro-watch" class="intro-choice primary">
+                <b>▶&nbsp; Watch it solve</b>
+                <small>The best brain, at a speed you can follow</small>
+            </button>
+            <button id="intro-eyes" class="intro-choice">
+                <b>👁&nbsp; See what it sees</b>
+                <small>Solve with the raw pixel input blown up beside the cube</small>
+            </button>
+            <button id="intro-bench" class="intro-choice">
+                <b>📊&nbsp; Test it on 400 fresh cubes</b>
+                <small>Solve rate by scramble depth, against untrained brains</small>
+            </button>
+            <button id="intro-play" class="intro-choice">
+                <b>🎮&nbsp; Scramble it yourself</b>
+                <small>Same eight buttons the network has</small>
+            </button>
+        </div>
+        <button id="intro-explore" class="intro-dismiss">or just explore the controls →</button>
+    </div>
+</div>
+
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Rubik's Cube Neuroevolution</h1>
+            <span class="brand-sub">solved from pixels · nothing but the picture</span>
+        </div>
+        <div id="top-stats">
+            <span class="tstat" title="Moves used out of the budget for this scramble">move <b id="stat-move">0/0</b></span>
+            <span class="tstat" title="True number of quarter turns to a solved cube, from a breadth-first table. Shown for your benefit — the network cannot see it.">distance <b id="stat-dist">–</b></span>
+            <span class="tstat" title="Facelets carrying their own face's colour, out of 54">stickers <b id="stat-stick">–</b></span>
+            <span class="tstat badge" id="stat-state">ready</span>
+        </div>
+        <div id="top-actions" data-mob-bar>
+            <button id="btn-play" class="btn primary">▶ Play</button>
+            <button id="btn-step" class="btn">Step</button>
+            <button id="btn-new" class="btn">New cube</button>
+        </div>
+    </header>
+
+    <main id="layout">
+        <aside id="panel-left" data-mob-label="Controls">
+            <section class="card">
+                <h2>Playback</h2>
+                <label class="slider-row" title="How many moves per second the brain plays. Around 1.5 is followable; the trainer runs this same loop with no delay at all.">
+                    <span>Speed <b id="lb-speed">1.5 moves/s</b></span>
+                    <input type="range" id="sl-speed" min="1" max="80" value="15" step="1">
+                </label>
+                <label class="check-row" title="Spin the moving layer instead of snapping it. Costs nothing but makes what happened legible.">
+                    <input type="checkbox" id="chk-anim" checked><span>Animate the turns</span>
+                </label>
+                <label class="check-row" title="Stop at the end of an episode instead of scrambling again.">
+                    <input type="checkbox" id="chk-loop" checked><span>Auto-scramble when finished</span>
+                </label>
+                <div class="btn-row">
+                    <button id="btn-reset" class="btn">Re-scramble</button>
+                    <button id="btn-solvedcube" class="btn">Solved cube</button>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>The cube it is given</h2>
+                <label class="slider-row" title="How many random quarter turns the scramble uses. The true distance can be shorter — the readout at the top shows the real number.">
+                    <span>Scramble depth <b id="lb-depth">3 turns</b></span>
+                    <input type="range" id="sl-depth" min="1" max="12" value="3" step="1">
+                </label>
+                <p class="hint" id="hint-depth"></p>
+            </section>
+
+            <section class="card">
+                <h2>Measure it</h2>
+                <label class="slider-row" title="Cubes per depth. Every brain tested is given the identical scrambles.">
+                    <span>Cubes per depth <b id="lb-bench">80</b></span>
+                    <input type="range" id="sl-bench" min="20" max="200" value="80" step="20">
+                </label>
+                <button id="btn-bench" class="btn wide primary">Run the test</button>
+                <p class="hint">Replays held-out scrambles at full speed and compares the
+                   selected brain with untrained ones, on the same cubes.</p>
+                <div id="bench-out"></div>
+            </section>
+
+            <section class="card">
+                <h2>Turn it yourself</h2>
+                <div id="manual-keys"></div>
+                <p class="hint">Only four faces turn — top, bottom, left, right — which is
+                   the same action space the network has. Front and back are never
+                   touched, so a cube scrambled with them may not be solvable here.</p>
+            </section>
+        </aside>
+
+        <div id="stage">
+            <div id="views">
+                <div class="view-box big">
+                    <canvas id="view-front"></canvas>
+                    <span class="view-tag">drag to orbit</span>
+                </div>
+                <div class="view-col">
+                    <div class="view-box">
+                        <canvas id="view-net"></canvas>
+                        <span class="view-tag" id="net-tag">inside the network</span>
+                    </div>
+                    <div class="view-box eyes">
+                        <canvas id="view-input"></canvas>
+                        <span class="view-tag" id="input-tag">what the brain sees</span>
+                    </div>
+                </div>
+            </div>
+            <div id="movebar"></div>
+        </div>
+
+        <aside id="panel-right" data-mob-label="Brain">
+            <section class="card">
+                <h2>Its eight outputs</h2>
+                <div id="outputs"></div>
+                <p class="hint">The largest one is the move it plays. They start life
+                   nearly identical, so which turn wins is decided by the smallest
+                   weights in the network.</p>
+            </section>
+            <section class="card">
+                <h2>This episode</h2>
+                <div class="kv"><span>scramble</span><b id="ep-seq">–</b></div>
+                <div class="kv"><span>its moves</span><b id="ep-moves">–</b></div>
+                <div class="kv"><span>distance</span><b id="ep-dist">–</b></div>
+                <div class="kv"><span>closest reached</span><b id="ep-best">–</b></div>
+                <div class="kv"><span>undid itself</span><b id="ep-undo">–</b></div>
+                <canvas id="chart-dist" width="280" height="90"></canvas>
+                <p class="hint">True distance to solved after each move. It can only ever
+                   step by one — these turns flip the cube's corner parity, so no move
+                   leaves the distance unchanged.</p>
+            </section>
+            <section class="card">
+                <h2>Recent episodes</h2>
+                <div id="log"></div>
+            </section>
+        </aside>
+    </main>
+</div>
+
+<script src="cube.js"></script>
+<script src="vision.js"></script>
+<script src="nn.js"></script>
+<script src="rewards.js"></script>
+<script src="env.js"></script>
+<script src="evaluate.js"></script>
+<script src="evolution.js"></script>
+<script src="configs.js"></script>
+<!-- The gradient-distilled brain, which is the one that actually solves depth 7. The
+     evolved champion it replaced is kept at training/evolved_brain.js and is not loaded
+     by the page — see the README. -->
+<script src="default_brain.js"></script>
+<script src="view.js"></script>
+<script src="main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
+</body>
+</html>

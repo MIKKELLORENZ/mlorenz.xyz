@@ -64,7 +64,42 @@ const ARM = {
      * meant to end up in, and nothing can ever be picked up. 55 mm leaves ~2 cm
      * of margin. It is a jaw length, not a tuning constant, and the test suite
      * asserts the relationship rather than the number. */
-    graspOffset: 0.055
+    graspOffset: 0.055,
+
+    /* EYE-IN-HAND STEREO RIG.
+     *
+     * Two cameras on the wrist, looking down the approach vector — the
+     * direction the jaws point and close along. Defined here rather than in
+     * render.js because this is arm hardware, not decoration: the same geometry
+     * has to drive the on-screen preview and any headless pipeline that renders
+     * what the arm can actually see.
+     *
+     * The baseline runs along the JAW-OPENING axis, which puts the disparity on
+     * the image's horizontal axis where every stereo method expects it, and
+     * keeps both eyes level with each other however the wrist is rotated.
+     *
+     * The pair sits on a BRACKET, held `mount` clear of the wrist axis, and is
+     * TOED IN at a point just past the grasp point rather than aimed straight
+     * down the approach vector. Both are forced by what the first version
+     * looked like: eyes on the axis and parallel put the gripper housing 26 mm
+     * in front of a 74-degree lens, so the entire frame was the back of the
+     * arm's own hand. A hand camera does need to see its own jaws — without
+     * them there is no way to tell "the ball is between the pads" from "the
+     * ball is a centimetre short", which is the one distinction the grasp turns
+     * on — but it needs them at the EDGE of the frame, not filling it.
+     *
+     * FOV is wide because the working distance is centimetres: at a narrow
+     * angle the ball fills the frame just as the hand arrives and everything
+     * else leaves it. `near` is small for the same reason. */
+    eye: {
+        back: 0.030,        // how far behind the tip, along -approach
+        baseline: 0.044,    // eye separation, along the jaw-opening axis
+        mount: 0.052,       // how far OFF the wrist axis the bracket holds them
+        lookAhead: 0.020,   // the pair is toed in this far past the grasp point
+        fov: 74,
+        near: 0.006,
+        far: 6
+    }
 };
 
 /* READY pose — solved, not guessed: the joint angles that put the grasp point
@@ -86,6 +121,12 @@ class Arm {
         this.target = HOME.slice();
         this.noise = opts.noise || 0;
         this.rng = opts.rng || null;
+        /* Optional world-supplied predicate `solid(fk) -> bool`: "does this pose
+         * put any part of the arm inside something solid?" The arm itself knows
+         * nothing about benches or buckets, so the world hands it one. Without
+         * it the arm is a ghost — see the note on `step`. */
+        this.solid = opts.solid || null;
+        this.contacts = 0;             // ticks in which a move was blocked
         this._fk = null;
         this.effort = 0;               // accumulated |commanded change|, for smoothness costs
         this.limitHits = 0;
@@ -137,8 +178,36 @@ class Arm {
         this.target[4] = gt;
     }
 
-    /* One physics substep. */
+    /* One physics substep.
+     *
+     * SOLIDS ARE ENFORCED HERE, NOT BY A PENALTY. Before this existed the bench
+     * and the buckets were scenery: the FK was exact, the renderer drew exactly
+     * what the FK said, and what the FK said was that the arm was 97 mm inside
+     * the table. A gen-224 GA champion spent 22.6% of its ticks with a link
+     * inside the bench, punched through the table top 393 times and through a
+     * bucket wall 117 times across 40 episodes. It looked like a rendering bug
+     * and was not: the arm really was swinging through the furniture, so the
+     * workspace the GA was searching did not exist.
+     *
+     * The fix is a position constraint rather than a reward, because a reward
+     * for not clipping is one more thing to trade off and the fleet would price
+     * it. A servo that runs into the bench simply stops, which is what a real
+     * one does. Implementation: take the step, and if the new pose penetrates,
+     * bisect back along the joint-space segment to the last free pose. Six
+     * iterations resolve contact to 1/64 of a tick's motion (<0.6 mm at the
+     * fastest observed tip speed).
+     *
+     * Two invariants make this safe. The start pose is always free (HOME is
+     * free and we only ever move to free poses), so the bisection always has a
+     * free end to fall back to and the arm can never wedge. And the solid
+     * regions are VOLUMES, not shells, so a fast joint cannot tunnel: any pose
+     * that ends up on the far side of a bucket wall is still inside the solid.
+     *
+     * The gripper (joint 4) is excluded — aperture does not enter the FK, and
+     * freezing the hand because the elbow touched the bench would make "let go"
+     * unreachable at exactly the moment it matters. */
     step(dt) {
+        const qPrev = this.solid ? this.q.slice() : null;
         for (let j = 0; j < 5; j++) {
             const [lo, hi] = ARM.limits[j];
             let want = this.target[j];
@@ -154,6 +223,20 @@ class Arm {
             this.q[j] = nq;
         }
         this.updateFK();
+        if (this.solid && this.solid(this._fk)) {
+            const qNew = this.q.slice();
+            let free = 0, hit = 1;
+            for (let it = 0; it < 6; it++) {
+                const m = (free + hit) / 2;
+                for (let j = 0; j < 4; j++) this.q[j] = qPrev[j] + (qNew[j] - qPrev[j]) * m;
+                this.updateFK();
+                if (this.solid(this._fk)) hit = m; else free = m;
+            }
+            for (let j = 0; j < 4; j++) this.q[j] = qPrev[j] + (qNew[j] - qPrev[j]) * free;
+            this.updateFK();
+            for (let j = 0; j < 4; j++) this.qd[j] = (this.q[j] - qPrev[j]) / dt;
+            this.contacts++;
+        }
     }
 
     /* Forward kinematics -> world positions of every joint and the grasp point. */
@@ -181,6 +264,56 @@ class Arm {
         return this._fk;
     }
 
+    /* World-space pose of each eye: origin and an orthonormal basis with
+     * `forward` down the approach vector and `right` along the baseline.
+     *
+     * Returned as plain objects rather than three.js types so this stays usable
+     * from a headless process, which is the whole reason it lives in arm.js. */
+    eyes() {
+        const f = this._fk, E = ARM.eye;
+        const fwd = f.approach;
+        // the jaw-opening axis: horizontal, perpendicular to the reach plane
+        const right = { x: -f.radial.z, y: 0, z: f.radial.x };
+        // up completes the frame; recomputed rather than assumed vertical so the
+        // pair stays rigidly attached to the wrist when the wrist tilts
+        const up = {
+            x: right.y * fwd.z - right.z * fwd.y,
+            y: right.z * fwd.x - right.x * fwd.z,
+            z: right.x * fwd.y - right.y * fwd.x
+        };
+        const un = Math.hypot(up.x, up.y, up.z) || 1;
+        up.x /= un; up.y /= un; up.z /= un;
+        // the point both eyes are aimed at: just past where a ball gets captured
+        const aim = {
+            x: f.tip.x + fwd.x * (ARM.graspOffset + E.lookAhead),
+            y: f.tip.y + fwd.y * (ARM.graspOffset + E.lookAhead),
+            z: f.tip.z + fwd.z * (ARM.graspOffset + E.lookAhead)
+        };
+        const mk = (side) => {
+            const o = {
+                x: f.tip.x - fwd.x * E.back + right.x * side * E.baseline / 2 + up.x * E.mount,
+                y: f.tip.y - fwd.y * E.back + right.y * side * E.baseline / 2 + up.y * E.mount,
+                z: f.tip.z - fwd.z * E.back + right.z * side * E.baseline / 2 + up.z * E.mount
+            };
+            let fx = aim.x - o.x, fy = aim.y - o.y, fz = aim.z - o.z;
+            const fn = Math.hypot(fx, fy, fz) || 1;
+            fx /= fn; fy /= fn; fz /= fn;
+            // re-orthogonalise the baseline against the toed-in forward axis, so
+            // the disparity stays on the image's horizontal axis
+            const d = right.x * fx + right.y * fy + right.z * fz;
+            let rx = right.x - fx * d, ry = right.y - fy * d, rz = right.z - fz * d;
+            const rn = Math.hypot(rx, ry, rz) || 1;
+            rx /= rn; ry /= rn; rz /= rn;
+            return {
+                origin: o,
+                forward: { x: fx, y: fy, z: fz },
+                right: { x: rx, y: ry, z: rz },
+                up: { x: ry * fz - rz * fy, y: rz * fx - rx * fz, z: rx * fy - ry * fx }
+            };
+        };
+        return [mk(-1), mk(+1)];        // left eye, right eye
+    }
+
     fk() { return this._fk; }
     graspPoint() { return this._fk.grasp; }
     aperture() { return this.q[4]; }
@@ -206,6 +339,7 @@ class Arm {
         this.target = HOME.slice();
         this.effort = 0;
         this.limitHits = 0;
+        this.contacts = 0;
         this.updateFK();
     }
 }

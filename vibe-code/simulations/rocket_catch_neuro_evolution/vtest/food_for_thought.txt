@@ -1,0 +1,61 @@
+Evolution runs but never produces landing behavior. For each question below, answer with
+concrete evidence (numbers, plots, code references) — not "yes, that's handled."
+
+1. SOLVABILITY: Can a hand-written controller (PID/LQR, or even a scripted suicide burn)
+   land in this exact sim, with these exact actuator limits and observations? If not, the
+   GA is innocent — the environment is the bug. Report TWR at near-dry mass and minimum
+   throttle: if min_throttle × TWR > 1, hovering is impossible and only a timed hoverslam
+   works. Confirm control authority is sufficient at every phase.
+
+2. FITNESS GRADIENT: Plot the fitness distribution of generation 0. If all random genomes
+   score roughly the same (e.g., everything crashes and gets a flat penalty), selection has
+   zero signal. Does fitness improve smoothly as behavior gets marginally better — closer to
+   pad, slower at impact, more upright? List every fitness term, its weight, and its typical
+   magnitude at gen 0 vs. a hypothetical near-landing. Then hunt for degenerate optima: can a
+   genome score well by hovering until timeout, drifting away slowly, or dying early?
+
+3. CURRICULUM: Are genomes evaluated on the full problem from day one? Show results of
+   starting trivially easy (5–20 m up, upright, near-zero velocity, above the pad) and
+   widening the initial-condition envelope only as success rate rises. The flip maneuver
+   especially should not be expected to emerge cold from random weights.
+
+4. OBSERVATIONS: List every NN input, its frame, and its normalization. Is position
+   expressed relative to the pad? Are all inputs scaled to roughly [-1, 1]? How is attitude
+   encoded — raw Euler angles will pass through gimbal-lock territory (~90° pitch) during
+   the belly flop; use quaternion components or rotation-matrix rows instead. Are angular
+   rates, vertical velocity, and fuel fraction included?
+
+5. ACTIONS: How do raw NN outputs map to actuators? Confirm: throttle clamped to
+   [min_throttle, 1] with realistic relight/ignition constraints, gimbal with both
+   deflection AND rate limits, flaps/RCS for the orbiter, and first-order actuator lag.
+   Are outputs squashed (tanh) then mapped, or raw and saturating?
+
+6. EVALUATION NOISE: Are initial conditions randomized per rollout? If yes, how many
+   rollouts per genome, and do all genomes in a generation share the same seed set (common
+   random numbers)? One noisy rollout per genome means selection amplifies luck, not skill.
+   If instead everything is one fixed scenario, flag the overfitting risk.
+
+7. GA MECHANICS: Report population size, genome length (weight count), mutation operator
+   and sigma, crossover scheme, elitism count, and any diversity mechanism (speciation,
+   novelty, fitness sharing). Is crossover on direct-encoded weights helping or scrambling
+   (competing-conventions problem)? Plot best/mean fitness and population diversity over
+   generations — is this premature convergence or a flat landscape?
+
+8. NETWORK SIZE: How many parameters are being evolved? Direct-encoded GAs degrade badly
+   past a few thousand weights. Is the net feedforward (fine if state is fully observable)
+   or recurrent (harder to evolve — justify it)? Does the output activation range match the
+   action mapping?
+
+9. TIME AND TERMINATION: What is the control frequency vs. physics dt? What exactly counts
+   as "landed" (contact speed, lateral speed, tilt angle, sustained for N steps) and as
+   "crashed"? Does the timeout cut off genomes mid-descent in ways that punish slower but
+   correct approaches? Verify the contact/leg model doesn't make touchdown physically chaotic.
+
+10. ORBITER PHASING: Is one network expected to handle aero belly descent, the flip, and the
+    terminal burn in a single policy? Compare against: separate controllers per phase with an
+    explicit handoff, a phase flag as input, or evolving the booster case first and
+    transferring. Also verify the aero model itself: do the flaps actually provide enough
+    pitch authority, and is center-of-pressure vs. CG placement stable in belly attitude?
+
+Finish with: (a) the top 3 suspected root causes ranked by evidence, (b) the single cheapest
+experiment to confirm each, and (c) trajectory plots of the current best genome per phase.

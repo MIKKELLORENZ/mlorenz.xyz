@@ -16,6 +16,27 @@
  */
 "use strict";
 
+/* How often a mutated weight is thrown away and redrawn rather than nudged.
+ *
+ * A few percent is healthy for a population evolving from random: it keeps
+ * genuinely new values entering the pool long after the additive noise has
+ * annealed down. It is also completely safe there, because every brain in such a
+ * run was *selected under this operator* — a lineage that could not survive the
+ * occasional reset died long ago, so the survivors are robust to it by
+ * construction.
+ *
+ * A network fitted by gradient descent has never faced it, and is not. Measured
+ * on the round-6 brain: at rate 0.12 the reset branch touches about 20 of its
+ * 5,511 weights, and that alone takes it from 774 skill to 318 — while the same
+ * mutation with resets disabled leaves it at 754. The additive sigma was never
+ * the problem; twenty random numbers were.
+ *
+ * So it is a knob rather than a constant, defaulting to the value every evolved
+ * champion in this project was produced under. Turn it down when fine-tuning a
+ * solution the GA did not build. */
+let MUT_RESET = 0.03;
+function setMutReset(p) { MUT_RESET = Math.max(0, Math.min(1, p)); return MUT_RESET; }
+
 function mulberry32(seed) {
     let a = seed >>> 0;
     return function () {
@@ -141,7 +162,7 @@ class Genome {
             const w = this.weights[l];
             for (let i = 0; i < w.length; i++) {
                 if (rng() < rate) {
-                    if (rng() < 0.03) w[i] = gaussRand(rng) * 0.5;          // rare full reset
+                    if (rng() < MUT_RESET) w[i] = gaussRand(rng) * 0.5;     // rare full reset
                     else w[i] += gaussRand(rng) * sigma;
                 }
             }
@@ -492,6 +513,6 @@ function archContract(rng) {
 if (typeof module !== "undefined") {
     module.exports = {
         Genome, Net, ConvNet, mulberry32, gaussRand,
-        makeNet, netFromJSON, setArch, archSpec, archContract,
+        makeNet, netFromJSON, setArch, archSpec, archContract, setMutReset,
     };
 }

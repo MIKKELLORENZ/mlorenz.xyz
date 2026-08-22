@@ -1,0 +1,44 @@
+teacher tune · 2600 configs x 80 eps x stages 0,1,2,3 (search base 500000) · 52 workers
+  search 20/2600  search 40/2600  search 60/2600  search 80/2600  search 100/2600  search 120/2600  search 140/2600  search 160/2600  search 180/2600  search 200/2600  search 220/2600  search 240/2600  search 260/2600  search 280/2600  search 300/2600  search 320/2600  search 340/2600  search 360/2600  search 380/2600  search 400/2600  search 420/2600  search 440/2600  search 460/2600  search 480/2600  search 500/2600  search 520/2600  search 540/2600  search 560/2600  search 580/2600  search 600/2600  search 620/2600  search 640/2600  search 660/2600  search 680/2600  search 700/2600  search 720/2600  search 740/2600  search 760/2600  search 780/2600  search 800/2600  search 820/2600  search 840/2600  search 860/2600  search 880/2600  search 900/2600  search 920/2600  search 940/2600  search 960/2600  search 980/2600  search 1000/2600  search 1020/2600  search 1040/2600  search 1060/2600  search 1080/2600  search 1100/2600  search 1120/2600  search 1140/2600  search 1160/2600  search 1180/2600  search 1200/2600  search 1220/2600  search 1240/2600  search 1260/2600  search 1280/2600  search 1300/2600  search 1320/2600  search 1340/2600  search 1360/2600  search 1380/2600  search 1400/2600  search 1420/2600  search 1440/2600  search 1460/2600  search 1480/2600  search 1500/2600  search 1520/2600  search 1540/2600  search 1560/2600  search 1580/2600  search 1600/2600  search 1620/2600  search 1640/2600  search 1660/2600  search 1680/2600  search 1700/2600  search 1720/2600  search 1740/2600  search 1760/2600  search 1780/2600  search 1800/2600  search 1820/2600  search 1840/2600  search 1860/2600  search 1880/2600  search 1900/2600  search 1920/2600  search 1940/2600  search 1960/2600  search 1980/2600  search 2000/2600  search 2020/2600  search 2040/2600  search 2060/2600  search 2080/2600  search 2100/2600  search 2120/2600  search 2140/2600  search 2160/2600  search 2180/2600  search 2200/2600  search 2220/2600  search 2240/2600  search 2260/2600  search 2280/2600  search 2300/2600  search 2320/2600  search 2340/2600  search 2360/2600  search 2380/2600  search 2400/2600  search 2420/2600  search 2440/2600  search 2460/2600  search 2480/2600  search 2500/2600  search 2520/2600  search 2540/2600  search 2560/2600  search 2580/2600  search 2600/2600
+
+  search leaders (objective = worst stage):
+   worst  50.0%  mean  64.4%  s0 48/80  s1 68/80  s2 50/80  s3 40/80
+   worst  50.0%  mean  62.8%  s0 42/80  s1 67/80  s2 52/80  s3 40/80
+   worst  48.8%  mean  64.1%  s0 50/80  s1 64/80  s2 52/80  s3 39/80
+   worst  48.8%  mean  63.7%  s0 48/80  s1 65/80  s2 52/80  s3 39/80
+   worst  48.8%  mean  63.4%  s0 44/80  s1 72/80  s2 48/80  s3 39/80
+   worst  48.8%  mean  62.8%  s0 44/80  s1 63/80  s2 55/80  s3 39/80
+   worst  48.8%  mean  62.5%  s0 47/80  s1 66/80  s2 48/80  s3 39/80
+   worst  48.8%  mean  62.5%  s0 44/80  s1 70/80  s2 47/80  s3 39/80
+   worst  48.8%  mean  61.9%  s0 45/80  s1 63/80  s2 51/80  s3 39/80
+   worst  48.8%  mean  61.9%  s0 41/80  s1 69/80  s2 49/80  s3 39/80
+   worst  48.8%  mean  61.9%  s0 41/80  s1 70/80  s2 48/80  s3 39/80
+   worst  48.8%  mean  61.6%  s0 44/80  s1 64/80  s2 50/80  s3 39/80
+   incumbent: worst 45.0%  mean 60.6%  s0 41/80  s1 69/80  s2 48/80  s3 36/80
+
+  confirming 13 on base 888000, 250 eps/stage ...
+  confirm 1/13  confirm 2/13  confirm 3/13  confirm 4/13  confirm 5/13  confirm 6/13  confirm 7/13  confirm 8/13  confirm 9/13  confirm 10/13  confirm 11/13  confirm 12/13  confirm 13/13
+
+  CONFIRMED on the report bank (250 eps/stage):
+   leader 1   worst  52.4%  mean  65.8%  s0 160/250 (64%)  s1 195/250 (78%)  s2 172/250 (69%)  s3 131/250 (52%)
+   leader 3   worst  51.6%  mean  65.6%  s0 161/250 (64%)  s1 195/250 (78%)  s2 171/250 (68%)  s3 129/250 (52%)
+   leader 6   worst  50.8%  mean  63.6%  s0 146/250 (58%)  s1 194/250 (78%)  s2 169/250 (68%)  s3 127/250 (51%)
+   leader 12  worst  50.4%  mean  63.9%  s0 156/250 (62%)  s1 193/250 (77%)  s2 164/250 (66%)  s3 126/250 (50%)
+   leader 10  worst  49.6%  mean  63.1%  s0 148/250 (59%)  s1 193/250 (77%)  s2 166/250 (66%)  s3 124/250 (50%)
+   leader 8   worst  48.8%  mean  62.7%  s0 157/250 (63%)  s1 188/250 (75%)  s2 160/250 (64%)  s3 122/250 (49%)
+   incumbent  worst  48.4%  mean  62.2%  s0 148/250 (59%)  s1 192/250 (77%)  s2 161/250 (64%)  s3 121/250 (48%)   <- incumbent
+   leader 11  worst  48.0%  mean  62.4%  s0 148/250 (59%)  s1 193/250 (77%)  s2 163/250 (65%)  s3 120/250 (48%)
+   leader 5   worst  47.6%  mean  63.4%  s0 155/250 (62%)  s1 204/250 (82%)  s2 156/250 (62%)  s3 119/250 (48%)
+   leader 4   worst  47.2%  mean  64.0%  s0 158/250 (63%)  s1 193/250 (77%)  s2 171/250 (68%)  s3 118/250 (47%)
+   leader 9   worst  47.2%  mean  63.6%  s0 158/250 (63%)  s1 192/250 (77%)  s2 168/250 (67%)  s3 118/250 (47%)
+   leader 2   worst  46.8%  mean  62.0%  s0 150/250 (60%)  s1 194/250 (78%)  s2 159/250 (64%)  s3 117/250 (47%)
+   leader 7   worst  46.4%  mean  62.1%  s0 155/250 (62%)  s1 190/250 (76%)  s2 160/250 (64%)  s3 116/250 (46%)
+
+  winner vs incumbent: worst 4.0 points
+  gains:
+    SLAM.ignMargin: 0.7183566843354627
+    K.slotH: 11.839792363018914
+    ROLL.qFin: 68.3892706081329
+    K.qMargin: 0.7221673755907551
+
+  JSON: {"SLAM.ignMargin":0.7183566843354627,"K.slotH":11.839792363018914,"ROLL.qFin":68.3892706081329,"K.qMargin":0.7221673755907551}

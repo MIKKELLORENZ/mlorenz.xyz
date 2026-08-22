@@ -165,28 +165,97 @@ const GATE_GAMES = +arg("gate", 0);
  * one bag of sequences evaporates instead of compounding. One re-score costs a
  * single gate replay, perhaps once every few hundred generations. */
 const GATE_ROTATE = +arg("gate-rotate", 0);
+/* …and it has to move on *failure* too, or a lucky bank freezes the run dead.
+ *
+ * `championSkill` is a high-water mark that only moves when somebody beats it,
+ * and the bank only rotates on a promotion. Resume a strong champion onto a bank
+ * that happens to suit it and both conditions lock: the observed bar was 200.8
+ * where the same brain scores 191 on a large held-out sample, so no challenger
+ * could clear it, so there were no promotions, so the bank never rotated — a
+ * two-hour run that cannot promote once. The bar has to be the champion's skill,
+ * not its luckiest measurement of it, so after `--gate-stale` consecutive
+ * rejections the bank is redrawn and the champion re-scored on fresh games. It
+ * keeps its seat either way; only the bar it defends is refreshed. */
+const GATE_STALE = +arg("gate-stale", 0);
+
+/* ---- racing: screen the population cheap, measure the finalists properly ----
+ *
+ * A 200-game fitness is what made the last round work — at 2 games the held-out
+ * gate was rejecting nine in ten in-run winners, i.e. the GA was mostly wrong.
+ * But the accuracy is only *needed* where the decisions are: which challenger
+ * fights the champion, and what the champion itself re-scores at. The other
+ * forty brains only have to be sorted into "breeds" and "does not", and a couple
+ * of dozen games sorts that well enough.
+ *
+ * So with --screen N the generation runs in two passes over the same workers:
+ * every brain plays N games, the top --finalists then replay --trials games, and
+ * the re-injected champion is *always* a finalist so its honest re-score and
+ * every challenger comparison still happen on the same large common bank. Cost
+ * falls from pop×trials to pop×screen + (finalists+1)×trials — about a third at
+ * 48×24 + 11×120 — and the generations bought with the difference are worth more
+ * than the resolution given up on brains that were never going to be champion.
+ *
+ * Non-finalists keep their screen fitness for breeding order but are pinned
+ * below the worst finalist, so a lucky 24-game score can never be mistaken for a
+ * challenger. Ordering inside each group is preserved, which is all _breed uses.
+ */
+const SCREEN = +arg("screen", 0);
+const FINALISTS = Math.max(1, +arg("finalists", 10));
+/* Weight-reset rate inside mutation. Default is what every evolved champion here
+ * was produced under; drop it near zero to fine-tune a brain the GA did not
+ * build, which has no tolerance for having twenty of its weights redrawn. */
+const MUT_RESET_ARG = arg("mut-reset", null);
+if (MUT_RESET_ARG !== null) setMutReset(+MUT_RESET_ARG);
+/* The gate is replayed on the main thread because the main thread is idle while
+ * the workers score the population — but that stops being true once the gate is
+ * big enough to matter. At 200 games against twelve busy workers one gate check
+ * measured 24 s of a 37 s generation: the main thread is competing for the same
+ * cores it handed the population to, so it runs the bank at a quarter of its
+ * isolated speed and the anti-noise measure becomes the run's dominant cost.
+ *
+ * It cannot simply be moved onto the pool, because Evolution.evolve calls gateFn
+ * synchronously in the middle of breeding. But both brains it will ask about are
+ * known before evolve is called — the challenger is whichever result has the top
+ * fitness, and the defender is the sitting champion — so the scores are computed
+ * on the pool first and gateFn becomes a cache lookup. Same games, same decision,
+ * a twentieth of the wall clock. The serial path stays as the fallback for a
+ * bank rotation, which happens once every few dozen generations. */
+let gateBank = [], gateEpoch = 0;
+const gateCache = new Map();
 if (GATE_GAMES > 0) {
-    let epoch = 0, bank = [];
     const drawBank = () => {
-        bank = [];
-        for (let i = 0; i < GATE_GAMES; i++) bank.push(2200001 + epoch * 1000003 + i * 7919);
+        gateBank = [];
+        for (let i = 0; i < GATE_GAMES; i++) gateBank.push(2200001 + gateEpoch * 1000003 + i * 7919);
     };
     drawBank();
     evo.championSkill = null;
-    evo.gateFn = net => {
+    const serialGate = net => {
         let pieces = 0, lines = 0;
-        for (const s of bank) {
+        for (const s of gateBank) {
             const a = new Agent(net, s, GAME_CFG);
             while (a.alive) a.step(PIECE_CAP);
             pieces += a.pieces; lines += a.lines;
         }
-        return (pieces + 25 * lines) / bank.length;    // reward-independent skill
+        return (pieces + 25 * lines) / gateBank.length;    // reward-independent skill
     };
-    evo.rotateGate = () => {
-        epoch++;
+    evo.gateFn = net => gateCache.has(net) ? gateCache.get(net) : serialGate(net);
+    /* Rotation is the one gate call evolve() does not make — the main loop owns
+     * it — so unlike gateFn it can simply be async and use the pool. It was left
+     * on the serial path when the rest of the gate was parallelised, and at 800
+     * games that is a full extra minute every few generations. Worse, it is
+     * invisible: the re-score happens after the generation timer has stopped, so
+     * it lands in no generation's reported time and shows up only as the gap
+     * between a 61.9 s logged mean and 72 s of actual elapsed clock. */
+    evo.rotateGate = async () => {
+        gateEpoch++;
         drawBank();
-        evo.championSkill = evo.champion ? evo.gateFn(evo.champion) : null;
-        evo.gateEpoch = epoch;
+        gateCache.clear();                       // scores from the old bank mean nothing now
+        if (evo.champion) {
+            const s = await evaluateSeeds(evo.champion, gateBank);
+            gateCache.set(evo.champion, s);
+            evo.championSkill = s;
+        } else evo.championSkill = null;
+        evo.gateEpoch = gateEpoch;
         return evo.championSkill;
     };
 }
@@ -196,7 +265,8 @@ for (let i = 0; i < NWORK; i++) workers.push(new Worker(__filename));
 console.log(`config ${RUN_CFG_NAME} · ${DESC.profile} profile · ${DESC.inputs} inputs · ` +
     `${DESC.contract} · ${DESC.params.toLocaleString()} params`);
 console.log(`pop ${POP} · ${evo.islands} islands (migrate every ${GA_CFG.migrateEvery}) · ` +
-    `self-adaptive σ ${GA_CFG.selfAdapt ? "on" : "off"} · ${TRIALS} trials · ` +
+    `self-adaptive σ ${GA_CFG.selfAdapt ? "on" : "off"} · ` +
+    (SCREEN > 0 ? `screen ${SCREEN} → top ${FINALISTS} on ` : "") + `${TRIALS} trials · ` +
     `${PIECE_CAP}-piece cap · ${NWORK} workers` +
     (UNTIL ? ` · stopping at ${new Date(UNTIL).toLocaleTimeString()}` : ""));
 
@@ -219,6 +289,58 @@ function evaluate(brains, seeds) {
             brains: brains.slice(lo, hi).map(b => b.toJSON()),
         });
     }))).then(chunks => chunks.flat());
+}
+
+/* One brain over a whole bank, split across the pool by *seeds* rather than by
+ * brains. scoreBrain reports lines and pieces as per-game means, so recombining
+ * the slices is a count-weighted average and comes out identical to having
+ * played the bank in one thread. */
+function evaluateSeeds(brain, seeds) {
+    const per = Math.ceil(seeds.length / NWORK);
+    const json = brain.toJSON();
+    return Promise.all(workers.map((w, i) => new Promise((resolve, reject) => {
+        const lo = i * per, hi = Math.min(seeds.length, lo + per);
+        if (lo >= hi) return resolve(null);
+        const done = () => { w.off("message", onMsg); w.off("error", onErr); };
+        const onMsg = m => { done(); resolve({ n: hi - lo, r: m.out[0] }); };
+        const onErr = e => { done(); reject(e); };
+        w.on("message", onMsg);
+        w.on("error", onErr);
+        w.postMessage({
+            tag: "gate" + i, seeds: seeds.slice(lo, hi), cfg: GAME_CFG,
+            pieceCap: PIECE_CAP, config: RUN_CFG, brains: [json],
+        });
+    }))).then(parts => {
+        let n = 0, pieces = 0, lines = 0;
+        for (const p of parts) {
+            if (!p) continue;
+            n += p.n; pieces += p.r.pieces * p.n; lines += p.r.lines * p.n;
+        }
+        return n ? (pieces + 25 * lines) / n : 0;
+    });
+}
+
+/* Fill the cache for exactly the two brains evolve() is about to ask about. */
+async function primeGate(results) {
+    if (!GATE_GAMES || !evo.gateFn) return;
+    /* evolve() re-scores the champion from its re-injected copy before comparing,
+     * so the bar the challenger has to clear is that fresh number, not the stale
+     * one on the object. Mirror it here or we prime on the wrong verdict. */
+    let champFit = evo.championFit;
+    if (evo.injected) {
+        const r = results.find(x => x.brain === evo.injected);
+        if (r) champFit = r.fitness;
+    }
+    let top = null;
+    for (const r of results) if (!top || r.fitness > top.fitness) top = r;
+    if (!top || top.fitness <= champFit) return;         // no challenge, no gate call
+    if (evo.champion && !gateCache.has(evo.champion) &&
+        (evo.championSkill === null || evo.championSkill === undefined)) {
+        gateCache.set(evo.champion, await evaluateSeeds(evo.champion, gateBank));
+    }
+    if (!gateCache.has(top.brain)) {
+        gateCache.set(top.brain, await evaluateSeeds(top.brain, gateBank));
+    }
 }
 
 let stop = false;
@@ -263,9 +385,24 @@ function growNet(gen) {
     return true;
 }
 
+/* Where the resumed weights came from, carried forward so it cannot be lost.
+ * A brain distilled from an oracle and then evolved is neither "evolved" nor
+ * "gradient-trained", and the header bake_brain.js writes is the first thing
+ * anyone reads about it — a run that drops this turns a hybrid into a false
+ * claim of pure evolution one save() later. */
+const LINEAGE = (() => {
+    if (!RESUME || typeof RESUME !== "string") return null;
+    const p = path.resolve(__dirname, RESUME);
+    if (!fs.existsSync(p)) return null;
+    try {
+        const s = JSON.parse(fs.readFileSync(p, "utf8"));
+        return s.lineage || (s.imitation ? { imitation: s.imitation, from: RESUME } : null);
+    } catch (e) { return null; }
+})();
+
 function save(name, gen) {
     fs.writeFileSync(path.join(OUT, name), JSON.stringify({
-        gen, fitness: evo.championFit, lines: evo.championLines,
+        gen, fitness: evo.championFit, lines: evo.championLines, lineage: LINEAGE,
         gateSkill: evo.championSkill || null, gateGames: GATE_GAMES || 0,
         pop: POP, trials: TRIALS, pieceCap: PIECE_CAP,
         gameCfg: GAME_CFG, gaCfg: GA_CFG,
@@ -276,7 +413,7 @@ function save(name, gen) {
 
 (async () => {
     const t00 = Date.now();
-    let gensRun = 0, promotions = 0;
+    let gensRun = 0, promotions = 0, rejectsAtRotate = 0;
     for (let g = 0; g < GENS && !stop; g++) {
         if (UNTIL && Date.now() > UNTIL) { console.log("reached the wall-clock deadline"); break; }
         const t0 = Date.now();
@@ -286,17 +423,46 @@ function save(name, gen) {
          * generation's own draw, or a large --trials would make consecutive
          * generations interleave over the same range. 977 for the two- and
          * three-trial runs this was written for, so those are unchanged. */
-        const base = evo.gen * Math.max(977, TRIALS * 31 + 1);
+        const span = TRIALS * 31 + 1;
+        const base = evo.gen * Math.max(977, span + (SCREEN > 0 ? SCREEN * 31 + 1000 : 0));
         const seeds = [];
         for (let t = 0; t < TRIALS; t++) seeds.push(base + t * 31 + 1);
 
-        const scored = await evaluate(evo.brains, seeds);
+        let scored;
+        if (SCREEN > 0) {
+            /* pass 1 — everyone, cheap, on a band of seeds disjoint from pass 2's */
+            const sSeeds = [];
+            for (let t = 0; t < SCREEN; t++) sSeeds.push(base + span + 999 + t * 31 + 1);
+            const s1 = await evaluate(evo.brains, sSeeds);
+            const order = evo.brains.map((_, i) => i).sort((a, b) => s1[b].fitness - s1[a].fitness);
+            const pick = new Set(order.slice(0, Math.min(FINALISTS, evo.brains.length)));
+            /* the re-injected champion is a finalist by right, not by screen luck:
+             * its honest re-score and every challenge it faces have to happen on
+             * the same big common bank, or the comparison means nothing */
+            const champIdx = evo.injected ? evo.brains.indexOf(evo.injected) : -1;
+            if (champIdx >= 0) pick.add(champIdx);
+            const idx = [...pick];
+            /* pass 2 — the finalists, on the full bank, common random numbers */
+            const s2 = await evaluate(idx.map(i => evo.brains[i]), seeds);
+            scored = s1.slice();
+            let worst = Infinity;
+            idx.forEach((i, k) => { scored[i] = s2[k]; if (s2[k].fitness < worst) worst = s2[k].fitness; });
+            const rest = order.filter(i => !pick.has(i));
+            rest.forEach((i, k) => {
+                scored[i] = Object.assign({}, s1[i],
+                    { fitness: Math.min(s1[i].fitness, worst) - 1e-6 * (k + 1) });
+            });
+            evo.finalists = idx.length;
+        } else {
+            scored = await evaluate(evo.brains, seeds);
+        }
         const results = evo.brains.map((b, i) => ({
             brain: b, fitness: scored[i].fitness, lines: scored[i].lines,
             pieces: scored[i].pieces, sig: scored[i].sig,
         }));
         const gen = evo.gen;
         const prevChamp = evo.championFit;
+        await primeGate(results);
         const r = evo.evolve(results, GA_CFG);
         const secs = (Date.now() - t0) / 1000;
         gensRun++;
@@ -316,14 +482,18 @@ function save(name, gen) {
             r.avgLines.toFixed(2), r.avgPieces.toFixed(1), eff.sigma.toFixed(4), secs.toFixed(1),
         ].join(",") + "\n");
 
+        let rotate = false;
         if (evo.championFit > prevChamp) {
             save("champion.json", gen);
             promotions++;
-            if (GATE_ROTATE > 0 && evo.rotateGate && promotions % GATE_ROTATE === 0) {
-                const s = evo.rotateGate();
-                console.log(`  gate bank rotated (epoch ${evo.gateEpoch}) — champion re-scored at ` +
-                    `${s === null ? "n/a" : s.toFixed(1)} on ${GATE_GAMES} fresh games`);
-            }
+            if (GATE_ROTATE > 0 && promotions % GATE_ROTATE === 0) rotate = true;
+        }
+        if (GATE_STALE > 0 && (evo.gateRejects || 0) - rejectsAtRotate >= GATE_STALE) rotate = true;
+        if (rotate && evo.rotateGate) {
+            rejectsAtRotate = evo.gateRejects || 0;
+            const s = await evo.rotateGate();
+            console.log(`  gate bank rotated (epoch ${evo.gateEpoch}) — champion re-scored at ` +
+                `${s === null ? "n/a" : s.toFixed(1)} on ${GATE_GAMES} fresh games`);
         }
 
         // A champion that has held its seat this long is not being limited by the

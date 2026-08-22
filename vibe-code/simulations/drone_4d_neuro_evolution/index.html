@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flying in Four Dimensions — 4D Drone Neuroevolution</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
+</head>
+<body>
+
+<div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Flying in Four Dimensions</h2>
+        <p>An eight-rotor drone flying in <b>real 4D physics</b>. It has to reach
+           waypoints with <b>four coordinates</b> — being in the right place in
+           <span class="mono">x&nbsp;y&nbsp;z</span> counts for nothing if you are in
+           the wrong place in <span class="mono">w</span>.</p>
+        <p class="intro-hint">Two views, because one cannot show 4D. The drone has
+           arrived only when it is on target in <b>both</b>.</p>
+        <div class="intro-choices">
+            <button id="intro-watch" class="intro-choice primary">
+                <b>▶&nbsp; Watch Mikkels AI fly</b>
+            </button>
+            <button id="intro-auto" class="intro-choice">
+                <b>📐&nbsp; Watch the hand-written pilot</b>
+            </button>
+        </div>
+        <button id="intro-explore" class="intro-dismiss">or just explore →</button>
+    </div>
+</div>
+
+<!-- data-mob-root: the element that should be exactly one screen tall on a
+     phone; data-mob-layout: the row holding stage + panel. #panel itself is
+     picked up by the shared layer's default selector. -->
+<div id="app" data-mob-root data-mob-layout>
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Flying in Four Dimensions</h1>
+            <span class="brand-sub">8 rotors · SO(4) · neuroevolution</span>
+        </div>
+        <div id="top-stats">
+            <span class="tstat">waypoints <b id="stat-wp">0</b></span>
+            <span class="tstat">distance <b id="stat-dist">—</b></span>
+            <span class="tstat" title="How far off the target the drone is along the 4th axis">
+                &Delta;w <b id="stat-dw">—</b></span>
+            <span class="tstat">airborne <b id="stat-air">0.0s</b></span>
+            <span class="tstat">clock <b id="stat-clock">0.0s</b></span>
+        </div>
+    </header>
+
+    <main id="stage" data-mob-stage>
+        <canvas id="view"></canvas>
+        <div class="view-label" id="label-l">x · y · z</div>
+        <div class="view-label right" id="label-r">w · y · z</div>
+        <div id="deadmsg" class="deadmsg"></div>
+        <div id="pilot-flag" class="pilot-flag ai">Mikkels AI</div>
+        <div class="legend">
+            <span><i class="sw" style="background:#ffc857"></i>waypoint cross-section</span>
+            <span><i class="sw ring"></i>full 4-ball</span>
+            <span><i class="sw" style="background:#3ba7ff"></i>rotor behind</span>
+            <span><i class="sw" style="background:#ff8a3d"></i>rotor ahead</span>
+        </div>
+    </main>
+
+    <aside id="panel" data-mob-label="Controls">
+        <div class="pgroup">
+            <div class="prow">
+                <!-- data-mob-bar: pause stays reachable without opening the sheet -->
+                <button id="btn-play" class="btn primary" data-mob-bar>⏸ Pause</button>
+                <button id="btn-reset" class="btn">↺ Restart</button>
+                <button id="btn-mission" class="btn">🎲 New mission</button>
+            </div>
+            <div class="prow">
+                <label class="lbl" title="Switches instantly, mid-flight — keys 1 and 2">Pilot</label>
+                <select id="sel-pilot" data-mob-bar>
+                    <option value="brain">Mikkels AI</option>
+                    <option value="auto">Hand-written PD pilot</option>
+                </select>
+            </div>
+            <div class="prow">
+                <label class="lbl">Speed</label>
+                <input type="range" id="rng-speed" min="0.25" max="4" step="0.25" value="1">
+                <span class="val" id="val-speed">1.0×</span>
+            </div>
+            <div class="prow">
+                <label class="lbl" title="Rotates the projection basis in the x–w plane. At 0° the left view is the ordinary room and the right view looks along the fourth axis.">4D rotation θ</label>
+                <input type="range" id="rng-theta" min="0" max="90" step="1" value="0">
+                <span class="val" id="val-theta">0°</span>
+            </div>
+            <p class="note" id="prov"></p>
+        </div>
+
+        <div class="pgroup">
+            <h3>Where it is</h3>
+            <table class="coords">
+                <tr><th></th><th>x</th><th>y</th><th>z</th><th class="w4">w</th></tr>
+                <tr><td class="rl">drone</td><td id="p0">0</td><td id="p1">0</td><td id="p2">0</td><td class="w4" id="p3">0</td></tr>
+                <tr><td class="rl">target</td><td id="t0">0</td><td id="t1">0</td><td id="t2">0</td><td class="w4" id="t3">0</td></tr>
+                <tr class="derr"><td class="rl">error</td><td id="e0">0</td><td id="e1">0</td><td id="e2">0</td><td class="w4" id="e3">0</td></tr>
+            </table>
+        </div>
+
+        <div class="pgroup">
+            <h3>Eight rotors</h3>
+            <div id="rotorbars" class="bars"></div>
+            <p class="note">Corner <span class="mono">(s<sub>R</sub>,s<sub>F</sub>,s<sub>A</sub>)</span>
+               of a cube in the 3-space orthogonal to the thrust axis. Seven of the eight
+               Walsh patterns are the controls; the eighth does nothing at all.</p>
+        </div>
+
+        <div class="pgroup">
+            <h3>Six rotation planes</h3>
+            <div id="planebars" class="bars"></div>
+            <p class="note">Three <b>tilt</b> planes contain the thrust axis — rotate in one
+               and the drone falls over. Three <b>heading</b> planes do not, and are the exact
+               4D generalisation of yaw.</p>
+        </div>
+
+        <div class="pgroup collapsed" id="about-group">
+            <h3 class="toggle" id="about-toggle">What makes this actually 4D ▾</h3>
+            <div class="about">
+                <p><b>Orientation is a 4&times;4 matrix in SO(4)</b>, not a quaternion — unit
+                   quaternions double-cover SO(3), which is a different group.</p>
+                <p><b>Angular velocity is a bivector</b> with C(4,2)&nbsp;=&nbsp;6 components.
+                   There is no axis of rotation; that is a 3D coincidence, true only because
+                   the orthogonal complement of a plane happens to be a line when n&nbsp;=&nbsp;3.</p>
+                <p><b>Inertia is four numbers, not six.</b> The six plane moments come from the
+                   mass quadrupole as I<sub>ab</sub>&nbsp;=&nbsp;J<sub>a</sub>&nbsp;+&nbsp;J<sub>b</sub>,
+                   so they cannot be chosen freely — picking six would describe no physical body.</p>
+                <p><b>Eight rotors at the corners of a cube.</b> The map from rotor thrusts to
+                   (thrust, 3 tilt torques, 3 heading torques) is seven Walsh functions on
+                   {−1,+1}³, which are mutually orthogonal — so all seven are independently
+                   commandable with condition number 1. An octahedron of six rotors would
+                   slave each tilt torque to a heading torque: you could not lean without spinning.</p>
+                <p><b>Torque-free motion conserves both Casimirs of so(4)</b> — ‖L‖² and the
+                   Pfaffian, the second of which has no 3D analogue. The bundled test suite
+                   checks all of this numerically.</p>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<script src="three.min.js"></script>
+<script src="nn.js"></script>
+<script src="math4d.js"></script>
+<script src="drone4d.js"></script>
+<script src="room4d.js"></script>
+<script src="world4d.js"></script>
+<script src="autopilot.js"></script>
+<script src="champion.js"></script>
+<script src="render4d.js"></script>
+<script src="viewer.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
+</body>
+</html>

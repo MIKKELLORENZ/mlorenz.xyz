@@ -38,6 +38,20 @@ function arg(name, def) {
 const MODEL = arg("model", "qwen3-embedding:8b");
 const DIMS = parseInt(arg("dims", "24"), 10);
 const WHITEN = parseFloat(arg("whiten", "0.5"));
+/* --proj centroid fits the projection to the SPEC CENTROIDS rather than to the
+ * sentences. See the note where it is used. */
+const PROJ = arg("proj", "pca");
+/* --l2 unit-normalises every raw vector before anything else.
+ *
+ * MEASURED NO-OP, kept as documentation. The reasoning that motivated it is
+ * sound — Qwen embeddings are used under cosine similarity, so magnitude is not
+ * meaningful, while PCA is fitted to variance and variance counts magnitude, so
+ * a component could be spent modelling sentence length. It changes nothing here
+ * because Ollama already returns unit vectors: the L2 norm of all 539 cached
+ * vectors is 1.0000 to four decimals, and every diagnostic comes out
+ * bit-identical with the flag on (centroid-12: 73.5% / 81.6% / 95.2% either
+ * way). Left in so the next person does not spend the afternoon on it. */
+const L2 = argv.includes("--l2");
 const HOST = arg("host", "http://localhost:11434");
 const OUT = path.join(__dirname, arg("out", "task_embeddings.js"));
 
@@ -186,6 +200,15 @@ async function embedAll(tasks) {
     }
     const D = raw[0].length;
     console.log(`  native dimension: ${D}`);
+    if (L2) {
+        for (const v of raw) {
+            let n = 0;
+            for (let d = 0; d < D; d++) n += v[d] * v[d];
+            n = Math.sqrt(n) || 1;
+            for (let d = 0; d < D; d++) v[d] /= n;
+        }
+        console.log(`  raw vectors unit-normalised (cosine geometry)`);
+    }
 
     // --- 2. PCA fitted on the TRAIN split only -------------------------------
     const trainIdx = [];
@@ -196,17 +219,62 @@ async function embedAll(tasks) {
     for (const i of trainIdx) { const v = raw[i]; for (let d = 0; d < D; d++) mean[d] += v[d]; }
     for (let d = 0; d < D; d++) mean[d] /= n;
 
-    const X = trainIdx.map(i => {
-        const v = new Float64Array(D), s = raw[i];
-        for (let d = 0; d < D; d++) v[d] = s[d] - mean[d];
-        return v;
-    });
+    /* WHAT THE PROJECTION IS FITTED TO.
+     *
+     * `--proj pca` (the original) fits the basis to the 392 training SENTENCES,
+     * so it keeps the directions along which sentences vary most. That is not
+     * the same as the directions that distinguish one GOAL from another, and
+     * the difference is the whole ballgame here: most of the variance between
+     * two sentences is wording, and wording is exactly the thing the arm is
+     * supposed to ignore.
+     *
+     * `--proj centroid` fits the basis to the 49 SPEC CENTROIDS — the mean
+     * vector of each goal's training phrasings. Directions along which the
+     * centroids spread are directions that separate goals; directions along
+     * which phrasings of ONE goal disagree are averaged away before the basis
+     * is fitted rather than competing for components. It is the between-class
+     * half of a linear discriminant, and with 49 classes and 392 samples it is
+     * the half that can be estimated honestly — a full LDA also needs a
+     * 4096-dimensional within-class scatter out of 392 points, which is not a
+     * measurement, it is a wish.
+     *
+     * The held-out split is untouched by either: the centroids are built from
+     * training phrasings only, so recovering a held-out sentence is still a
+     * genuine generalisation test. */
+    let fitRows;
+    if (PROJ === "centroid") {
+        const bySpec = new Map();
+        for (const i of trainIdx) {
+            const k = tasks[i].specIdx;
+            if (!bySpec.has(k)) bySpec.set(k, []);
+            bySpec.get(k).push(i);
+        }
+        fitRows = [...bySpec.keys()].sort((a, b) => a - b).map(k => {
+            const members = bySpec.get(k);
+            const v = new Float64Array(D);
+            for (const i of members) { const s = raw[i]; for (let d = 0; d < D; d++) v[d] += s[d]; }
+            for (let d = 0; d < D; d++) v[d] = v[d] / members.length - mean[d];
+            return v;
+        });
+        console.log(`  fitting the basis to ${fitRows.length} spec centroids (not ${n} sentences)`);
+        if (DIMS > fitRows.length - 1)
+            console.log(`  ! ${fitRows.length} centroids span at most ${fitRows.length - 1} dimensions; ` +
+                `${DIMS} was asked for and the tail will be noise.`);
+    } else {
+        fitRows = trainIdx.map(i => {
+            const v = new Float64Array(D), s = raw[i];
+            for (let d = 0; d < D; d++) v[d] = s[d] - mean[d];
+            return v;
+        });
+    }
+    const X = fitRows;
+    const nFit = X.length;
 
     // Gram matrix in SAMPLE space (n x n) — far smaller than the d x d covariance
-    console.log(`  building ${n}x${n} Gram matrix...`);
+    console.log(`  building ${nFit}x${nFit} Gram matrix...`);
     const G = [];
-    for (let i = 0; i < n; i++) {
-        const row = new Float64Array(n);
+    for (let i = 0; i < nFit; i++) {
+        const row = new Float64Array(nFit);
         for (let j = 0; j <= i; j++) {
             let s = 0;
             const a = X[i], b = X[j];
@@ -216,11 +284,11 @@ async function embedAll(tasks) {
         }
         G.push(row);
     }
-    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) G[i][j] = G[j][i];
+    for (let i = 0; i < nFit; i++) for (let j = i + 1; j < nFit; j++) G[i][j] = G[j][i];
 
     console.log(`  eigendecomposition for top ${DIMS}...`);
-    const { vecs, vals } = topEigen(G, n, DIMS, 220);
-    const totalVar = (() => { let s = 0; for (let i = 0; i < n; i++) s += G[i][i]; return s; })();
+    const { vecs, vals } = topEigen(G, nFit, DIMS, 220);
+    const totalVar = (() => { let s = 0; for (let i = 0; i < nFit; i++) s += G[i][i]; return s; })();
     const explained = vals.reduce((s, v) => s + Math.max(0, v), 0) / totalVar;
     console.log(`  variance explained by ${DIMS} components: ${(explained * 100).toFixed(1)}%`);
 
@@ -229,7 +297,7 @@ async function embedAll(tasks) {
     for (let k = 0; k < DIMS; k++) {
         const v = new Float64Array(D);
         const u = vecs[k], sc = Math.sqrt(Math.max(vals[k], 1e-12));
-        for (let i = 0; i < n; i++) {
+        for (let i = 0; i < nFit; i++) {
             const w = u[i] / sc, xi = X[i];
             for (let d = 0; d < D; d++) v[d] += w * xi[d];
         }

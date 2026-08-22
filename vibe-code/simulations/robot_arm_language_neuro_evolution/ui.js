@@ -1,39 +1,29 @@
-/* ui.js — panel wiring. Every knob lives in CFG; main.js reads it each frame. */
+/* ui.js — panel wiring for the playback page. Every knob lives in CFG;
+ * main.js reads it each frame.
+ *
+ * Everything here is about the INSTRUCTION and the BENCH. The mutation rates,
+ * population sizes and curriculum sliders that used to live in this file went
+ * when training left the browser — see the note at the top of main.js.
+ */
 "use strict";
 
 const CFG = {
-    popSize: 24,
-    episodes: 3,
-    /* Measured on stage 1 (gridsearch.js). Top-quartile deliveries:
-     *   all-heads 0.20/0.15 -> 0.075     modular 0.20/0.15 -> 0.125
-     *   modular   0.30/0.20 -> 0.125     modular 0.12/0.20 -> 0.250
-     * The two knobs interact. With all three heads mutating, a LOWER rate was
-     * strictly worse (0.06/0.12 scored 0.000) because nothing ever escaped.
-     * Once only one head moves per child, low rate becomes refinement rather
-     * than paralysis and wins by 3.3x over the original default. */
-    mutRate: 0.12,
-    mutSigma: 0.20,
-    gracePeriod: 3,
-    immZeroFit: 1800,
-    childZeroFit: 6000,
-    stageLock: 0,
     speed: 1,
     paused: false,
-    showBenches: 12,
-    soloView: false,
-    focus: 0,
-    split: "train",          // which phrasing pool the episodes draw from
+    showEyes: false,
+    autoDeal: true,
+    fill: 2.0,               // how crowded a fresh bench starts
+    noise: 0.3,              // sensor and servo noise
+    split: "train",          // which phrasing pool the sentence list offers
     pinnedTaskId: null,      // a specific sentence, pinned by the user
     liveTask: null,          // a sentence the user typed, embedded via local Ollama
-    liveEmbedding: null,
-    showcaseSpin: 0
+    liveEmbedding: null
 };
 
 const UI = {};
 function $(id) { return document.getElementById(id); }
 let H = {};
 let baked = null;
-let lastGenRec = null;
 
 /* ------------------------------------------------------------------ setup */
 function initUI(handlers) {
@@ -45,11 +35,12 @@ function initUI(handlers) {
         badge.textContent = `${Embedding.meta.model} · ${Embedding.nativeDim}→${Embedding.dim}`;
         badge.className = "pill good";
         $("emb-detail").innerHTML =
-            `Sentences were embedded offline by <b>${Embedding.meta.model}</b> and projected onto the ` +
-            `first <b>${Embedding.dim}</b> principal components — a basis fitted on the <i>training</i> ` +
-            `phrasings only. Held-out 1-NN recovers the rule type ` +
+            `Sentences were embedded offline by <b>${Embedding.meta.model}</b> and projected onto ` +
+            `<b>${Embedding.dim}</b> dimensions — a basis fitted on the <i>training</i> phrasings only. ` +
+            `Held-out 1-NN recovers the rule type ` +
             `<b>${(Embedding.meta.holdoutKind * 100).toFixed(0)}%</b> of the time and the named colours ` +
-            `<b>${(Embedding.meta.holdoutColor * 100).toFixed(0)}%</b> (Jaccard).`;
+            `<b>${(Embedding.meta.holdoutColor * 100).toFixed(0)}%</b> (Jaccard). That last number is the ` +
+            `ceiling on this page: the arm cannot obey a sentence it cannot tell apart from another one.`;
     } else {
         badge.textContent = "surrogate (not baked)";
         badge.className = "pill warn";
@@ -58,11 +49,9 @@ function initUI(handlers) {
             `works. It separates different words but knows nothing about meaning, so held-out phrasings ` +
             `are hopeless by construction. Run <code>node embed_tasks.js</code> to bake the real ones.`;
     }
-    if (Embedding.warning) {
-        $("emb-detail").innerHTML += `<br><span class="bad">${Embedding.warning}</span>`;
-    }
+    if (Embedding.warning) $("emb-detail").innerHTML += `<br><span class="bad">${Embedding.warning}</span>`;
 
-    // ---- task picker -----------------------------------------------------
+    // ---- instruction picker ----------------------------------------------
     const kindSel = $("sel-kind");
     const KINDS = ["(any)", "SORT", "ALTERNATE", "LEAVE_ONE", "COUNT", "ORDER", "EXCLUDE", "ALL_TO_ONE"];
     KINDS.forEach(k => {
@@ -87,19 +76,16 @@ function initUI(handlers) {
         });
         $("phrase-count").textContent = `${pool.length} sentences`;
     };
-    kindSel.onchange = refreshPhrases;
-    $("sel-phrase").onchange = (e) => {
-        CFG.pinnedTaskId = e.target.value || null;
-        CFG.liveTask = null; CFG.liveEmbedding = null;
-    };
+    kindSel.onchange = () => { refreshPhrases(); pickSentence(""); };
+    $("sel-phrase").onchange = (e) => pickSentence(e.target.value);
     document.querySelectorAll("input[name=split]").forEach(r => {
         r.onchange = () => {
             CFG.split = r.value;
-            CFG.pinnedTaskId = null;
             refreshPhrases();
             $("split-note").textContent = CFG.split === "holdout"
-                ? "★ These sentences were never used during evolution. This is the real test."
-                : "The 392 phrasings evolution is scored on.";
+                ? "★ These sentences were never used in training. This is the real test."
+                : "The 392 phrasings the arm was trained on.";
+            pickSentence("");
         };
     });
     refreshPhrases();
@@ -110,27 +96,20 @@ function initUI(handlers) {
         if (e.key === "Enter") { e.preventDefault(); embedLive(e.target.value.trim()); }
     });
 
-    // ---- curriculum ------------------------------------------------------
-    const track = $("stage-track");
-    STAGES.forEach(s => {
-        const d = document.createElement("div");
-        d.className = "stage-pip";
-        d.innerHTML = `<b>${s.id}</b>${s.name}`;
-        d.title = s.desc;
-        track.appendChild(d);
-    });
-    bindSlider("sl-stagelock", "lb-stagelock", v => {
-        CFG.stageLock = v;
-        return v === 0 ? "auto" : String(v);
-    });
+    // ---- bench knobs ------------------------------------------------------
+    bindSlider("sl-fill", "lb-fill", v => { CFG.fill = v / 10; return (v / 10).toFixed(1); });
+    bindSlider("sl-noise", "lb-noise", v => { CFG.noise = v / 100; return (v / 100).toFixed(2); });
+    $("btn-replay").onclick = () => H.deal(true);
+    const loopBtn = $("btn-loop");
+    loopBtn.onclick = () => {
+        CFG.autoDeal = !CFG.autoDeal;
+        loopBtn.classList.toggle("on", CFG.autoDeal);
+        loopBtn.textContent = CFG.autoDeal ? "Auto-deal" : "Deal once";
+    };
 
-    // ---- evolution knobs -------------------------------------------------
-    bindSlider("sl-pop", "lb-pop", v => { CFG.popSize = v; return String(v); });
-    bindSlider("sl-eps", "lb-eps", v => { CFG.episodes = v; return String(v); });
-    bindSlider("sl-mut", "lb-mut", v => { CFG.mutRate = v / 100; return (v / 100).toFixed(2); });
-    bindSlider("sl-sig", "lb-sig", v => { CFG.mutSigma = v / 100; return (v / 100).toFixed(2); });
-    bindSlider("sl-grace", "lb-grace", v => { CFG.gracePeriod = v; return v === 0 ? "off" : String(v); });
-    bindSlider("sl-benches", "lb-benches", v => { CFG.showBenches = v; return String(v); });
+    // ---- who is driving ---------------------------------------------------
+    $("btn-brain").onclick = () => H.setDriver(false);
+    $("btn-reference").onclick = () => H.setDriver(true);
 
     // ---- top actions -----------------------------------------------------
     const speeds = [["½", 0.5], ["1×", 1], ["4×", 4], ["16×", 16], ["max", 0]];
@@ -145,6 +124,7 @@ function initUI(handlers) {
         if (v === 1) b.classList.add("on");
         sg.appendChild(b);
     });
+    $("btn-scene").onclick = () => H.deal(false);
     $("btn-pause").onclick = () => {
         CFG.paused = !CFG.paused;
         $("btn-pause").textContent = CFG.paused ? "Resume" : "Pause";
@@ -157,28 +137,27 @@ function initUI(handlers) {
         $("btn-theme").textContent = dark ? "Light" : "Dark";
         document.body.classList.toggle("dark", dark);
     };
-    $("btn-solo").onclick = () => {
-        CFG.soloView = !CFG.soloView;
-        $("btn-solo").classList.toggle("on", CFG.soloView);
-        $("btn-solo").textContent = CFG.soloView ? "Grid view" : "Solo view";
+    // Eye-in-hand stereo preview. Off by default: it is a second and third
+    // render of the whole scene every frame, which is real cost on a phone.
+    const eb = $("btn-eyes");
+    if (eb) eb.onclick = () => {
+        CFG.showEyes = !CFG.showEyes;
+        eb.classList.toggle("on", CFG.showEyes);
+        eb.textContent = CFG.showEyes ? "Hide eyes" : "Arm eyes";
     };
-    $("btn-export").onclick = exportChampion;
-    $("btn-restart").onclick = () => H.restart({});
-    $("btn-reference").onclick = () => H.restart({ reference: true, showcase: false });
 
     // ---- intro -----------------------------------------------------------
-    $("intro-watch").onclick = () => {
-        if (!baked) return;
-        hideIntro();
-        H.restart({ showcase: true, brain: Brain.fromJSON(baked.brain), fitness: baked.fitness });
-    };
-    $("intro-scratch").onclick = () => { hideIntro(); H.restart({}); };
-    $("intro-continue").onclick = () => {
-        if (!baked) return;
-        hideIntro();
-        H.restart({ seedBrain: Brain.fromJSON(baked.brain) });
-    };
-    $("intro-explore").onclick = () => { hideIntro(); H.restart({}); };
+    $("intro-watch").onclick = () => { hideIntro(); H.deal(false); };
+    $("intro-explore").onclick = () => { hideIntro(); };
+}
+
+/* Choosing a sentence re-deals on the SAME seed, so switching wording compares
+ * two instructions on one bench instead of on two different draws. */
+function pickSentence(id) {
+    CFG.pinnedTaskId = id || null;
+    CFG.liveTask = null;
+    CFG.liveEmbedding = null;
+    H.deal(true);
 }
 
 function hideIntro() { $("intro").classList.add("hidden"); }
@@ -200,7 +179,7 @@ async function embedLive(text) {
     }
     out.textContent = "embedding…";
     try {
-        // half a megabyte of projection basis, fetched only now that it is needed
+        // the projection basis, fetched only now that it is needed
         if (!await Embedding.ensureBasis()) throw new Error("projection basis unavailable");
         const res = await fetch("http://localhost:11434/api/embed", {
             method: "POST",
@@ -212,17 +191,18 @@ async function embedLive(text) {
         const vec = (j.embeddings && j.embeddings[0]) || j.embedding;
         const enc = Embedding.encodeLive(vec);
         if (!enc) throw new Error("wrong dimension from the model");
-        // The referee still needs a machine-readable goal, and the point of the
-        // exercise is that the ARM reads the sentence — so the rule is taken
-        // from whichever pinned goal the user selected, while the vector the
-        // brain sees comes from what they typed. Mismatches are the interesting
-        // case: the arm does what the sentence says, and the scoreboard judges
-        // it against what was selected.
-        const ref = TASKS.find(t => t.id === CFG.pinnedTaskId) || TASKS_TRAIN[0];
+        /* The referee still needs a machine-readable goal, and the point of the
+         * exercise is that the ARM reads the sentence — so the rule is taken
+         * from whichever sentence is currently selected, while the vector the
+         * arm sees comes from what was typed. Mismatches are the interesting
+         * case: the arm does what it thinks it was told, and the scoreboard
+         * judges it against the selected rule. */
+        const ref = TASKS.find(t => t.id === CFG.pinnedTaskId) || TASKS.filter(t => t.split === "train")[0];
         CFG.liveTask = { id: "live", kind: ref.kind, params: ref.params, text, specIdx: -1, split: "live" };
         CFG.liveEmbedding = enc;
-        out.innerHTML = `<span class="good">embedded ✓</span> — scored against the pinned rule ` +
+        out.innerHTML = `<span class="good">embedded ✓</span> — judged against the selected rule ` +
             `<b>${ref.kind.toLowerCase().replace(/_/g, " ")}</b>`;
+        H.deal(true);
     } catch (e) {
         out.innerHTML = `<span class="bad">no local Ollama (${e.message}).</span> ` +
             `Start it with <code>ollama serve</code> and make sure <code>${Embedding.meta.model}</code> is pulled.`;
@@ -232,33 +212,28 @@ async function embedLive(text) {
 /* ------------------------------------------------------------- callbacks */
 UI.setBaked = (b) => {
     baked = b;
-    const ok = !!b;
-    $("intro-watch").disabled = !ok;
-    $("intro-continue").disabled = !ok;
-    if (!ok) {
-        $("intro-watch").querySelector("small").textContent =
-            "No default_brain.js in this folder — train one with train.js first";
-        $("intro-continue").querySelector("small").textContent = "Needs a trained brain";
-    } else {
-        $("intro-watch").querySelector("small").textContent =
-            `Generation ${b.gen} champion · fitness ${Math.round(b.fitness)}`;
-        if (b.corpusHash && b.corpusHash !== corpusHash()) {
-            $("intro-note").innerHTML =
-                `<span class="bad">The saved brain was evolved against a different task bank ` +
-                `(${b.corpusHash} vs ${corpusHash()}). It will behave, but not as trained.</span>`;
-        }
+    const watch = $("intro-watch");
+    if (!b) {
+        watch.querySelector("small").textContent =
+            "No default_brain.js in this folder — train one with distill.js first";
+        $("intro-note").innerHTML =
+            `<span class="bad">No baked brain. The page will run, but the arm is untrained and will ` +
+            `not do anything sensible. Bake one with <code>node distill.js</code> then ` +
+            `<code>node bake_brain.js</code>.</span>`;
+        return;
+    }
+    watch.querySelector("small").textContent =
+        b.heldOut
+            ? `Completes ${(b.heldOut.tasks * 100).toFixed(0)}% of tasks worded in ways it never saw`
+            : `The trained arm on a fresh bench`;
+    if (b.corpusHash && b.corpusHash !== corpusHash()) {
+        $("intro-note").innerHTML =
+            `<span class="bad">The saved brain was trained against a different task bank ` +
+            `(${b.corpusHash} vs ${corpusHash()}). It will behave, but not as trained.</span>`;
     }
 };
 
-UI.onRestart = (evo, showcase, reference) => {
-    $("stat-mode").textContent = reference ? "scripted reference" : showcase ? "champion showcase" : "evolving";
-    $("stat-mode").className = "tstat badge" + (reference ? " alt" : "");
-    $("btn-export").disabled = showcase || reference;
-    lastGenRec = null;
-    $("gen-log").innerHTML = "";
-};
-
-UI.onEpisode = (task, stage, world) => {
+UI.onEpisode = (task, world, seed, reference) => {
     $("instruction").textContent = "“" + task.text + "”";
     $("instr-kind").textContent = task.kind.toLowerCase().replace(/_/g, " ");
     $("instr-split").textContent = task.split === "holdout" ? "★ never trained on"
@@ -269,39 +244,39 @@ UI.onEpisode = (task, stage, world) => {
     $("scene-balls").innerHTML = counts.map((n, c) =>
         n ? `<span class="chip" style="--c:#${COLOR_HEX[c].toString(16).padStart(6, "0")}">${n} ${COLORS[c]}</span>` : ""
     ).join("");
-    $("stat-stage").textContent = `stage ${stage.id} · ${stage.name}`;
-    $("stage-desc").textContent = stage.desc;
-    [...$("stage-track").children].forEach((p, i) =>
-        p.classList.toggle("on", STAGES[i].id === stage.id));
-};
-
-UI.onGeneration = (evo, rec, stage) => {
-    lastGenRec = rec;
-    $("stat-gen").textContent = evo.gen;
-    $("stat-best").textContent = Math.round(rec.best);
-    $("stat-balls").textContent = `${rec.bestDel.toFixed(1)} / ${rec.avgDel.toFixed(1)}`;
-    $("stat-done").textContent = `${Math.round(rec.complete * 100)}%`;
-    const line = document.createElement("div");
-    line.className = "logline";
-    line.innerHTML = `<b>gen ${evo.gen - 1}</b> best ${Math.round(rec.best)} · ` +
-        `balls ${rec.bestDel.toFixed(1)} · done ${Math.round(rec.complete * 100)}%` +
-        (evo.graceEvent ? ` <i>${evo.graceEvent}</i>` : "");
-    const log = $("gen-log");
-    log.insertBefore(line, log.firstChild);
-    while (log.children.length > 60) log.removeChild(log.lastChild);
-    drawHistory(evo.history);
+    $("stat-kind").textContent = task.kind.toLowerCase().replace(/_/g, " ");
+    $("stat-seed").textContent = seed;
+    $("stat-mode").textContent = reference ? "scripted reference" : "trained arm";
+    $("stat-mode").className = "tstat badge" + (reference ? " alt" : "");
+    /* The driver buttons are painted from the world that was actually built,
+     * not from the click that asked for it. `?ref=1` sets the driver without
+     * touching a button, and a control showing the opposite of what is on
+     * screen is worse than no control at all. */
+    $("btn-brain").classList.toggle("on", !reference);
+    $("btn-reference").classList.toggle("on", !!reference);
+    $("drive-note").textContent = reference
+        ? "The hand-written IK controller. It reads the referee's answer directly and never sees the sentence — it is the ceiling on motion, not a solution to the language problem."
+        : "The baked brain. It reads the sentence; the scripted controller does not, and is shown only so you can see what the arm is capable of when the language is taken out of the problem.";
+    $("focus-log").innerHTML = "";
+    $("focus-log").dataset.n = 0;
 };
 
 let frameSkip = 0;
-UI.onFrame = (world, simTime, leader) => {
+UI.onFrame = (world, simTime) => {
     if (frameSkip++ % 4) return;
-    const focus = Math.min(CFG.focus, world.stations.length - 1);
-    const s = world.stations[focus];
+    const s = world.stations[0];
+    const onBench = s.balls.filter(b => !b.lost && b.inBucket < 0 && !b.held).length;
+    const lost = s.balls.filter(b => b.lost).length;
+
     $("stat-time").textContent = simTime.toFixed(1) + "s";
-    $("focus-idx").textContent = `bench ${focus + 1}${focus === leader ? " (leading)" : ""}`;
-    $("focus-fit").textContent = Math.round(s.fitness);
+    $("stat-del").textContent = `${s.delivered} / ${s.evalr.target}`;
+    $("stat-left").textContent = onBench;
     $("focus-clock").textContent = Math.max(0, s.clock).toFixed(1) + "s";
     $("focus-del").textContent = `${s.delivered} / ${s.evalr.target}`;
+    $("focus-left").textContent = onBench;
+    $("focus-lost").innerHTML = lost
+        ? `<span class="bad">${lost}</span>`
+        : `<span class="good">0</span>`;
 
     // what the pointer heads are pointing at, right now
     const sb = s.sel.ball;
@@ -327,50 +302,7 @@ UI.onFrame = (world, simTime, leader) => {
     const ev = $("focus-log");
     if (s.log.length !== +ev.dataset.n) {
         ev.dataset.n = s.log.length;
-        ev.innerHTML = s.log.slice(-8).reverse()
+        ev.innerHTML = s.log.slice(-9).reverse()
             .map(e => `<div class="logline"><b>${e.t.toFixed(1)}s</b> ${e.s}</div>`).join("");
     }
 };
-
-/* --------------------------------------------------------------- history */
-function drawHistory(hist) {
-    const c = $("chart");
-    const ctx = c.getContext("2d");
-    const w = c.width = c.clientWidth * 2, h = c.height = c.clientHeight * 2;
-    ctx.clearRect(0, 0, w, h);
-    if (hist.length < 2) return;
-    const N = Math.min(hist.length, 300);
-    const data = hist.slice(-N);
-    const maxD = Math.max(1, ...data.map(d => d.bestDel));
-    const line = (key, color, max) => {
-        ctx.beginPath();
-        data.forEach((d, i) => {
-            const x = (i / (N - 1)) * w;
-            const y = h - (d[key] / max) * h * 0.92 - h * 0.04;
-            i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-        });
-        ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.stroke();
-    };
-    line("bestDel", "#35b6ff", maxD);
-    line("avgDel", "#4fe0a8", maxD);
-    line("complete", "#ffc94d", 1);
-    $("chart-max").textContent = maxD.toFixed(1);
-}
-
-/* ---------------------------------------------------------------- export */
-function exportChampion() {
-    const evo = H.getEvo();
-    if (!evo || !evo.champion) return;
-    const blob = new Blob([JSON.stringify({
-        gen: evo.gen - 1, fitness: evo.championFit, championGen: evo.championGen,
-        embDim: Embedding.dim,
-        embModel: Embedding.meta ? Embedding.meta.model : "surrogate",
-        corpusHash: corpusHash(),
-        brain: evo.champion.toJSON()
-    })], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `arm_champion_gen${evo.gen - 1}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-}

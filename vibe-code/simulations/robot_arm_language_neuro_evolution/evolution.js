@@ -166,27 +166,27 @@ const STAGES = [
     {
         id: 1, bank: 4, name: "reach & place",
         desc: "One ball, an empty table, one legal answer. Learn the motor loop.",
-        kinds: ["SORT"], maxColors: 1, maxBalls: 1, noise: 0, advance: 0.55
+        kinds: ["SORT"], maxColors: 1, maxBalls: 1, fill: 1.0, noise: 0, advance: 0.55
     },
     {
         id: 2, bank: 8, name: "clutter",
         desc: "Distractor colours appear. The selector has to start reading the instruction.",
-        kinds: ["SORT"], maxColors: 2, maxBalls: 3, noise: 0, advance: 1.1
+        kinds: ["SORT"], maxColors: 2, maxBalls: 3, fill: 1.0, noise: 0, advance: 1.1
     },
     {
         id: 3, bank: 16, name: "sets & exclusions",
         desc: "Counting, 'everything into one bucket', and colours that must not be touched.",
-        kinds: ["SORT", "ALL_TO_ONE", "COUNT", "EXCLUDE"], maxColors: 4, maxBalls: 4, noise: 0.2, advance: 1.5
+        kinds: ["SORT", "ALL_TO_ONE", "COUNT", "EXCLUDE"], maxColors: 4, maxBalls: 5, fill: 1.3, noise: 0.2, advance: 1.5
     },
     {
         id: 4, bank: 28, name: "order matters",
         desc: "Alternation, strict ordering, and leaving one behind — the goal now depends on history.",
-        kinds: null, maxColors: 4, maxBalls: 5, noise: 0.3, advance: 2.0
+        kinds: null, maxColors: 4, maxBalls: 8, fill: 1.7, noise: 0.3, advance: 2.0
     },
     {
         id: 5, bank: 48, name: "full bench",
-        desc: "Every goal, up to six balls, sensor and servo noise.",
-        kinds: null, maxColors: 4, maxBalls: 6, noise: 0.5, advance: 99
+        desc: "Every goal, a full bench, sensor and servo noise.",
+        kinds: null, maxColors: 4, maxBalls: 12, fill: 2.2, noise: 0.5, advance: 99
     }
 ];
 

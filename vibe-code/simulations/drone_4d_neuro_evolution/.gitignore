@@ -1,0 +1,10 @@
+# Training checkpoints hold the entire population (110 nets × 12k params as
+# JSON), so a run's worth is hundreds of megabytes. The only artefact that
+# needs to be committed is champion.js, which bake.js generates from the
+# checkpoint the run picked.
+training/*.json
+training/out_*.txt
+training/err_*.txt
+
+# generated while capturing the thumbnail
+_shot.html
