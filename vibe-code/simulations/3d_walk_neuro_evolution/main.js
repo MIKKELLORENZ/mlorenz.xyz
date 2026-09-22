@@ -268,7 +268,9 @@ function runShowcase(net) {
      * this code is the same one bake_brain.js printed — which is what turns "the
      * new brain is loaded, probably" into something checkable. */
     const idEl = document.getElementById("stat-brain");
-    if (idEl) idEl.textContent = brainId(showcaseNet);
+    if (idEl) idEl.textContent = brainId(showcaseNet) +
+        (showcaseNet.riseNet ? " + rise " + brainId(showcaseNet.riseNet) : "") +
+        (showcaseNet.riseNets ? " + " + Object.keys(showcaseNet.riseNets).map(k => k + ":" + brainId(showcaseNet.riseNets[k])).join(" ") : "");
     // Viewing mode: eval on, the breeding controls out of the way, and the
     // fitness/skills/log column gone — it would be plotting one frozen brain
     // against itself. All of it comes back if eval is switched off.
@@ -391,7 +393,8 @@ const KEY = "walk_neuro_champion_v1";
 const brainIO = {
     save() {
         if (!evo.champion) return uiLog("nothing to save yet");
-        localStorage.setItem(KEY, JSON.stringify({ net: evo.champion.toJSON(), fitness: evo.championFit }));
+        localStorage.setItem(KEY, JSON.stringify({ net: evo.champion.toJSON(), fitness: evo.championFit,
+            riseNet: evo.champion.riseNet ? evo.champion.riseNet.toJSON() : undefined }));
         uiLog(`champion saved (${evo.championFit.toFixed(0)})`);
     },
     load() {
@@ -417,6 +420,9 @@ const brainIO = {
             if (net.sizes.join() !== NET_SIZES.join()) {
                 return uiLog(`brain shape ${net.sizes.join("-")} does not match this build (${NET_SIZES.join("-")})`);
             }
+            // two-net brain: the rise net rides on the walking net (see walker.js)
+            if (o.riseNet) { const r = Net.fromJSON(o.riseNet); if (r.sizes.join() === NET_SIZES.join()) net.riseNet = r; }
+            if (o.riseNets) { net.riseNets = {}; for (const k in o.riseNets) { const r = Net.fromJSON(o.riseNets[k]); if (r.sizes.join() === NET_SIZES.join()) net.riseNets[k] = r; } }
             evo.champion = net;
             evo.championFit = o.fitness || 0;
             uiLog(`brain loaded (${net.sizes.join("-")})`);
@@ -438,6 +444,8 @@ const brainIO = {
             uiLog(`built-in brain is ${net.sizes.join("-")}, this body needs ${NET_SIZES.join("-")} — retrain and re-bake`);
             return null;
         }
+        if (DEFAULT_BRAIN.riseNet) { const r = Net.fromJSON(DEFAULT_BRAIN.riseNet); if (r.sizes.join() === NET_SIZES.join()) net.riseNet = r; }
+        if (DEFAULT_BRAIN.riseNets) { net.riseNets = {}; for (const k in DEFAULT_BRAIN.riseNets) { const r = Net.fromJSON(DEFAULT_BRAIN.riseNets[k]); if (r.sizes.join() === NET_SIZES.join()) net.riseNets[k] = r; } }
         return net;
     },
     showcase() {
@@ -478,6 +486,9 @@ window.addEventListener("load", () => {
                     return;
                 }
                 const net = Net.fromJSON(raw);
+                // two-net brain: the rise net(s) come with the file (see builtIn)
+                if (fresh.riseNet) { const r = Net.fromJSON(fresh.riseNet); if (r.sizes.join() === NET_SIZES.join()) net.riseNet = r; }
+                if (fresh.riseNets) { net.riseNets = {}; for (const k in fresh.riseNets) { const r = Net.fromJSON(fresh.riseNets[k]); if (r.sizes.join() === NET_SIZES.join()) net.riseNets[k] = r; } }
                 const now = brainId(net);
                 if (showcase) { runShowcase(net); newGeneration(); }
                 else { showcaseNet = net; }

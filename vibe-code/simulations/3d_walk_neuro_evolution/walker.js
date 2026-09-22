@@ -399,6 +399,7 @@ const BALANCE_HOLD = 2.0;           // s upright after standing before walking s
  * collect on a height it merely touched. */
 const RISE_CREDIT_HOLD = 0.20;   // s
 const RISE_HOLD = 0.35;             // s upright at height before a recovery counts
+const RISE_HANDOFF = 1.0;           // s the rise net keeps driving after a recovery (two-net brain)
 const COM_PEAK_DECAY = 0.6;         // m/s — how fast the "fell from" height forgets
 const DOWN_TIMEOUT = 6.0;           // s face-down with no progress before we stop simulating it
 
@@ -779,6 +780,14 @@ function nrand(rng) { return (rng() + rng() + rng() - 1.5) * 1.1547; }
 class Walker {
     constructor(brain, idx, model) {
         this.brain = brain;
+        /* Two-net brain: a separately evolved RISE net rides on the walking net
+         * as `brain.riseNet` and drives while the walker is down and for
+         * RISE_HANDOFF s after it recovers. Distilling a 65% kneel riser into
+         * the walking net kept 20% of it; kept apart, both skills stay whole
+         * (measured: 6.5 wp walking and 70% held kneel rises). Null = the
+         * single-net brain. Must stay identical to walker.hpp. */
+        this.riseBrain = brain && brain.riseNet ? brain.riseNet : null;
+        this.riseHold = 0;
         this.idx = idx;
         this.model = model;
         this.mb = new MultiBody(model);
@@ -826,6 +835,13 @@ class Walker {
         // live from the first tick rather than only after a fall.
         this.startedDown = !!pose;
         this.startPose = pose ? pose.name : "crouch";
+        // poses the WALKING net starts better from than any rise net (crouch 42/60 vs 0, horse 11/20 vs 5/20); see control()
+        this.crouchStart = !!pose && (String(pose.name).indexOf("crouch") === 0 || pose.name === "horse");
+        /* per-pose SPECIALIST rise nets (brain.riseNets[name]) beat the general
+         * rise net from the pose they were evolved on; the general one drives
+         * every other down state, including a real fall */
+        this.riseBrain = (this.brain && this.brain.riseNets && pose && this.brain.riseNets[pose.name])
+            || (this.brain && this.brain.riseNet) || null;
         const q0 = pose ? pose.q : M.crouch;
         for (let j = 0; j < this.nj; j++) {
             let a = q0[j];
@@ -901,6 +917,7 @@ class Walker {
         this.fallSeverity = 0;
         this.diverged = false;      // flung off the map, as distinct from fallen over
         this.downed = false;        // on the ground, and has to get itself up
+        this.riseHold = 0;
         this.downTimer = 0;
         this.riseTimer = 0;
         this.falls = 0;
@@ -1257,7 +1274,11 @@ class Walker {
             for (let i = 0; i < inp.length; i++) inp[i] += nrand(this.rng) * s;
         }
 
-        const o = this.brain.forward(inp);
+        if (this.riseHold > 0) this.riseHold -= CTRL_DT;
+        /* a crouch start is the walking net's own posture; the rise net takes
+         * such an episode only after a real fall (see walker.hpp) */
+        const net = (this.riseBrain && (this.downed || this.riseHold > 0) && !(this.crouchStart && this.falls === 0)) ? this.riseBrain : this.brain;
+        const o = net.forward(inp);
         for (let i = 0; i < NOUT; i++) {
             let v = o[i];
             if (world.noise) v += nrand(this.rng) * SIM2REAL.actionNoise;
@@ -1858,6 +1879,14 @@ class Walker {
                 this.riseTimer += dtc;
                 if (this.riseTimer > RISE_HOLD) {
                     this.downed = false;
+                    this.riseHold = RISE_HANDOFF;   // the rise net finishes standing up before the walker takes over
+                    /* A walker that has recovered HAS stood up. The stand milestone
+                     * (0.93 of standing hip height held 0.6 s) was only ever met by
+                     * the overshoot of the crouch-to-stand at an ordinary start; the
+                     * walking net's settled stance is ~0.90, so a walker that rose
+                     * from the floor and walked off earned no arrivals for it. Must
+                     * stay identical to walker.hpp. */
+                    if (!this.stood) { this.stood = true; this.stoodAt = world.time; }
                     this.riseTimer = 0; this.fallTimer = 0; this.downTimer = 0;
                     if (this.recoveries < FIT.RECOVER_CAP) {
                         this.recoveries++;

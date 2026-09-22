@@ -230,6 +230,12 @@ class Net {
         for (let l = 0; l < this.weights.length; l++) n.weights[l].set(this.weights[l]);
         if (this.slopes) { for (let l = 0; l < this.slopes.length; l++) n.slopes[l].set(this.slopes[l]); }
         n.act = this.act;
+        /* The two-net brain rides on the walking net (walker.js): the rise net
+         * and any per-pose specialists must survive a clone, or the showcase —
+         * which clones what it is handed — silently runs the walker alone.
+         * That is exactly what happened on 2026-09-15. */
+        if (this.riseNet) n.riseNet = this.riseNet.clone();
+        if (this.riseNets) { n.riseNets = {}; for (const k in this.riseNets) n.riseNets[k] = this.riseNets[k].clone(); }
         return n;
     }
 

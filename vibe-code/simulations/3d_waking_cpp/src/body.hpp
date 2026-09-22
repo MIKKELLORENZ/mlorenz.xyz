@@ -142,6 +142,91 @@ struct Model {
         po.seatT = u;
         return po;
     }
+
+    /* riseAt — the ramp that walks the CONTACT SET, not the height.
+     *
+     * seatAt above was measured and is not the ramp it was believed to be:
+     * seatAt(1.00) spawns at hip 86 deg against the deep crouch's 92, and every
+     * rung of it touches the ground with FOOT and nothing else. So the entire
+     * rise curriculum trained one contact configuration and the exam then asked
+     * for a different one. What was missing was never height, it was support:
+     *
+     *     Foot                 crouch      COM 0.551
+     *     Foot + Shank         kneel       COM 0.574   <- knee down
+     *     Foot + Shank + Hand  quadruped   COM 0.376   <- hands down
+     *     Hand                 prone       COM 0.386
+     *
+     * kneel sits HIGHER than the deep crouch, which is why a height-ordered ramp
+     * could never have found these rungs.
+     *
+     * SNAPPED, not interpolated, and that was measured. A linear blend of two
+     * statically stable postures is not itself stable — frozen at the spawn
+     * posture the blends face-planted (crouch->kneel 0.797 -> 0.162,
+     * kneel->quadruped 0.538 -> 0.143) while the anchors held (kneel 0.574 ->
+     * 0.562, quadruped 0.376 -> 0.348). A rung that collapses under a do-nothing
+     * controller is the cliff again wearing a fractional name.
+     *
+     * Must stay identical to model.riseAt in body.js. */
+    Pose riseAt(double t) const {
+        const double u = std::max(0.0, std::min(1.0, t));
+        if (u < 0.35) return crouchAt(u / 0.35);
+        const Pose* pick = nullptr;
+        auto byName = [&](const char* n) -> const Pose* {
+            for (const auto& p : startPoses) if (p.name == n) return &p;
+            return nullptr;
+        };
+        if (u >= 0.90) { for (const auto& p : groundPoses) if (p.name == "prone") pick = &p; }
+        else if (u >= 0.65) pick = byName("quadruped");
+        else pick = byName("kneel");
+        if (!pick) pick = &groundPoses[0];
+        Pose po = *pick;
+        char buf[32]; std::snprintf(buf, sizeof buf, "rise%.2f", u);
+        po.name = buf;
+        /* depth drives riseGrace, so a deeper rung buys proportionally more clock
+         * — a rise from all-fours genuinely takes longer than standing out of a
+         * squat, and charging both the same is charging the harder one twice. */
+        po.depth = 1 + u;
+        po.seatT = u;
+        return po;
+    }
+
+    /* poseBySpec — a start pose by NAME or by SPEC, for the training tools:
+     *
+     *   "kneel"                         a pose from groundPoses / startPoses
+     *   "crouch:0.75" "seat:0.5" "rise:0.8"   the ramps above
+     *   "lerp:kneel:quadruped:0.3"      a blend, 0 = the first pose, 1 = the second
+     *
+     * The blend is the reverse-curriculum rung: a rise GA seeded with a brain
+     * that gets up from kneel is started a little way back toward quadruped,
+     * and moved further back only when it holds the current rung. riseAt's note
+     * that a blend is not STATICALLY stable still stands — a brain is acting on
+     * it from the first tick, and a rung it cannot catch is simply not passed.
+     * Training-only: the browser never sees a spec, so nothing here needs a
+     * JS twin. Returns false for an unknown name. */
+    bool poseBySpec(const std::string& s, Pose& out) const {
+        for (const auto& q : groundPoses) if (q.name == s) { out = q; return true; }
+        for (const auto& q : startPoses) if (q.name == s) { out = q; return true; }
+        auto num = [&](size_t at) { return std::atof(s.c_str() + at); };
+        if (s.rfind("crouch:", 0) == 0) { out = crouchAt(num(7)); return true; }
+        if (s.rfind("seat:", 0) == 0) { out = seatAt(num(5)); return true; }
+        if (s.rfind("rise:", 0) == 0) { out = riseAt(num(5)); return true; }
+        if (s.rfind("lerp:", 0) == 0) {
+            const size_t c1 = s.find(':', 5); if (c1 == std::string::npos) return false;
+            const size_t c2 = s.rfind(':'); if (c2 <= c1) return false;
+            Pose a, b;
+            if (!poseBySpec(s.substr(5, c1 - 5), a) || !poseBySpec(s.substr(c1 + 1, c2 - c1 - 1), b)) return false;
+            const double u = std::max(0.0, std::min(1.0, num(c2 + 1)));
+            out = a;
+            for (int j = 0; j < nj; j++) out.q[j] = a.q[j] + (b.q[j] - a.q[j]) * u;
+            out.pitch = a.pitch + (b.pitch - a.pitch) * u;
+            out.roll  = a.roll  + (b.roll  - a.roll)  * u;
+            out.depth = std::max(a.graceDepth(), b.graceDepth());
+            out.seatT = -1;
+            out.name = s;
+            return true;
+        }
+        return false;
+    }
 };
 
 /* Inertia of a solid box about its own centre. */

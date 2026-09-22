@@ -232,3 +232,91 @@ ssh -N -L 8913:localhost:8913 <your-training-host>
 trained at stage 3 and examined at stage 4 meets harder shoves and sharper
 courses, so a low score says "harder exam", not "worse walker" — this project lost
 an afternoon to exactly that once, and `exam.cpp` says so twice for a reason.
+
+---
+
+## 2026-09-14 — distillation tools
+
+The GA could not learn to get up (signal-limited, see the JS folder's
+`what_worked.md`, "Update, 2026-09-14"). These tools built a per-decision
+teacher and cloned it; the shipped brain is `dag/f22.json` (seed 22 of five fits on identical data; `dag/s8.json` was the earlier pick).
+
+| | |
+|---|---|
+| `src/dagger.cpp` → `walk3d_dagger` | labels every control tick with a teacher (walking champion while upright, phase-tracked rise reference while down), records samples, and doubles as the on-policy evaluator. Uses an `ActionHook` on `Walker::control` that is null for every other binary. |
+| `src/risesearch.cpp` → `walk3d_risesearch` | open-loop rise search in network output space; `--finisher` scores a gene by what the closed-loop champion ends in after handover (the version that found a standing kneel rise); `--chain`, `--residual`, `--init` variants. **Vary the mission seed**: it drives the pose jitter. |
+| `distil.py` | PyTorch (system python3 on the node) fit of 365-48-32-33 leaky-ReLU to the samples; folds input standardisation into layer 1; parity-checks the export against `nn.hpp`'s forward pass (2e-7). |
+| `dagger.sh`, `dagger_more.sh` | the rounds (β 1 → 0, refit from scratch on the union each time); `DAGDIR`, `REFS`, `EXTRA`, `DAGGER_ARGS` env vars. |
+| `duel.sh`, `duel_final.sh` | the ship/no-ship instrument: every finalist driving itself on one fresh block, same binary. Never compare across binaries — the episode plan changes with the flags. |
+| `go_polish.sh`, `go_polish5.sh` | GA from a distilled seed (`--mut-reset 0`, small steps, stage 5 locked). Ten generations keep the rise; fifteen lose it. |
+| `dag/rob3_kneel.json` | the kneel rise reference (6 knots, 3 s) that ends standing when the champion finishes it. `dag/fin6_kneel.json` is its parent. |
+
+`nn.hpp` gained `mutResetRef()` (`--mut-reset`, default 0.03 as before).
+
+---
+
+## 2026-09-15 — the two-net brain, rise GAs, and honest counting
+
+The distilled single net topped out at a kneel rise that "rose" 55 % of the
+time by the walker's recovery flag and **held** (no fall within 3 s) 8 %. Two
+changes made a real getting-up skill and one caught the counting error.
+
+**Count held, not rose.** `walk3d_dagger` now prints `held a/b` per pose, and
+`pick_best.py`, the self-label rule and the rise-only trainer's bonus all use
+it. The recovery flag fires 0.35 s after "upright enough" — mid-rise for a
+searched motion, and immediately for a crouch or seat start (the pose is
+already at the flag's thresholds), so "rose" on those poses measures nothing.
+`--verbose 1` on the harness prints per-episode `recov / falls / upright`; look
+at it before trusting any rate. `src/probe_fall.cpp` runs the trainer's own
+episode path on one brain and prints what each episode scored — it is how the
+trial and the harness were reconciled three times tonight.
+
+**Two-net brain.** `Walker::riseBrain` drives while `downed` and for
+`RISE_HANDOFF` = 1 s after recovery; the walking net otherwise. Crouch starts
+and `horse` are routed to the walking net (`crouchStart`) — it starts better
+from them than any rise net does. `bake_brain.js walker.json --rise rise.json`
+bakes both (`DEFAULT_BRAIN.riseNet`); the harness takes `--student-rise`.
+Distilling a 65 % riser into the walking net kept 20 % of it; kept apart, the
+brain walks 5.9 wp AND holds 79 % of kneel starts. `stood` is credited on
+recovery (both sides), or a walker that rose via the rise net earned no
+arrivals: its natural stance is ~0.90 of standing hip height and the stand
+milestone's 0.93 was only ever met by the crouch-to-stand overshoot.
+
+**Rise-only GA (`go_riseonly.sh`, `walk3d_train --rise-only`).** From a brain
+with an 8 % held kneel rise it reached 65–79 % in ~150 generations at 96
+episodes per brain (8–24 episodes rank on the winner's curse). What it needed:
+the held bonus (`rose && upright >= T-3 s`), snapshots exported in the
+rise-only branch (`--export-every`) and picked by the harness, `--rise-pose
+a,b,c` dealt per episode slot so nothing is forgotten, and the `fall:` start
+spawning STANDING (the stage's own crouch deal survived the spec lookup and a
+"heap" GA was paid for crouch rises). Mutation scale matters: 0.02/0.015
+refines a skill and never creates one (seat: 0 in 86 gens); 0.06/0.05 created
+a 93 % seat:0.25 hold in 30 gens — and lost kneel. `--rise-rank mean` picks
+the specialist, `min` picks the do-nothing generalist, `gate:<thr>` (rank by
+mean among brains keeping the seeded pose) is the one to use.
+
+**Start-pose specs** (`Model::poseBySpec`, resolved in `World::init` from
+`WorldOpts::riseTrial`, so `--rise-pose` and the harness `--poses` take them):
+`crouch:x`, `seat:x`, `rise:x`, `lerp:A:B:t` (blend; the reverse-curriculum
+rung), `jit:pose:amp` (mission-seeded joint/pitch/roll noise), `fall:x` (spawn
+standing, one hard shove, episode rebased a second after landing — the
+walker's own heaps). `go_curric.sh` drives a curriculum (advance on held ≥
+49/82 on the rung and on the checks), `go_mix.sh` a fixed mix with per-pose
+measurement every 5 min, `go_heap.sh` the fall start. `src/refstate.hpp` holds
+the (joints, gravity) descriptor shared by the tracker and `risesearch
+--target` (dense pose-target term; still 0/6 beyond kneel).
+
+Where it is stuck (2026-09-15 04:00 UTC): kneel 79 % and crouch 70 % held;
+seated / quadruped / prone / supine / side and recovery after a real fall are
+0. See `3d_walk_neuro_evolution/what_worked.md` and `dag5/ASSESSMENT.md` on the
+node for the numbers and the reasoning.
+
+**Extension 2026-09-15 (01:35–02:40 UTC).** `--student-rise-pose name=file,…` on the
+harness and `bake_brain.js --rise-pose name=file` (repeatable) route a per-pose
+specialist rise net by start pose (`riseNets` in the baked brain; the general
+`--rise` net drives every other down state). Single-pose specialist GAs for the
+sitting/lying pool poses reached 0/82 held in 45 min. Kneel on varied terrain is
+the shipped brain's weak spot (14/90 held vs 80/90 flat); a varied-terrain
+refinement did not move in 71 gens — `go_riseonly.sh` takes `TERRAIN=`, `go_mix.sh`
+takes `FLOORFLAT=` for the measurement. Full log: node `dag5/PLAN_7H.md`,
+assessment in `dag/ASSESSMENT_20260915.md` here.

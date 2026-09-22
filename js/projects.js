@@ -279,6 +279,18 @@ document.addEventListener('DOMContentLoaded', function() {
         },
 
         {
+            id: "bioreactor_neuro_evolution",
+            title: "Tending the Culture",
+            description: "One evolved controller runs five different stem-cell differentiations in the same 100 mL stirred bottle: cardiomyocytes by the GiWi protocol with lactate selection, midbrain dopamine neurons by the floor-plate route, pancreatic beta cells through six stages, kidney organoids, and hepatocytes. The plant is mechanisms rather than tables and it knows about none of them — cells sit in a chain of stages, they leave a stage on a clock, and the signals present at that hour decide only the FRACTION that arrive where the protocol intended, so a cue dosed two days late still fills the vessel, just with the wrong cells. Around that: bicarbonate pH chemistry that lactate titrates until the phenol red goes yellow, a Thiele-modulus hypoxic core, aggregate fusion and shear, reagents whose effective dose falls with cell density and with how far a 25 kDa protein has to diffuse into a 300 µm ball, decisions made on how LONG a signal was on rather than how strong, and a hidden cell line whose sensitivity to every reagent is only observable through flow cytometry two days late. The controller has a fixed action space whatever the product — six process knobs, six generic dosing pumps, three media — is told which of the five was ordered through five inputs and a countdown, and otherwise sees exactly what a lab sees: probes every hour, assays hours late, nothing at weekends. Calibrating it meant breaking each published protocol one way at a time until every failure mode matched the papers (half the CHIR dose makes forebrain and twice makes hindbrain; inducing the endocrine programme five days early makes polyhormonal cells; a two-day CHIR pulse and a seven-day pulse ruin a kidney organoid in opposite directions; withholding oxygen costs a hepatocyte its drug-metabolising activity without costing a single cell), and finding eleven faults a scoreboard would never have shown — including an absolute score that put four of the five protocols BELOW a reactor nobody touched, and a distillation whose loss fell to 0.06 while producing a network that made zero neurons and zero beta cells, and a held-out gate whose scenario bank never rotated, which froze one run's champion for 380 generations while its log read exactly like a plateau. Each protocol is now scored against the median of its own published recipe, and the controller is measured against them one product at a time rather than on an average: it beats beta cells, hepatocytes and midbrain dopamine neurons, takes kidney organoids narrowly, and is behind on cardiomyocytes alone, where it buys purity with yield for a trade the corrected references price as a loss. Four of the five beaten, on a hundred and twenty paired batches against the published recipes. The page is a lab notebook rather than a control room — pick which of the five to make, or let every batch draw a different one, and watch the network and the published recipe work the same bottle side by side.",
+            thumbnail: "../vibe-code/simulations/bioreactor_neuro_evolution/thumbnail.png",
+            category: "simulations",
+            tags: ["bioreactor", "stem cells", "cardiomyocytes", "dopaminergic neurons", "beta cells", "kidney organoids", "hepatocytes", "differentiation", "cell culture", "process control", "bioprocess", "neuroevolution", "neural network", "genetic algorithm", "machine learning", "javascript"],
+            date: "2026-09-13",
+            path: "simulations/bioreactor_neuro_evolution/index.html",
+            type: "iframe"
+        },
+
+        {
             id: "tokamak_plasma_neuro_evolution",
             title: "Holding the Plasma",
             description: "Magnetic control of a tokamak plasma, learned by evolution. A 150 kA current ring is held in mid-air by nineteen coils and is violently unstable — elongate it and it falls out of the machine in six milliseconds, slowed to a catchable ten only by eddy currents in the conducting wall. The controller sees what a real machine sees: 34 flux loops, 38 field probes and coil currents, noisy and one step stale, and it commands voltages, not currents. Coupled L/R circuits, elliptic-integral Green's functions, a magnetic observer, and a hand-tuned PID cascade running the same shot beside it for comparison. The published observation vector turned out to be memoryless — it cannot tell a plasma sitting high from one falling fast — so seventy temporal neurons were added, including the whole probe array differenced against 0.8 ms ago, which is where the invisible vessel eddy currents live. The controller is cloned from the PID by imitation learning and then evolved past it, on a difficulty ladder that makes the machine nastier whenever the champion gets comfortable and never lets it forget the machine it started on. It now completes two thirds of the 1.2 s discharge the baseline disrupts every single time, and where the baseline's error grows fourfold as the wall thins, its own grows by a third.",
@@ -375,6 +387,29 @@ document.addEventListener('DOMContentLoaded', function() {
             featured: false // thumbnail doesn't carry a full-bleed hero slide
         },
 
+        {
+            id: "neural_architect",
+            title: "Neural Architect",
+            description: "A visual designer for neural network architectures. Build the big picture out of blocks — inputs, linear and conv layers, attention, norms, residual adds — then zoom in and the same blocks resolve into their individual neurons. Split an input into named regions (\"neurons 0–10 physical constraints, 11–110 objective embedding, 111–200 sensors\"), label single neurons, and drag a line from one neuron to another to add sparse graph-style connections on top of the dense wiring. Marquee-select blocks or neuron ranges and apply batch-norm, dropout, residual skips or annotations from a floating toolbar; group blocks into reusable modules; start from a clean slate or a template. Shapes are inferred live, and the export is a complete, runnable PyTorch nn.Module (with a smoke test and the design embedded in its docstring so the .py re-opens losslessly), plus Keras JSON out and ONNX in.",
+            thumbnail: "../vibe-code/utilities/neural_architect/thumbnail.png",
+            category: "utilities",
+            tags: ["neural network", "architecture", "pytorch", "keras", "onnx", "deep learning", "designer", "graph neural network", "node editor", "canvas", "javascript"],
+            date: "2026-09-12",
+            path: "utilities/neural_architect/index.html",
+            type: "iframe"
+        },
+
+        {
+            id: "compression_evolution",
+            title: "Compression Evolution",
+            description: "A genetic algorithm that invents lossless compression algorithms, starting from nothing but “count which bytes are common”. Every candidate is a real compressor — optional Burrows–Wheeler sort, evolved numeric predictors, a bank of evolved context experts, a learned mixer and an arithmetic coder — that is actually run; the champion is decompressed again and compared bit for bit, and can be downloaded and restored. By default ONE design is evolved for five very different files at once (a 1 MB cat photo, Alice in Wonderland, a guitar recording, a cat’s meow and the page’s own source): its rules are structure-relative (“one row up”, “one unit left”), so the same algorithm means something on pixels, samples and text. Three architectural families evolve side by side on a chart whose reference lines are gzip, bzip2, xz, zstd, brotli, PPMd, PNG, WebP, JPEG XL, FLAC and friends, all measured with the real tools on the very same bytes; the recorded run reaches a mean of 33 % and passes PPMd on both texts, FLAC on both recordings and PNG and JPEG-LS on the photo. See what every expert looks at, where the bits go (flat background nearly free, fur and whiskers expensive) and which part of the design saves them. Runs are saved as you go, switching files never stops evolution, and one click downloads the evolved algorithm. Bring your own file, up to 8 MB; nothing leaves the browser.",
+            thumbnail: "../vibe-code/utilities/compression_evolution/thumbnail.png",
+            category: "utilities",
+            tags: ["compression", "genetic algorithm", "evolution", "lossless", "context mixing", "arithmetic coding", "burrows-wheeler", "gzip", "png", "flac", "information theory", "entropy", "web workers", "data visualization", "javascript"],
+            date: "2026-09-21",
+            path: "utilities/compression_evolution/index.html",
+            type: "iframe"
+        },
 
 
     ];
@@ -681,7 +716,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="project-title-container">
                     <span class="project-title">${esc(projectTitle || 'Interactive Project')}</span>
                 </div>
-                <button id="theme-toggle" aria-label="Toggle dark mode"></button>
             `;
 
             // Add event listener to the new back button

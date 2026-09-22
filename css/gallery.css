@@ -295,7 +295,7 @@
 
 .vc-toolbar {
     position: sticky;
-    top: 57px;
+    top: var(--nav-h, 57px);
     z-index: 40;
     display: flex;
     align-items: center;

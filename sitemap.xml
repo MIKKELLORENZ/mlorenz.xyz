@@ -4,10 +4,16 @@
     <loc>https://mlorenz.xyz/</loc>
   </url>
   <url>
-    <loc>https://mlorenz.xyz/vibe-code/</loc>
+    <loc>https://mlorenz.xyz/blog/</loc>
   </url>
+  <!-- blog:posts:start -->
   <url>
-    <loc>https://mlorenz.xyz/inventions/</loc>
+    <loc>https://mlorenz.xyz/blog/1_laws_of_physics_or_engineering_decisions/</loc>
+    <lastmod>2026-09-22</lastmod>
+  </url>
+  <!-- blog:posts:end -->
+  <url>
+    <loc>https://mlorenz.xyz/vibe-code/</loc>
   </url>
   <url>
     <loc>https://mlorenz.xyz/consultancy/</loc>

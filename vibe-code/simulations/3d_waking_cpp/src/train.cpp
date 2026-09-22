@@ -110,9 +110,17 @@ int main(int argc, char** argv) {
 
     struct {
         int gens, pop, episodes, workers, grace, stageLock, save;
+    int rehearseEvery;
         uint32_t seed;
         double mutRate, mutSigma, headingW, cpgScale, servoScale, trackFrac;
         long long deadline;
+        double childZeroFit, scaffoldFrac;
+        int riseEvery;
+        bool riseOnly;
+        std::string risePose;
+        std::string riseTerrain;
+        double riseTerrainFrac;
+        double risePay;
         int plateauGens, trackGens, trackCount, actCull, exportEvery, exportCount,
             injectLife, injectCross;
         bool surfaceNorm, interbreed, quiet, freshHistory;
@@ -137,8 +145,10 @@ int main(int argc, char** argv) {
     CFG.seed = (uint32_t)argNum("seed", 1234);
     CFG.mutRate = argNum("mut-rate", MutDefault::rate);
     CFG.mutSigma = argNum("mut-sigma", MutDefault::sigma);
+    mutResetRef() = argNum("mut-reset", 0.03);
     CFG.grace = (int)argNum("grace", 3);
     CFG.stageLock = (int)argNum("stage-lock", 0);
+    CFG.rehearseEvery = (int)argNum("rehearse-every", 7);
     CFG.terrain = argStr("terrain", "rolling");
     CFG.out = argStr("out", "training");
     CFG.resume = argStr("resume", "");
@@ -148,6 +158,43 @@ int main(int argc, char** argv) {
     CFG.cpgScale = argNum("cpg-scale", 1);
     CFG.servoScale = argNum("servo-scale", 1);
     CFG.deadline = (long long)argNum("deadline", 0);
+    /* childZeroFit is an ABSOLUTE fitness threshold above which crossover is
+     * switched off entirely and the run hill-climbs. That made it a hidden
+     * function of the reward scale: the rise-ladder change dropped best fitness
+     * from ~17,800 to ~10,000 and silently flipped the whole population from
+     * hill-climbing (79% of generations above the line) back to recombination
+     * (1%). Any comparison spanning that boundary compares two search modes as
+     * well as two curricula. Exposed so it can be pinned; 0 disables the gate. */
+    /* Share of RISE-RUNG episodes in which a searched reference drives the
+     * first part of the rise before handing over to the brain. 0 disables. */
+    /* Every Nth generation is a RISE TRIAL: the whole fleet becomes minor
+     * variations of the elite, spawns in one floor pose with the scaffold off,
+     * and is ranked on mean COM height instead of the ledger. 0 disables. */
+    CFG.riseEvery = (int)argNum("rise-every", 0);
+    CFG.riseOnly = argNum("rise-only", 0) != 0;
+    RISE_ONLY_SECONDS = argNum("rise-seconds", 3.0);
+    RISE_SETTLE_WINDOW = argNum("rise-settle", 0.5);
+    CFG.risePay = argNum("rise-pay", 1.0);
+    /* --rise-rank mean|min: how a rise-only brain is ranked over a POSE MIX.
+     * "mean" let a seat/crouch specialist win the mix (seat:0.25 held 73/82,
+     * kneel 0/82) — the skill it was seeded with was traded away. "min" ranks
+     * on the worst pose, so nothing solved can be sold to buy the next pose. */
+    const std::string riseRank = argStr("rise-rank", "mean");
+    FIT().COM_RISE_PER_M *= CFG.risePay;   // getting up must not be the cheap option
+    /* Getting up on FLAT ground is a different problem from getting up on a
+     * stair tread, and only the second one is what a fallen walker actually
+     * meets. "flat" trains the easy case; anything else mixes real ground in. */
+    CFG.riseTerrain = argStr("rise-terrain", "flat");
+    CFG.riseTerrainFrac = argNum("rise-terrain-frac", 0.0);
+    CFG.risePose = argStr("rise-pose", "prone");
+    /* --rise-pose a,b,c: a MIX, dealt per episode slot (e % n). A rise GA that
+     * trains one curriculum rung at a time forgets the previous ones — the
+     * rung-0.19 riser measured 0/82 from the plain kneel it was seeded from —
+     * so every rung trains on all the poses passed so far plus the new one. */
+    std::vector<std::string> risePoses;
+    { std::stringstream ss(CFG.risePose); std::string tok; while (std::getline(ss, tok, ',')) if (!tok.empty()) risePoses.push_back(tok); }
+    CFG.scaffoldFrac = argNum("scaffold-frac", -1);
+    CFG.childZeroFit = argNum("child-zero-fit", 15000);
     CFG.plateauGens = (int)argNum("plateau-gens", 100);
     CFG.trackGens = (int)argNum("track-gens", 50);
     CFG.trackFrac = argNum("track-frac", 0.36);
@@ -192,6 +239,9 @@ int main(int argc, char** argv) {
 
     const Model& M = HUMANOID();
     Evolution evo(CFG.pop, CFG.seed, CFG.acts, CFG.interbreed);
+    evo.riseEvery = CFG.riseEvery;
+    evo.riseOnly = CFG.riseOnly;
+    evo.risePose = CFG.risePose;
     if (CFG.interbreed && !evo.interbreed) {
         std::cout << "!! --interbreed needs two or more activations and cannot include tanh\n";
         return 1;
@@ -438,6 +488,7 @@ int main(int argc, char** argv) {
             o.noiseSeed = (uint32_t)(5000 + m * 13);
             o.episodeSlot = e;
             o.episodeCount = E;
+            if (risePoses.size() > 1 && !o.riseTrial.empty()) o.riseTrial = risePoses[(size_t)e % risePoses.size()];
             epOut[(size_t)i * E + e] = runEpisode(w, M, &evo.brains[(size_t)i], o);
         }
     };
@@ -448,6 +499,22 @@ int main(int argc, char** argv) {
         Curriculum curr;
         curr.stageLock = CFG.stageLock;
         const StagePick st = stageFor(evo.gen, evo.history, curr);
+        /* ---- curriculum rehearsal ----
+         * Every rehearseEvery-th generation the fleet runs an EARLIER stage as a
+         * brush-up. The ratchet stage is untouched: st.stage is what the fleet has
+         * earned and stays what gets recorded, while runStage is what the episodes
+         * actually use. Keeping those two apart is the whole design — feeding the
+         * rehearsed stage back into the ratchet would demote the fleet, and
+         * stageFor is a one-way ratchet precisely because a sawtooth trains
+         * nothing.
+         *
+         * The champion update is deliberately NOT suppressed on these generations.
+         * It is a PAIRED comparison against the incumbent re-scored on the same
+         * missions, so it stays fair at any stage — and a challenger that wins
+         * because it kept a rung the fleet was losing is exactly what a rehearsal
+         * exists to select for. */
+        const int reh = rehearsalStageFor(evo.gen, st.stage, CFG.rehearseEvery);
+        const int runStage = reh ? reh : st.stage;
         /* The champion is the best brain of the CURRENT stage, and fitness is not
          * comparable across stages, so a promotion silently retires the outgoing
          * stage's best. One run peaked at 3,920 on stage 2 and that brain is simply
@@ -461,7 +528,24 @@ int main(int argc, char** argv) {
         prevStage = st.stage;
 
         baseOpts = WorldOpts{};
-        baseOpts.stage = st.stage;
+        /* Asked BEFORE the episodes are dealt, because the answer changes how
+         * every world is built. evo.isRiseTrial() cannot change in between:
+         * tracks only open at the end of an evolve. */
+        const bool riseGen = evo.isRiseTrial();
+        if (riseGen) baseOpts.riseTrial = CFG.risePose;
+        if (CFG.riseOnly) {
+            baseOpts.riseOnly = true;
+            /* A fraction of generations run on real ground instead of flat. Dealt
+             * by GENERATION rather than per episode so a whole fleet meets the
+             * same ground and the ranking within a generation stays a fair
+             * comparison — the same fairness rule every episode already obeys. */
+            const bool rough = CFG.riseTerrainFrac > 0 &&
+                (double)((evo.gen * 2654435761u) % 1000u) / 1000.0 < CFG.riseTerrainFrac;
+            baseOpts.terrainId = rough ? CFG.riseTerrain : "flat";
+            baseOpts.terrainDifficulty = rough ? 1.0 : 0.0;
+        }
+        if (CFG.scaffoldFrac >= 0) baseOpts.scaffoldFrac = CFG.scaffoldFrac;
+        baseOpts.stage = runStage;
         baseOpts.terrainDifficulty = st.terrainDifficulty;
         baseOpts.terrainId = CFG.terrain;
         baseOpts.noise = true;
@@ -492,8 +576,10 @@ int main(int argc, char** argv) {
         /* Reduce in index order, single-threaded. Deterministic by construction:
          * the same additions in the same order regardless of --workers. */
         struct Acc {
+            double posSum[16] = {0}; int posN[16] = {0};   // per-pose rise score, --rise-rank min
             double fitness=0, arrivals=0, stood=0, balanced=0, upright=0, progress=0,
-                   steps=0, stride=0, dist=0, ground=0, rose=0, comPeak=0, align=0;
+                   steps=0, stride=0, dist=0, ground=0, rose=0, comPeak=0, align=0,
+                   meanCom=0, riseScore=0, kneelUp=0, nearUp=0, stoodUp=0, bestSettled=0;
         };
         std::vector<Acc> acc((size_t)n);
         std::vector<std::vector<double>> perEp((size_t)n, std::vector<double>((size_t)E, 0.0));
@@ -514,6 +600,31 @@ int main(int argc, char** argv) {
                 a.ground += (r.startedDown ? 1.0 : 0.0) / E;
                 a.rose += (r.rose ? 1.0 : 0.0) / E;
                 a.comPeak += r.comPeak / E;
+                a.meanCom += r.meanCom / E;
+                /* Rise-only ranks on this. Settled COM height alone rewarded a
+                 * high-but-not-upright end pose: a champion standing on 24/24
+                 * trial episodes recovered on 54% of harness kneel starts. The
+                 * walker's own recovery test (torso upright, hips high, held) is
+                 * what every downstream measurement counts, so it pays here too. */
+                /* …and it must HOLD: the recovery flag fires mid-rise and the
+                 * shipped brain fell again within a second on nearly every
+                 * kneel start it "rose" from. uprightTime accumulates ~2.5 s
+                 * during the rise itself, so 5 s of an 8 s episode means it
+                 * stayed up to the end. */
+                /* "5 of 10 s upright" was satisfied by rising at 2 s and falling
+                 * at 5 s (crouch starts: rose 53/82, held 0/82 on the harness).
+                 * The bonus now needs the walker upright for all but 3 s of the
+                 * trial — the rise itself — so only a rise that HOLDS pays. */
+                const double rs = r.riseScore + (CFG.riseOnly && r.rose && r.upright >= RISE_ONLY_SECONDS - 3.0 ? 0.5 : 0.0);
+                a.riseScore += rs / E;
+                if (risePoses.size() > 1) { const int k = e % (int)risePoses.size(); if (k < 16) { a.posSum[k] += rs; a.posN[k]++; } }
+                /* Three height rungs, as fractions of episodes. Reusing the
+                 * stood/balanced/rose fields means the existing charts plot them
+                 * with no code change; the rise dashboard relabels the card. */
+                a.kneelUp += (r.settled >= 0.55 ? 1.0 : 0.0) / E;   // up on the knees
+                a.nearUp  += (r.settled >= 0.75 ? 1.0 : 0.0) / E;   // most of the way
+                a.stoodUp += (r.settled >= 0.85 ? 1.0 : 0.0) / E;   // standing
+                a.bestSettled = std::max(a.bestSettled, r.settled);
                 a.align += r.align / E;
                 if (i == 0) surfaces[(size_t)e] = r.surface;
             }
@@ -531,9 +642,30 @@ int main(int argc, char** argv) {
             ranked.resize((size_t)n);
             for (int i = 0; i < n; i++) ranked[(size_t)i] = acc[(size_t)i].fitness;
         }
+        auto riseRankOf = [&](const Acc& a) {
+            if (risePoses.size() < 2) return a.riseScore;
+            if (riseRank == "min") {
+                /* measured: the min rewards "hold still everywhere" (a sit scores
+                 * ~0.7 on every pose) over a real kneel rise (1.4) + a collapse (0.3) */
+                double m = 1e9; for (size_t k = 0; k < risePoses.size() && k < 16; k++) if (a.posN[k]) m = std::min(m, a.posSum[k] / a.posN[k]);
+                return m < 1e9 ? m : a.riseScore;
+            }
+            if (riseRank.rfind("gate:", 0) == 0) {
+                /* gate:<thr> — rank by the MEAN, but a brain whose FIRST pose (the
+                 * one it was seeded with) scores below thr is ranked below every
+                 * brain that keeps it: the new pose may only be bought with
+                 * capacity, never with the old skill */
+                const double thr = std::atof(riseRank.c_str() + 5);
+                const double p0 = a.posN[0] ? a.posSum[0] / a.posN[0] : 0.0;
+                return p0 >= thr ? a.riseScore : a.riseScore - 10.0;
+            }
+            return a.riseScore;
+        };
         std::vector<Result> results((size_t)n);
         for (int i = 0; i < n; i++)
-            results[(size_t)i] = { i, &evo.brains[(size_t)i], ranked[(size_t)i], acc[(size_t)i].arrivals };
+            results[(size_t)i] = { i, &evo.brains[(size_t)i], ranked[(size_t)i],
+                                   acc[(size_t)i].arrivals,
+                                   CFG.riseOnly ? riseRankOf(acc[(size_t)i]) : acc[(size_t)i].meanCom };
 
         /* Curriculum statistics describe the MAIN line only. While a plateau round
          * is running, part of the population is deliberately breeding at up to five
@@ -543,7 +675,9 @@ int main(int argc, char** argv) {
          * hold back a promotion it had already earned. */
         const int N = std::min(evo.mainCount, n);
         HistRec stats;
-        stats.stage = st.stage;
+        stats.stage = st.stage;              // the RATCHET stage, never the rehearsed one
+        stats.rehearsal = reh != 0;
+        stats.rehearsalStage = reh;
         stats.terrainDifficulty = st.terrainDifficulty;
         auto sum = [&](double Acc::*f) { double s = 0; for (int i = 0; i < N; i++) s += acc[(size_t)i].*f; return s; };
         auto maxOf = [&](double Acc::*f) { double m = -1e300; for (int i = 0; i < N; i++) m = std::max(m, acc[(size_t)i].*f); return m; };
@@ -573,11 +707,52 @@ int main(int argc, char** argv) {
         }
 
         EvoLimits lim;
+        lim.childZeroFit = CFG.childZeroFit;
         lim.plateauGens = CFG.plateauGens;
         lim.trackGens = CFG.trackGens;
         lim.trackFrac = CFG.trackFrac;
         lim.trackCount = CFG.trackCount;
         lim.actCull = CFG.actCull;
+        /* A rise trial breeds but does not report. Its best/avg are metres of COM
+         * height, so pushing them into runLog would put two different units on one
+         * axis — the plateau detector reads that array, the stage gate reads it,
+         * and the charts draw it. The trial prints its own one-line summary
+         * instead and is invisible to every mechanism that decides promotion. */
+        if (riseGen) {
+            HistRec rr = evo.runRiseTrial(results, CFG.mutRate, CFG.mutSigma);
+            if (CFG.riseOnly) {
+                const int NN = std::min(evo.mainCount, n);
+                double k = 0, nr = 0, st = 0, bc = 0;
+                for (int i = 0; i < NN; i++) {
+                    k += acc[(size_t)i].kneelUp; nr += acc[(size_t)i].nearUp;
+                    st += acc[(size_t)i].stoodUp;
+                    bc = std::max(bc, acc[(size_t)i].bestSettled);
+                }
+                rr.stoodFrac = NN ? k / NN : 0;      // >= 0.55 m — on the knees
+                rr.balancedFrac = NN ? nr / NN : 0;  // >= 0.75 m — most of the way up
+                rr.roseFrac = NN ? st / NN : 0;      // >= 0.85 m — standing
+                rr.bestCom = bc;
+                rr.terrainDifficulty = baseOpts.terrainDifficulty;
+            }
+            runLog.push_back(rr);      // keeps index + 1 == generation
+            /* SAVE BEFORE THE `continue`. The periodic save lives at the bottom of
+             * this loop, so short-circuiting here skipped it entirely: a rise-only
+             * run improved for 320 generations and wrote no champion at all,
+             * because every generation takes this branch. The champion ratchets on
+             * the rise score inside runRiseTrial, so there is something real to
+             * write — it was simply never reaching the disk. */
+            if (CFG.save && (g + 1) % CFG.save == 0) { saveChampion(""); saveRunLog(); }
+            /* Snapshots too: the rise-only champion ratchets on the best 8-24
+             * episode mean, which is a lucky draw as often as a better brain
+             * (measured: champion 66% on the harness where an earlier one was
+             * 76%). Periodic exports of the trial's rank 0 let the harness pick
+             * the teacher by playing. */
+            if (!CFG.exportDir.empty() && CFG.exportEvery > 0 && evo.gen % CFG.exportEvery == 0) exportEmigrants();
+            if (!CFG.quiet) std::cout << "gen " << pad(std::to_string(evo.gen - 1), 4)
+                                      << " " << evo.riseEvent << "\n";
+            evo.riseEvent.clear();
+            continue;
+        }
         const HistRec rec = evo.evolve(std::move(results), CFG.mutRate, CFG.mutSigma, CFG.grace, lim, stats);
         runLog.push_back(rec);
 
@@ -592,7 +767,7 @@ int main(int argc, char** argv) {
             const double el = nowSec() - t0;
             std::string line =
                 "gen " + pad(std::to_string(evo.gen - 1), 4) + " " +
-                "st" + std::to_string(st.stage) +
+                "st" + std::to_string(st.stage) + (reh ? "~" + std::to_string(reh) : "") +
                 (st.stage >= 4 ? "/" + fmt("%.2f", st.terrainDifficulty) : "  ") + " " +
                 "best " + pad(fmt("%.0f", rec.best), 7) + " avg " + pad(fmt("%.0f", rec.avg), 7) +
                 " | stood " + pad(fmt("%.0f", stats.stoodFrac * 100), 3) + "%" +
@@ -650,6 +825,27 @@ int main(int argc, char** argv) {
          * measured. */
         if (CFG.deadline > 0 && nowSec() >= (double)CFG.deadline) {
             std::cout << "\ndeadline reached at generation " << (evo.gen - 1) << " — stopping cleanly\n";
+            break;
+        }
+        /* A STOP file in the output directory ends the run at the same clean
+         * point the deadline uses. This is what the dashboard's stop button
+         * writes, and a file rather than a signal on purpose: the trainer is
+         * launched detached with setsid, the dashboard is a separate process that
+         * may be on the other side of an SSH tunnel, and neither knows the
+         * other's pid. A file is the only channel both ends already share.
+         *
+         * The alternative — killing the process — loses whatever the current
+         * generation has scored and leaves champion.json describing a population
+         * that never finished being measured. Here the loop exits normally, so
+         * the champion and the run log are both written by the code below.
+         *
+         * NOT removed on the way out. A stopped run that deletes its own stop
+         * file looks identical to one that was never stopped, and the next launch
+         * would have no idea it is resuming something a human halted on purpose.
+         * launch_temporal.sh clears it at startup instead. */
+        if (fs::exists(fs::path(CFG.out) / "STOP")) {
+            std::cout << "\nSTOP file found at generation " << (evo.gen - 1)
+                      << " — finishing this generation and stopping cleanly\n";
             break;
         }
     }

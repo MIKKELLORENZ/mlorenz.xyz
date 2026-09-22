@@ -13,6 +13,9 @@
 struct EpOut {
     double fitness = 0, arrivals = 0, upright = 0, progress = 0;
     double steps = 0, stride = 0, dist = 0, comPeak = 0, align = 0;
+    double meanCom = 0;          // time-weighted mean COM height, for rise trials
+    double riseScore = 0;        // settled height + 0.25 x mean, for rise-only runs
+    double settled = 0;          // COM height over the final window, on its own
     bool stood = false, balanced = false, startedDown = false, rose = false;
     const char* surface = "?";
 };
@@ -40,6 +43,9 @@ inline EpOut runEpisode(World& w, const Model& M, Net* brain, const WorldOpts& o
     // nothing wrong.
     r.rose = x.startedDown && x.recoveries > 0;
     r.comPeak = x.bestComY;
+    r.meanCom = x.meanCom();
+    r.riseScore = x.riseScore();
+    r.settled = x.settledCom();
     r.align = x.meanAlign();
     r.surface = terrainName(w.terrain.id);
     return r;

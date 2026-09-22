@@ -1,0 +1,243 @@
+/* Paper and ink. One accent — teal — for the network and the product it makes;
+   graphite for the published protocol it is measured against; everything
+   else is a shade of the page. Colour is kept for data. */
+:root {
+    --bg: #f5f3ee;
+    --panel: #fdfcfa;
+    --panel-2: #f5f3ee;       /* the shared mobile sheet reads this */
+    --line: #dcd8d0;
+    --line-2: #c3beb4;
+    --text: #1e2226;
+    --muted: #6a6f75;
+    --faint: #9ca1a6;
+    --accent: #1d7a74;        /* the network, the product */
+    --accent-2: #5c636a;      /* the protocol */
+    --warn: #b9862d;
+    --danger: #b23a2f;
+    --good: #2f7a4e;
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.5 var(--sans);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+b, strong { font-weight: 600; }
+
+/* ---- intro ---- */
+#intro {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    background: rgba(30, 34, 38, 0.38);
+}
+#intro.hidden { display: none; }
+.intro-card {
+    width: 100%; max-width: 560px;
+    background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px;
+    padding: 30px 32px 22px;
+    box-shadow: 0 24px 60px rgba(30, 34, 38, 0.18);
+}
+.intro-card .eyebrow { font-size: 10.5px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--muted); margin-bottom: 8px; }
+.intro-card h2 { font: 500 28px/1.15 var(--serif); letter-spacing: -0.2px; margin-bottom: 12px; }
+.intro-card > p { color: var(--text); font-size: 13.5px; line-height: 1.6; margin-bottom: 14px; }
+.intro-card > p.quiet { color: var(--muted); }
+.intro-section { font-size: 10.5px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); margin: 18px 0 8px; }
+.intro-choices { display: flex; flex-direction: column; gap: 8px; }
+.intro-choice {
+    display: block; text-align: left; cursor: pointer;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line-2); border-radius: 6px; padding: 11px 14px;
+    font: inherit;
+    transition: border-color .12s, background .12s;
+}
+.intro-choice:hover { border-color: var(--text); background: var(--bg); }
+.intro-choice b { display: block; font-size: 14px; margin-bottom: 1px; }
+.intro-choice small { color: var(--muted); font-size: 12px; }
+.intro-choice.primary { border-color: var(--text); }
+.intro-choice.primary b::before { content: "▸ "; color: var(--accent); }
+.intro-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+.intro-dismiss { background: none; border: 0; color: var(--muted); cursor: pointer; font: inherit; font-size: 12.5px; padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; }
+.intro-dismiss:hover { color: var(--text); }
+.intro-foot .hint { margin: 0; }
+
+/* ---- segmented controls (playback speed, the product chooser) ---- */
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; background: var(--panel); }
+.seg button {
+    background: transparent; border: 0; border-left: 1px solid var(--line);
+    color: var(--muted); padding: 4px 10px; cursor: pointer;
+    font: inherit; font-size: 12px; white-space: nowrap; line-height: 1.4;
+}
+.seg button:first-child { border-left: 0; }
+.seg button:hover { color: var(--text); background: var(--bg); }
+.seg button.on { background: var(--text); color: var(--panel); }
+.seg.wrap { flex-wrap: wrap; }
+.seg.wrap button { border-left: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: -1px; }
+
+/* ---- the header ---- */
+#app { display: flex; flex-direction: column; height: 100vh; }
+#topbar {
+    display: flex; align-items: center; gap: 18px; padding: 0 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    flex: 0 0 56px; height: 56px; flex-wrap: nowrap; overflow: hidden;
+}
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.brand h1 { font: 500 18px/1 var(--serif); letter-spacing: -0.1px; white-space: nowrap; }
+.brand-sub { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 34ch; }
+/* The strapline is decoration and the chooser is not, so the strapline goes
+   first — and it goes entirely, rather than truncating mid-word. */
+@media (max-width: 1680px) { .brand-sub { display: none; } }
+@media (max-width: 1180px) { #top-versus .vs-name { display: none; } }
+.chooser-wrap { display: flex; align-items: center; gap: 8px; }
+.chooser-label { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+#top-stats { display: flex; gap: 16px; margin-left: auto; align-items: center; }
+.tstat { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.tstat b { color: var(--text); font-weight: 500; }
+#top-versus { display: none; margin-left: auto; align-items: center; gap: 10px; }
+body.exhibit #top-versus { display: flex; }
+body.exhibit #top-stats { display: none; }
+.vs-side { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.vs-side i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.vs-learn i { background: var(--accent); }
+.vs-sop i { background: var(--accent-2); }
+.vs-name { color: var(--muted); font-size: 11.5px; }
+.vs-side b { font-weight: 500; min-width: 60px; }
+.vs-learn b { text-align: right; }
+.vs-mid { border: 1px solid var(--line-2); border-radius: 20px; padding: 2px 11px; font-size: 11.5px; color: var(--muted); min-width: 150px; text-align: center; white-space: nowrap; }
+.vs-mid.win { color: var(--good); border-color: var(--good); }
+.vs-mid.lose { color: var(--danger); border-color: var(--danger); }
+#top-actions { display: flex; gap: 8px; align-items: center; }
+
+/* ---- the layout ---- */
+#layout { display: flex; flex: 1 1 auto; min-height: 0; }
+/* The left column does NOT scroll as a whole. The network view is pinned to
+   the bottom of it and the cards above scroll behind. */
+#panel-left {
+    flex: 0 0 clamp(360px, 34%, 620px);
+    padding: 12px; overflow: hidden;
+    display: flex; flex-direction: column; gap: 10px;
+    border-right: 1px solid var(--line);
+}
+#panel-left-scroll {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 10px;
+}
+#panel-right {
+    flex: 0 0 290px; overflow-y: auto; padding: 12px;
+    display: flex; flex-direction: column; gap: 10px;
+    border-left: 1px solid var(--line);
+}
+body.exhibit #panel-right { display: none; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 11px 14px 13px; }
+.card h2 { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.3px; color: var(--muted); margin-bottom: 8px; }
+.hint { color: var(--muted); font-size: 11.5px; margin-top: 6px; line-height: 1.5; }
+.hint b { color: var(--text); font-weight: 600; }
+.hint i { font-style: italic; }
+.hint code { background: var(--bg); border: 1px solid var(--line); padding: 0 4px; border-radius: 3px; font-size: 10.5px; }
+
+/* ---- controls ---- */
+.slider-row { display: block; margin: 8px 0; }
+.slider-row span { display: flex; justify-content: space-between; margin-bottom: 2px; color: var(--text); }
+.slider-row b { color: var(--muted); font-weight: 500; }
+input[type=range] { width: 100%; accent-color: var(--text); }
+.check-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; cursor: pointer; }
+.check-row input { accent-color: var(--text); flex: none; }
+.btn {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px;
+    padding: 5px 12px; cursor: pointer; font: inherit; font-size: 12px; line-height: 1.4;
+}
+.btn:hover { border-color: var(--text); }
+.btn.primary { background: var(--text); color: var(--panel); border-color: var(--text); }
+.btn.primary:hover { background: #000; }
+.btn.danger { color: var(--danger); }
+.btn.danger:hover { border-color: var(--danger); }
+.btn.wide { width: 100%; margin-top: 6px; }
+.btn-row { display: flex; gap: 6px; }
+.btn-row .btn { flex: 1; }
+details.card summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: baseline; }
+details.card summary::-webkit-details-marker { display: none; }
+details.card summary h2 { margin: 0; }
+details.card summary::after { content: "show"; color: var(--faint); font-size: 11px; }
+details.card[open] summary::after { content: "hide"; }
+details.card[open] summary { margin-bottom: 8px; }
+
+[data-exhibit] { display: none; }
+body.exhibit [data-exhibit] { display: block; }
+body.exhibit [data-lab] { display: none; }
+body.exhibit #top-versus[data-exhibit] { display: flex; }
+body.sopmode #top-versus { display: none !important; }
+
+/* ---- this batch ---- */
+.order-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; flex-wrap: wrap; }
+.order-name { font: 500 19px/1.2 var(--serif); color: var(--text); }
+.order-days { color: var(--muted); font-size: 11.5px; }
+.order-cues { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 2px; }
+.cue-chip {
+    font-size: 10.5px; padding: 2px 7px; border-radius: 4px;
+    background: var(--bg); border: 1px solid var(--line); color: var(--muted);
+}
+.cue-chip.on { border-color: var(--accent); color: var(--accent); background: var(--panel); }
+.cue-chip i { font-style: normal; opacity: .75; }
+
+.kv { display: flex; justify-content: space-between; gap: 8px; padding: 2.5px 0; font-size: 12px; border-bottom: 1px solid var(--bg); }
+.kv:last-child { border-bottom: 0; }
+.kv span { color: var(--muted); }
+.kv b { font-weight: 500; text-align: right; }
+.kv b.stale { color: var(--muted); }
+.kv b.old { color: var(--warn); }
+.notebook-sub { color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin: 9px 0 2px; }
+
+#canvas-wrap { flex: 1 1 auto; min-width: 0; position: relative; background: var(--bg); }
+#view { display: block; width: 100%; height: 100%; }
+#hud { position: absolute; right: 14px; top: 10px; pointer-events: none; font-size: 11.5px; color: var(--muted); text-align: right; line-height: 1.45; }
+#hud b { color: var(--text); font-weight: 500; }
+
+/* the network panel is pinned to the bottom of the left column */
+.net-card { margin-top: auto; }
+#netview { display: block; width: 100%; height: auto; border-radius: 4px; background: #fbfaf7; border: 1px solid var(--line); }
+.net-card .hint .up { color: var(--accent); font-weight: 600; }
+.net-card .hint .down { color: var(--danger); font-weight: 600; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: var(--muted); margin-top: 4px; }
+.legend .sw { display: inline-block; width: 12px; height: 2px; margin-right: 6px; vertical-align: middle; }
+.sw-best { background: var(--accent); }
+.sw-avg { background: var(--accent-2); }
+
+#scn-events { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0; }
+.ev-chip { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
+.ev-chip.active { border-color: var(--danger); color: var(--danger); background: var(--panel); }
+
+#log { max-height: 220px; overflow-y: auto; font-size: 11px; color: var(--muted); }
+#log div { padding: 3px 0; border-bottom: 1px solid var(--bg); }
+#log .gen { color: var(--text); font-weight: 600; }
+#log .evt { color: var(--accent); }
+
+/* Narrow windows: the right panel goes first, then the left column stops
+   pretending to be a third of a wide screen. The product chooser leaves the
+   header on a phone — the same chooser sits in the menu. */
+@media (max-width: 1300px) { .chooser-label { display: none; } }
+@media (max-width: 1200px) { #panel-right { display: none; } }
+@media (max-width: 1000px) { #topbar .chooser-wrap { display: none; } }
+@media (max-width: 900px) { #panel-left { flex-basis: 300px; } }
+body.mob #topbar .chooser-wrap { display: none; }
+
+/* The shared mobile layer loads AFTER this stylesheet and forces both
+   #top-stats and #top-versus to display:flex on body.mob, so it makes the
+   lab's stats visible in the exhibition and shows an EMPTY versus pill in
+   the lab. The mode rules have to be restated here to win. */
+/* The head-to-head is three fixed-width pieces and a 500 px bar cannot hold
+   them: the verdict ran straight through the protocol value. On a phone the
+   pill gives up its minimum width and its own overflow, and the two product
+   names in it are dropped by updateVersus (it asks for a short verdict when
+   body.mob is set) — the coloured dots already say which side is which. */
+body.mob #top-versus { gap: 6px; }
+body.mob .vs-mid { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; padding: 2px 8px; }
+body.mob .vs-side b { min-width: 0; }
+body.mob.exhibit #top-stats { display: none !important; }
+body.mob:not(.exhibit) #top-versus { display: none !important; }
+body.mob.sopmode #top-versus { display: none !important; }

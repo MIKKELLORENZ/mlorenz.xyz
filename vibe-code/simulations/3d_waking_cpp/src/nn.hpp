@@ -62,6 +62,11 @@ inline void setSlopeFlip(double v) { slopeFlipRef() = v; }
  * rhythm outputs are seeded ~14x wider, so a fresh population contains a real
  * spread of attempted gaits and still stands. */
 inline double& outInitRef() { static double v = 0.08; return v; }
+/* Probability that a mutated weight is REDRAWN outright rather than nudged.
+ * 0.03 is what every evolved lineage was selected under; a gradient-trained
+ * net has never met it and is not robust to it (measured elsewhere: 774 -> 318
+ * skill from twenty redrawn weights), so the trainer can set it to 0. */
+inline double& mutResetRef() { static double v = 0.03; return v; }
 inline std::vector<double>& outRowScaleRef() { static std::vector<double> v; return v; }
 
 class Net {
@@ -191,7 +196,7 @@ public:
         for (auto& w : weights) {
             for (size_t i = 0; i < w.size(); i++) {
                 if (rng() < rate) {
-                    if (rng() < 0.03) w[i] = (float)(gaussRand(rng) * 0.5);     // rare full reset
+                    if (rng() < mutResetRef()) w[i] = (float)(gaussRand(rng) * 0.5);     // rare full reset
                     else w[i] = (float)((double)w[i] + gaussRand(rng) * sigma);
                 }
             }
@@ -203,6 +208,61 @@ public:
                 for (size_t i = 0; i < s.size(); i++)
                     if (rng() < flip) { s[i] = s[i] > 0 ? 0.0f : (float)LRELU_SLOPE; touched = true; }
             if (touched) relabel();
+        }
+        return *this;
+    }
+
+    /* mutateSparse — change exactly k weights, chosen by COUNT and not by a
+     * per-weight probability.
+     *
+     * mutate() above flips a coin on every weight, so the number it changes is
+     * Binomial(20225, rate). At the default rate that is 708 +/- 26, and the
+     * standard deviation is the whole point: every mutated child in the
+     * population receives essentially the same SIZE of change. Counted across a
+     * generation of 192, the smallest move anywhere in the population was 354
+     * weights — 1.7% of the network — so the population could not refine, only
+     * jump, and no rate produces 25 reliably. This exists to ask for 25.
+     *
+     * No full-reset branch, deliberately: mutate() overwrites a weight outright
+     * three times in a hundred, which is the opposite of a refinement. The
+     * rank-weighted children still call mutate(), so that escape path stays in
+     * the population. No slope flips either — changing which rectifier a neuron
+     * is is a structural edit, not a small step.
+     *
+     * rowFocus spends the whole budget inside ONE neuron's incoming row, on the
+     * same argument row-wise crossover makes directly below: a row is a
+     * functional unit. Since 87% of this net's weights are the input layer, a
+     * scattered draw is almost always "how a few hidden units read the world".
+     *
+     * Indices are drawn WITH replacement — negligible at k=25, about 3% of draws
+     * collide at k=1100 — accepted for a draw order simple enough to mirror.
+     *
+     * DRAW ORDER IS LOAD-BEARING. Must match Net.mutateSparse in nn.js
+     * instruction for instruction or the trainer and the oracle diverge. */
+    Net& mutateSparse(int k, double sigma, Rng& rng, bool rowFocus) {
+        if (rowFocus) {
+            int nRows = 0;
+            for (size_t l = 0; l + 1 < sizes.size(); l++) nRows += sizes[l + 1];
+            int r = (int)(rng() * nRows);
+            size_t l = 0;
+            while (r >= sizes[l + 1]) { r -= sizes[l + 1]; l++; }
+            const int rowLen = sizes[l] + 1;
+            auto& w = weights[l];
+            const size_t base = (size_t)r * (size_t)rowLen;
+            const int m = std::min(k, rowLen);
+            for (int i = 0; i < m; i++) {
+                const size_t j = base + (size_t)(int)(rng() * rowLen);
+                w[j] = (float)((double)w[j] + gaussRand(rng) * sigma);
+            }
+        } else {
+            size_t W = 0;
+            for (auto& w : weights) W += w.size();
+            for (int i = 0; i < k; i++) {
+                size_t j = (size_t)(rng() * (double)W);
+                size_t l = 0;
+                while (j >= weights[l].size()) { j -= weights[l].size(); l++; }
+                weights[l][j] = (float)((double)weights[l][j] + gaussRand(rng) * sigma);
+            }
         }
         return *this;
     }
@@ -294,3 +354,4 @@ public:
 private:
     std::vector<float> buf;   // only for the single-threaded convenience overload
 };
+

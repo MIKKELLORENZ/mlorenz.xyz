@@ -16,7 +16,19 @@ for (const f of ["nn.js", "physics.js", "body.js", "terrain.js", "walker.js"]) {
     vm.runInThisContext(fs.readFileSync(path.join(__dirname, f), "utf8"), { filename: f });
 }
 
-const src = process.argv[2] || "training/champion.json";
+/* node bake_brain.js walker.json [--rise rise.json]
+ * --rise bakes a second, separately evolved RISE net beside the walking net
+ * (two-net brain, see walker.js): it drives while the walker is down. */
+const argv = process.argv.slice(2);
+const riseAt = argv.indexOf("--rise");
+const riseSrc = riseAt >= 0 ? argv[riseAt + 1] : null;
+if (riseAt >= 0) argv.splice(riseAt, 2);
+/* --rise-pose <name>=<file> (repeatable): a SPECIALIST rise net used only for
+ * episodes that start in that named pose; the --rise net drives every other
+ * down state (real falls included). */
+const risePoseSrc = {};
+for (let i; (i = argv.indexOf("--rise-pose")) >= 0;) { const [n, f] = argv[i + 1].split("="); risePoseSrc[n] = f; argv.splice(i, 2); }
+const src = argv[0] || "training/champion.json";
 const file = path.isAbsolute(src) ? src : path.join(__dirname, src);
 const saved = JSON.parse(fs.readFileSync(file, "utf8"));
 const net = saved.net || saved;
@@ -73,6 +85,31 @@ const weights = net.weights.length + " layers, " +
  * loads them. Naming the pre-rounding genome instead would give a code that
  * matches nothing anyone can see. */
 const id = brainId(Net.fromJSON(trimmed));
+/* The rise net goes through the same trim and round-trip check. */
+let trimmedRise = null, riseId = null, riseSaved = null;
+if (riseSrc) {
+    const rf = path.isAbsolute(riseSrc) ? riseSrc : path.join(__dirname, riseSrc);
+    riseSaved = JSON.parse(fs.readFileSync(rf, "utf8"));
+    const rn = riseSaved.net || riseSaved;
+    if (rn.sizes.join() !== NET_SIZES.join()) { console.error(`refusing to bake: rise net is ${rn.sizes.join("-")}`); process.exit(1); }
+    trimmedRise = { sizes: rn.sizes, act: rn.act, slopes: rn.slopes || null,
+                    weights: rn.weights.map(w => w.map(v => Number(v.toPrecision(PRECISION)))) };
+    const ra = Net.fromJSON(rn).forward(probe).slice(), rb = Net.fromJSON(trimmedRise).forward(probe);
+    let rw = 0; for (let i = 0; i < ra.length; i++) rw = Math.max(rw, Math.abs(ra[i] - rb[i]));
+    if (rw > 1e-9) { console.error(`refusing to bake: rounding changed the rise net's output by ${rw.toExponential(2)}`); process.exit(1); }
+    riseId = brainId(Net.fromJSON(trimmedRise));
+}
+const trimmedRisePoses = {}, risePoseIds = {};
+for (const n in risePoseSrc) {
+    const rf = path.isAbsolute(risePoseSrc[n]) ? risePoseSrc[n] : path.join(__dirname, risePoseSrc[n]);
+    const rsv = JSON.parse(fs.readFileSync(rf, "utf8")); const rn = rsv.net || rsv;
+    if (rn.sizes.join() !== NET_SIZES.join()) { console.error(`refusing to bake: rise net for ${n} is ${rn.sizes.join("-")}`); process.exit(1); }
+    const t = { sizes: rn.sizes, act: rn.act, slopes: rn.slopes || null, weights: rn.weights.map(w => w.map(v => Number(v.toPrecision(PRECISION)))) };
+    const ra = Net.fromJSON(rn).forward(probe).slice(), rb = Net.fromJSON(t).forward(probe);
+    let rw = 0; for (let i = 0; i < ra.length; i++) rw = Math.max(rw, Math.abs(ra[i] - rb[i]));
+    if (rw > 1e-9) { console.error(`refusing to bake: rounding changed the ${n} rise net's output by ${rw.toExponential(2)}`); process.exit(1); }
+    trimmedRisePoses[n] = t; risePoseIds[n] = brainId(Net.fromJSON(t));
+}
 /* THE STAGE THE BRAIN WAS TRAINED ON, carried with it.
  *
  * The showcase used to pin stage 4 at full difficulty because the run it was
@@ -95,7 +132,8 @@ const body = `/* default_brain.js — the built-in champion.
  *
  * Written by \`node bake_brain.js\`; do not hand-edit. Contract: ${net.sizes.join("-")}
  * (${weights}). Trained to generation ${saved.gen || "?"}, fitness ${(saved.fitness || 0).toFixed(0)}${saved.savedAt ? ", " + saved.savedAt.slice(0, 10) : ""}.
- *
+ * Provenance: ${saved.lineage || "evolved by the GA — no gradients"}.
+${trimmedRise ? ` * Rise net ${riseId} (two-net brain, drives while down): ${(riseSaved && riseSaved.lineage) || riseSrc}.\n *` : " *"}
  * Brain id ${id} — a deterministic hash of these weights. The same code appears
  * in the browser's watch mode, so what is on screen can be checked against what
  * was baked without trusting either label.
@@ -105,7 +143,10 @@ const body = `/* default_brain.js — the built-in champion.
  * re-reads this file by appending a second cache-busted <script> tag, and a
  * second \`const\` declaration at global scope throws. \`var\` reassigns. Node's
  * runInThisContext hoists it to a global either way, so nothing else changes. */
-var DEFAULT_BRAIN = ${JSON.stringify({ net: trimmed, fitness: saved.fitness || 0, gen: saved.gen || 0, id, stage })};
+var DEFAULT_BRAIN = ${JSON.stringify({ net: trimmed, fitness: saved.fitness || 0, gen: saved.gen || 0, id, stage, lineage: saved.lineage || null,
+                                       riseNet: trimmedRise || undefined, riseId: riseId || undefined,
+                                       riseNets: Object.keys(trimmedRisePoses).length ? trimmedRisePoses : undefined,
+                                       riseIds: Object.keys(risePoseIds).length ? risePoseIds : undefined })};
 `;
 fs.writeFileSync(path.join(__dirname, "default_brain.js"), body);
-console.log(`baked ${src} -> default_brain.js  (gen ${saved.gen}, fitness ${(saved.fitness || 0).toFixed(0)}, ${net.sizes.join("-")}, id ${id}, stage ${stage == null ? "unknown" : stage})`);
+console.log(`baked ${src} -> default_brain.js  (gen ${saved.gen}, fitness ${(saved.fitness || 0).toFixed(0)}, ${net.sizes.join("-")}, id ${id}, stage ${stage == null ? "unknown" : stage}${riseId ? ", rise net " + riseId : ""}${Object.keys(risePoseIds).length ? ", specialists " + Object.entries(risePoseIds).map(([k, v]) => k + "=" + v).join(" ") : ""})`);

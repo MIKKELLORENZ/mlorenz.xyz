@@ -59,9 +59,9 @@ static void vLayout() {
     // (COM height, COM over the feet, capture point: +5 channels, +15 inputs).
     check(L.NJ == 22, "NJ == 22");
     check(L.NC == 194, "NC == 194");
-    check(L.NIN == 364, "NIN == 364");
+    check(L.NIN == 365, "NIN == 365");
     check(L.NOUT == 33, "NOUT == 33");
-    check(L.MAXHIST == 31, "MAXHIST == 31");
+    check(L.MAXHIST == 62, "MAXHIST == 62");
     check((int)M.bodies.size() == 23, "bodies == 23");
     check((int)M.contacts.size() == 39, "contacts == 39");
     check((int)M.selfPairs.size() == 65, "selfPairs == 65");
@@ -69,7 +69,7 @@ static void vLayout() {
     // Lag 0 of every channel comes first, so inputs[c] is channel c — every
     // comment in walker.hpp relies on it and a graft would silently break if not.
     bool planOk = true;
-    for (int c = 0; c < L.NC; c++) if (L.planLag[c] != 0 || L.planCh[c] != c) planOk = false;
+    for (int c = 0; c < L.NC; c++) if (L.planWin[c] != -1 || L.planCh[c] != c) planOk = false;
     check(planOk, "lag plan: inputs[c] is channel c for all c");
 }
 
@@ -226,6 +226,17 @@ static void vEpisode(const std::string& path) {
         check(std::fabs(w.terrain.mu - env->numOr("mu", -1)) < 1e-12, "friction mu matches");
         check(std::fabs(w.frictionScale - env->numOr("frictionScale", -1)) < 1e-12, "frictionScale matches");
         check(std::fabs(w.riseGrace - env->numOr("riseGrace", -1)) < 1e-12, "riseGrace matches");
+        /* Scaffolding changes the ACTIONS directly, so a mismatch here explains
+         * action drift that would otherwise read as a dynamics bug twenty ticks
+         * later — which is a completely different fix. */
+        {
+            const double eAt = env->numOr("scaffoldAt", 0), eUn = env->numOr("scaffoldUntil", 0);
+            char b1[96], b2[96];
+            std::snprintf(b1, sizeof b1, "%.2f vs %.2f", w.scaffoldAt, eAt);
+            std::snprintf(b2, sizeof b2, "%.3fs vs %.3fs", w.scaffoldUntil, eUn);
+            check(std::fabs(w.scaffoldAt - eAt) < 1e-12, "scaffold handover matches", b1);
+            check(std::fabs(w.scaffoldUntil - eUn) < 1e-12, "scaffold window matches", b2);
+        }
         check(w.walker.startPoseName == env->strOr("startPose", "?"), "start pose matches",
               w.walker.startPoseName + " vs " + env->strOr("startPose", "?"));
         auto pts = env->get("points");
@@ -242,7 +253,8 @@ static void vEpisode(const std::string& path) {
     size_t rec = 0;
     long long t = 0;
     double worstIn = 0, worstOut = 0, worstBp = 0;
-    int worstInTick = -1;
+    int worstInTick = -1, firstOutDiv = -1, firstInDiv = -1;
+    double worstScafOut = 0; int scafTicks = 0;
     std::vector<double> driftIn;
     while (rec < ticks->arr.size() && !w.isOver() && t < 140LL * 500) {
         const bool wasControl = (w.tick % CONTROL_EVERY) == 0;
@@ -259,6 +271,14 @@ static void vEpisode(const std::string& path) {
             mo = std::max(mo, std::fabs((double)w.walker.out[(size_t)i] - out->arr[(size_t)i]->num));
         if (bp) for (int i = 0; i < 3 && i < (int)bp->arr.size(); i++)
             mb = std::max(mb, std::fabs(w.walker.mb.bp[i] - bp->arr[(size_t)i]->num));
+        if (w.scaffoldGene && w.time < w.scaffoldUntil && out) {
+            scafTicks++;
+            for (int i = 0; i < w.walker.nj && i < (int)out->arr.size(); i++)
+                worstScafOut = std::max(worstScafOut,
+                    std::fabs((double)w.walker.out[(size_t)i] - out->arr[(size_t)i]->num));
+        }
+        if (firstOutDiv < 0 && mo > 1e-4) firstOutDiv = (int)rec;
+        if (firstInDiv < 0 && mi > 1e-4) firstInDiv = (int)rec;
         if (mi > worstIn) { worstIn = mi; worstInTick = (int)rec; }
         worstOut = std::max(worstOut, mo);
         worstBp = std::max(worstBp, mb);
@@ -267,6 +287,13 @@ static void vEpisode(const std::string& path) {
         t++;
     }
     std::printf("  compared %d control ticks\n", (int)rec);
+    std::printf("  first divergence: action tick %d, sensor tick %d  (-1 = never)\n",
+                firstOutDiv, firstInDiv);
+    if (scafTicks > 0) {
+        char sb[96];
+        std::snprintf(sb, sizeof sb, "%d scaffolded ticks, worst %.3e", scafTicks, worstScafOut);
+        check(worstScafOut < 1e-9, "scaffolded joint commands are identical", sb);
+    }
     std::printf("  worst |d inputs| %.3e (tick %d)   worst |d out| %.3e   worst |d pelvis| %.3e m\n",
                 worstIn, worstInTick, worstOut, worstBp);
     if (driftIn.size() >= 10) {
@@ -297,21 +324,24 @@ static void vEpisode(const std::string& path) {
 static void vInputs() {
     const Layout& L = LAY();
     std::printf("What the brain sees, 50 times a second.\n\n");
-    std::printf("Each SENSOR below is read fresh every control tick. Most are also fed as a\n"
-                "few older readings (the \"lags\" column, in ticks of 20 ms), because a\n"
-                "feedforward network has no memory of its own — showing it the last few\n"
-                "values is what lets it perceive a RATE or a TREND. That is why %d sensors\n"
-                "become %d input neurons.\n\n", L.NC, L.NIN);
-    std::printf("%-26s %5s %5s  %-26s %s\n", "sensor", "n", "inputs", "history fed (ticks back)", "what it means");
+    std::printf("Each SENSOR below is read fresh every control tick. Most are also fed as\n"
+                "DIFFERENCES against their own recent past (the history column), because a\n"
+                "feedforward network has no memory of its own. Each of those is (now minus\n"
+                "the average over that window), so it reads as \"how much have I changed\n"
+                "since then\" rather than \"what was I\" — a contrast the controller can act\n"
+                "on directly, instead of a near-copy of a reading it already has. That is\n"
+                "why %d sensors become %d input neurons.\n\n", L.NC, L.NIN);
+    std::printf("%-26s %5s %5s  %-26s %s\n", "sensor", "n", "inputs", "history fed (window)", "what it means");
     std::printf("%s\n", std::string(140, '-').c_str());
     int totCh = 0, totIn = 0;
     for (const auto& g : L.groups) {
         std::string lags;
-        for (size_t i = 0; i < g.lags.size(); i++) {
+        for (size_t i = 0; i < g.wins.size(); i++) {
             if (i) lags += ",";
-            lags += std::to_string(g.lags[i]);
+            lags += std::to_string(WIN_A[g.wins[i]] * 20) + "-" +
+                    std::to_string(WIN_B[g.wins[i]] * 20) + "ms";
         }
-        if (g.lags.size() == 1) lags = "now only";
+        if (g.wins.empty()) lags = "now only";
         std::printf("%-26s %5d %5d   %-26s %s\n", g.name, g.nch, g.inputs, lags.c_str(), g.what);
         totCh += g.nch;
         totIn += g.inputs;

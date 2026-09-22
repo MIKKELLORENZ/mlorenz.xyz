@@ -30,6 +30,9 @@ inline void Walker::reset(const World* world, double x, double z, double yaw, co
     // from the first tick rather than only after a fall.
     startedDown = (pose != nullptr);
     startPoseName = pose ? pose->name : "crouch";
+    /* poses the WALKING net starts better from than any rise net (measured in
+     * the showcase pool: crouch 42/60 vs 0, horse 11/20 vs 5/20) */
+    crouchStart = pose && (pose->name.rfind("crouch", 0) == 0 || pose->name == "horse");
     const std::vector<double>& q0 = pose ? pose->q : M.crouch;
     for (int j = 0; j < nj; j++) {
         double a = q0[j];
@@ -82,6 +85,8 @@ inline void Walker::reset(const World* world, double x, double z, double yaw, co
     peakPtForce = 0;
     std::fill(histBuf.begin(), histBuf.end(), 0.0f);
     histWrite = 0;
+    std::fill(winSum.begin(), winSum.end(), 0.0);
+    nTicks = 0;
     std::fill(out.begin(), out.end(), 0.5f);
     std::fill(amp.begin(), amp.end(), 0.0);
     std::fill(ph.begin(), ph.end(), 0.0);
@@ -90,9 +95,13 @@ inline void Walker::reset(const World* world, double x, double z, double yaw, co
     done = false; timeLeft = 0; fallTimer = 0; fallSeverity = 0; comPeak = 0;
     diverged = false;      // flung off the map, as distinct from fallen over
     downed = false;        // on the ground, and has to get itself up
+    riseHold = 0;
     downTimer = 0; riseTimer = 0; falls = 0; recoveries = 0; riseIncome = 0;
     riseRefSet = false;    // the settled reference height is taken after 0.5 s
-    bestComY = 0; standTimer = 0; stoodAt = 0; stood = false; balanced = false;
+    bestComY = 0; riseCand = 0; riseCandT = 0; scaffolded = false;
+    comSum = 0; comTime = 0;
+    lateSum = 0; lateTime = 0;
+    standTimer = 0; stoodAt = 0; stood = false; balanced = false;
     footLoad[0] = footLoad[1] = 0;
     footContact[0] = footContact[1] = 0;
     steps = 0; strideSum = 0;
@@ -114,6 +123,30 @@ inline void Walker::reset(const World* world, double x, double z, double yaw, co
     legWalkScore = 0; legShapeScore = 0;
     // beginLeg() resizes this per leg; the reset value covers the window before
     // the first leg starts so payWalk never reads a stale budget.
+    legBudget = F.PROGRESS_PER_M * legInitDist + F.WALK_SHAPE_CAP;
+    pushLeft = 0; pushX = 0; pushZ = 0;
+    uprightTime = 0; walkTime = 0;
+    lastPx = mb.bp[0]; lastPz = mb.bp[2];
+}
+
+inline void Walker::rebaseAfterFall(const World* world) {
+    const Fit& F = FIT();
+    startedDown = true; startPoseName = "fall";
+    done = false; timeLeft = 0; fallTimer = 0; fallSeverity = 0; comPeak = 0;
+    diverged = false;
+    downed = true; riseHold = 0;
+    downTimer = 0; riseTimer = 0; falls = 0; recoveries = 0; riseIncome = 0;
+    riseRefSet = false;
+    bestComY = comHeight(world ? &world->terrain : nullptr); riseCand = 0; riseCandT = 0; scaffolded = false;
+    comSum = 0; comTime = 0;
+    lateSum = 0; lateTime = 0;
+    standTimer = 0; stoodAt = 0; stood = false; balanced = false;
+    steps = 0; strideSum = 0;
+    fitScore = 0; penalty = 0; energy = 0; arrivals = 0;
+    progressM = 0; alignSum = 0;
+    legIdx = 0; legStartTime = 0; legInitDist = 1; bestDist = 1e9;
+    pathLen = 0; usefulLen = 0; pendingPush = 0; pushesSurvived = 0;
+    legWalkScore = 0; legShapeScore = 0;
     legBudget = F.PROGRESS_PER_M * legInitDist + F.WALK_SHAPE_CAP;
     pushLeft = 0; pushX = 0; pushZ = 0;
     uprightTime = 0; walkTime = 0;
@@ -345,13 +378,42 @@ inline void Walker::control(World& world) {
         patchDatum = datum;
     }
 
-    // assemble the lag window
+    /* ---- roll the window sums forward ----
+     * `cur` is already written at histWrite, so lag L sits at histWrite - L.
+     * Advancing one tick shifts window [a,b]: the frame now at lag a has just
+     * entered it and the one at lag b+1 has just left. That is why MAXHIST is one
+     * deeper than the deepest window — the departing frame has to still be
+     * readable when it is subtracted. */
+    nTicks++;
+    for (int w = 0; w < NWIN; w++) {
+        const int a = WIN_A[w], b = WIN_B[w];
+        const float* fin  = &histBuf[(size_t)((histWrite - a + L.MAXHIST) % L.MAXHIST) * (size_t)L.NC];
+        const float* fout = &histBuf[(size_t)((histWrite - b - 1 + L.MAXHIST) % L.MAXHIST) * (size_t)L.NC];
+        double* s = &winSum[(size_t)w * (size_t)L.NC];
+        for (int c = 0; c < L.NC; c++) s[c] += (double)fin[c] - (double)fout[c];
+    }
+    /* How many frames of each window actually exist yet. The ring is zeroed on
+     * reset, so an unwritten frame contributes nothing to the sum, and dividing by
+     * the COUNT rather than the window length gives the exact mean of what is
+     * there. Dividing by the length would scale the mean toward zero for the first
+     * 1.2 s of every episode, and with a gain of 62 on COM height that pins the
+     * tap against the clamp across exactly the stand phase the curriculum opens
+     * with. */
+    int winCnt[NWIN];
+    for (int w = 0; w < NWIN; w++)
+        winCnt[w] = std::max(0, std::min(WIN_B[w], nTicks - 1) - WIN_A[w] + 1);
+
+    // assemble: present-tense readings, then one differenced tap per window
     {
-        const int n = (int)L.planLag.size();
+        const int n = (int)L.planWin.size();
         for (int i = 0; i < n; i++) {
-            const int lag = L.planLag[i], ch = L.planCh[i];
-            inputs[i] = lag == 0 ? cur[ch]
-                : histBuf[(size_t)((histWrite - lag + L.MAXHIST) % L.MAXHIST) * (size_t)L.NC + ch];
+            const int w = L.planWin[i], ch = L.planCh[i];
+            if (w < 0) { inputs[i] = cur[ch]; continue; }
+            const int cnt = winCnt[w];
+            // No past yet means no change yet — 0, not a spurious excursion.
+            if (cnt == 0) { inputs[i] = 0.0f; continue; }
+            const double mean = winSum[(size_t)w * (size_t)L.NC + ch] / (double)cnt;
+            inputs[i] = (float)clampd(((double)cur[ch] - mean) * L.planGain[i], -1.5, 1.5);
         }
     }
     histWrite = (histWrite + 1) % L.MAXHIST;
@@ -361,12 +423,58 @@ inline void Walker::control(World& world) {
         for (size_t i = 0; i < inputs.size(); i++) inputs[i] = (float)((double)inputs[i] + nrand(rng)*s);
     }
 
-    const float* o = brain->forward(inputs.data(), nnBuf.data());
+    if (riseHold > 0) riseHold -= CTRL_DT;
+    Net* net = (riseBrain && (downed || riseHold > 0) && !(crouchStart && falls == 0)) ? riseBrain : brain;
+    const float* o = net->forward(inputs.data(), nnBuf.data());
     for (int i = 0; i < L.NOUT; i++) {
         double v = o[i];
         if (world.noise) v += nrand(rng) * SIM2REAL::actionNoise;
         out[i] = (float)clampd(v, 0, 1);
     }
+    /* ---- rise scaffolding ------------------------------------------------
+     *
+     * For the first `scaffoldUntil` seconds of a scaffolded rise episode a
+     * SEARCHED reference trajectory drives the joints instead of the brain, and
+     * the brain takes over mid-motion.
+     *
+     * The rise has never had a reward gradient leading into it: commanding the
+     * standing posture from a floor pose drives the COM DOWN to 0.12-0.15 m
+     * first, so the correct behaviour is punished for its entire prefix. An
+     * open-loop search (probe_rise_search.js) then showed the rise IS reachable
+     * inside the real torque, lag and slew limits — 0.386 m to 0.812 m settled
+     * from prone — so what was missing was the gradient, not the capability.
+     *
+     * HANDING OVER MID-MOTION is the point, and is why this is not done by
+     * spawning at a mid-rise posture. A posture sampled from the middle of a
+     * rise carries velocity; spawning freezes it to zero, and a frozen snapshot
+     * of a dynamic motion falls over — exactly how the riseAt interpolations
+     * failed (0.797 -> 0.162 held frozen).
+     *
+     * The override lands AFTER the network is read and after the action noise is
+     * drawn, so the rng stream is identical whether or not an episode is
+     * scaffolded. Must stay identical to Walker.control in walker.js. */
+    if (world.scaffoldGene && world.time < world.scaffoldUntil) {
+        const double* g = world.scaffoldGene;
+        const int K = world.scaffoldKnots;
+        const double uu = clampd(world.time / world.scaffoldT, 0, 1) * (K - 1);
+        const int i0 = std::min(K - 2, (int)std::floor(uu));
+        const double f = uu - i0;
+        for (int j = 0; j < nj; j++) {
+            const double a = g[(size_t)j * K + i0], b = g[(size_t)j * K + i0 + 1];
+            out[j] = (float)(a + (b - a) * f);
+        }
+        scaffolded = true;
+    } else if (scaffolded) {
+        /* Handover. Re-baseline the ratchet to where the scaffold left the body,
+         * so none of the height it was GIVEN is paid for — otherwise a
+         * 90%-scaffolded episode banks most of a rise for free and outscores an
+         * unscaffolded one that did the work. */
+        scaffolded = false;
+        bestComY = comHeight(&world.terrain);
+        riseCand = bestComY;
+        riseCandT = 0;
+    }
+    if (hook) hook->onAction(*this, world);
     // joint setpoints: nominal +/- range. A newborn's 0.5s land exactly on the
     // nominal standing pose, so evolution starts from "try to stand", not from
     // "flail". Held between control ticks, like a real servo bus.
@@ -775,6 +883,14 @@ inline void Walker::tickBook(World& world) {
      * must decay, or a walker that stood once is charged full rate for every
      * later collapse. 0.6 m/s empties it in ~1.5 s. */
     comPeak = std::max(comHeight(&T), comPeak - 0.6 * dtc);
+    /* Time-weighted mean COM height — the rise-trial ranking signal. A MEAN and
+     * not a maximum: any max-over-episode statistic pays for a spike that
+     * collapses, which is the thrash-farming trap the sustained-height ratchet
+     * was built to close. dtc-weighted so a variable control step cannot change
+     * the ranking. Must stay identical to Walker.tick in walker.js. */
+    comSum += comHeight(&T) * dtc;
+    comTime += dtc;
+    if (lateWhenLeft >= 0 && timeLeft <= lateWhenLeft) { lateSum += comHeight(&T) * dtc; lateTime += dtc; }
     fallTimer = down ? fallTimer + dtc : 0;
     if (!downed && fallTimer > 0.15) {
         downed = true;
@@ -811,10 +927,30 @@ inline void Walker::tickBook(World& world) {
              * is DIRECTIONAL, paid only on beating the best height so far, so the
              * way to earn more is to keep going up rather than to hover. */
             double pay = F.COM_HOLD * clampd(com / M.standHipY, 0, 1) * dtc;
+            /* THE RATCHET PAYS FOR SUSTAINED HEIGHT, NOT FOR SPIKES.
+             *
+             * Crediting any instantaneous new maximum made thrashing strictly
+             * better than competence. Measured on the quadruped rung over three
+             * seconds: a controller frozen at the spawn posture holds the pose
+             * and earns 95; the champion flails, drops the COM from 0.376 to
+             * about 0.21 — and earns 107. A thrash spiking 8 cm above the settle
+             * height collects 700 * 0.08 = 56, worth more than seconds of holding
+             * still. The reward was paying for VARIANCE, the same order-statistic
+             * trap that inflates a champion picked on its best single mission.
+             *
+             * riseCand must be held for RISE_CREDIT_HOLD before it counts. A real
+             * rise passes through every height on the way up and stays there, so
+             * it loses nothing; a flail leaves before the timer completes. Must
+             * stay identical to walker.js. */
             if (com > bestComY) {
-                pay += (com - bestComY) * F.COM_RISE_PER_M;
-                bestComY = com;
-            }
+                if (com >= riseCand) riseCandT += dtc;
+                else { riseCand = com; riseCandT = 0; }
+                if (riseCandT >= RISE_CREDIT_HOLD) {
+                    pay += (riseCand - bestComY) * F.COM_RISE_PER_M;
+                    bestComY = riseCand;
+                    riseCandT = 0;
+                }
+            } else { riseCand = com; riseCandT = 0; }
             pay = std::min(pay, room);
             riseIncome += pay;
             fitScore += pay;
@@ -823,6 +959,14 @@ inline void Walker::tickBook(World& world) {
             riseTimer += dtc;
             if (riseTimer > RISE_HOLD) {
                 downed = false;
+                riseHold = RISE_HANDOFF;   // the rise net finishes standing up before the walker takes over
+                /* A walker that has recovered HAS stood up. The stand milestone
+                 * (0.93 of standing hip height held 0.6 s) was only ever met by
+                 * the overshoot of the crouch-to-stand at an ordinary start; the
+                 * walking net's settled stance is ~0.90, so a walker that rose
+                 * from the floor and walked off earned no arrivals for it. Must
+                 * stay identical to walker.js. */
+                if (!stood) { stood = true; stoodAt = world.time; }
                 riseTimer = 0; fallTimer = 0; downTimer = 0;
                 if (recoveries < F.RECOVER_CAP) {
                     recoveries++;

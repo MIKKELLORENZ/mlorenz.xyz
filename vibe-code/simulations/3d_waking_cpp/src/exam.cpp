@@ -37,7 +37,24 @@
 namespace fs = std::filesystem;
 
 /* Held out: no training generation draws from this range. */
-static const int WALK_MISSIONS[] = { 900, 907, 913, 921, 934, 947, 955, 962, 969, 976, 983, 990 };
+static const int WALK_MISSIONS_BASE[] = { 900, 907, 913, 921, 934, 947, 955, 962, 969, 976, 983, 990 };
+/* --mission-shift moves the whole bank onto twelve DIFFERENT missions.
+ *
+ * The held-out bank is fixed so scores stay comparable across a run, which is
+ * right — but it makes the bank re-usable, and re-using it is how a comparison
+ * lies. Ranking N brains on one bank and keeping the winner is a max over N
+ * noisy samples: the winner's score is inflated by the selection itself, and on
+ * this problem a fixed brain swings 1,031 to 2,934 across missions. Measured
+ * directly here once: six candidates spread 0.70-1.40 waypoints on their own
+ * bank and 0.90-1.00 on a disjoint one — the spread was the bank, not the brain.
+ *
+ * So a winner picked on the standard bank gets re-scored on a shifted one before
+ * anyone believes it. */
+static int MISSION_SHIFT = 0;
+static int WALK_MISSIONS[12];
+static void initMissions() {
+    for (int i = 0; i < 12; i++) WALK_MISSIONS[i] = WALK_MISSIONS_BASE[i] + MISSION_SHIFT;
+}
 static const int RISE_SEEDS[] = { 971, 978, 985, 992, 999, 1006 };
 static constexpr int N_WALK = 12, N_SEEDS = 6;
 
@@ -161,7 +178,8 @@ int main(int argc, char** argv) {
     std::vector<std::string> pos;
     for (int i = 1; i < argc; i++) {
         const std::string a = argv[i];
-        if (a == "--select") select = true;
+        if (a == "--mission-shift" && i + 1 < argc) MISSION_SHIFT = std::atoi(argv[++i]);
+        else if (a == "--select") select = true;
         else if (a == "--stage" && i + 1 < argc) {
             const std::string v = argv[++i];
             if (v == "auto") stageAuto = true; else stage = std::atoi(v.c_str());
@@ -180,6 +198,8 @@ int main(int argc, char** argv) {
     if (file.empty()) file = (train / "champion.json").string();
     fs::path fp(file);
     if (fp.is_relative()) fp = exeDir / fp;
+
+    initMissions();
 
     /* --stage auto: take the stage the run is ACTUALLY on, from its own log.
      *

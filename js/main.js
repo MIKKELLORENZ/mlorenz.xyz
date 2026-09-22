@@ -1,78 +1,65 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // Update footer year dynamically
-    updateFooterYear();
-    
-    // Initialize scroll-reveal animations
-    initScrollReveal();
+// Site behaviour. Loaded with `defer` on every page except the Vibe Code
+// gallery, which has projects.js instead.
+(function () {
+    // The inline <head> script hides [data-reveal] content only while this
+    // flag is unset; if this file never runs, it shows everything again.
+    window.siteReady = true;
 
-    // Enable smooth scrolling for anchor links
-    initSmoothScroll();
+    var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    // Pause marquee on hover
-    initMarquee();
-});
-
-function updateFooterYear() {
-    const currentYear = new Date().getFullYear();
-    const footerElements = document.querySelectorAll('footer p');
-    
-    footerElements.forEach(footer => {
-        const text = footer.textContent;
-        // Only update the year portion, keep the rest
-        footer.textContent = text.replace(/\d{4}/, currentYear);
-    });
-}
-
-function initScrollReveal() {
-    // Add .reveal class to all major sections
-    const sections = document.querySelectorAll(
-        '.section, .process-step, .card, .service-item, .about-link-card, .outcome, .belief-card, .now-card, .about-text'
-    );
-    
-    sections.forEach((el, i) => {
-        el.classList.add('reveal');
-        // Stagger the animation slightly
-        el.style.transitionDelay = `${Math.min(i * 0.05, 0.3)}s`;
+    document.querySelectorAll('[data-year]').forEach(function (el) {
+        el.textContent = new Date().getFullYear();
     });
 
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.classList.add('visible');
-            }
-        });
-    }, {
-        threshold: 0.06,
-        rootMargin: '0px 0px -30px 0px'
+    // The hero render fades in once it has decoded, rather than painting in
+    // progressive bands.
+    document.querySelectorAll('.hero-visual img').forEach(function (img) {
+        function show() { img.classList.add('is-loaded'); }
+        if (img.complete && img.naturalWidth) show();
+        else {
+            img.addEventListener('load', show, { once: true });
+            img.addEventListener('error', show, { once: true });
+        }
     });
 
-    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
-}
+    // Major sections rise in once as they reach the viewport.
+    var items = document.querySelectorAll('[data-reveal]');
+    if (items.length) {
+        if (reduceMotion || !('IntersectionObserver' in window)) {
+            items.forEach(function (el) { el.classList.add('is-visible'); });
+        } else {
+            var observer = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (!entry.isIntersecting) return;
+                    entry.target.classList.add('is-visible');
+                    observer.unobserve(entry.target);
+                });
+            }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+            items.forEach(function (el) { observer.observe(el); });
+        }
+    }
 
-function initSmoothScroll() {
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-        anchor.addEventListener('click', function(e) {
-            const target = document.querySelector(this.getAttribute('href'));
-            if (target) {
-                e.preventDefault();
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-        });
-    });
-}
-
-function initMarquee() {
-    const strip = document.querySelector('.marquee-strip');
-    if (!strip) return;
-    
-    const track = strip.querySelector('.marquee-track');
-    if (!track) return;
-    
-    strip.addEventListener('mouseenter', () => {
-        track.style.animationPlayState = 'paused';
-    });
-    
-    strip.addEventListener('mouseleave', () => {
-        track.style.animationPlayState = 'running';
-    });
-}
+    // The portrait clip is about 1 MB. Show the still at once and fetch the
+    // video when the page is idle, never on reduced motion, save-data or 2G.
+    var video = document.querySelector('.portrait video[data-src]');
+    if (video && !reduceMotion) {
+        var conn = navigator.connection || {};
+        if (!conn.saveData && !/(^|-)2g$/.test(conn.effectiveType || '')) {
+            var start = function () {
+                video.muted = true;
+                video.src = video.dataset.src;
+                var playing = video.play();
+                if (playing && playing.then) {
+                    playing.then(function () { video.classList.add('is-playing'); }, function () {});
+                } else {
+                    video.classList.add('is-playing');
+                }
+            };
+            var schedule = function () {
+                (window.requestIdleCallback || function (f) { setTimeout(f, 500); })(start, { timeout: 3000 });
+            };
+            if (document.readyState === 'complete') schedule();
+            else window.addEventListener('load', schedule, { once: true });
+        }
+    }
+})();

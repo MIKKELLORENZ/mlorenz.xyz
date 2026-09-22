@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compression Evolution — a genetic algorithm invents lossless compressors</title>
+<script>(function () { var t = new URLSearchParams(location.search).get('theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); })();</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="bar">
+    <span class="bar-title">Compression Evolution</span>
+    <span class="bar-status" id="status" aria-live="polite">Ready</span>
+    <div class="bar-actions">
+        <button class="btn btn-quiet" id="btn-algo" disabled title="The champion design as one JSON file. Load it later, here or anywhere the codec runs.">Download algorithm</button>
+        <button class="btn btn-quiet" id="btn-settings">Settings</button>
+        <button class="btn btn-primary" id="btn-run">Evolve</button>
+    </div>
+</header>
+
+<main class="page">
+    <section class="lede">
+        <div>
+            <span class="eyebrow">Compress</span>
+            <div class="segments" id="datasets" role="group" aria-label="What to compress"></div>
+        </div>
+        <div>
+            <h1 class="hero num" id="hero">–</h1>
+            <p class="hero-sub" id="hero-sub">of the original size</p>
+            <p class="small lede-note" id="hero-note"></p>
+        </div>
+    </section>
+
+    <section aria-labelledby="h-chart">
+        <h2 id="h-chart">Compressed size by generation</h2>
+        <p class="sub" id="chart-sub">Lower is better. Dots are measured on the whole data, the line between them is estimated from the fitness sample. Grey lines are existing tools, measured on the same bytes.</p>
+        <div class="chart-wrap"><canvas id="chart"></canvas><div id="chart-tip" class="tip" hidden></div></div>
+        <div class="legend" id="legend"></div>
+    </section>
+
+    <section id="files-section" aria-labelledby="h-files" hidden>
+        <h2 id="h-files">One design, every file</h2>
+        <p class="sub">The same algorithm compresses all of them. Its score is the average of these ratios, so a short text counts as much as a large photo. Select a file to see where its bits go.</p>
+        <div class="list files" id="files"></div>
+    </section>
+
+    <section aria-labelledby="h-bits">
+        <h2 id="h-bits">Where the bits go</h2>
+        <p class="sub" id="bits-sub">What the design pays for every byte. It appears once a first champion has been run on the whole file.</p>
+        <div class="segments mode" id="bits-mode" role="group" aria-label="What the map shows" hidden>
+            <button class="seg" type="button" data-mode="spent" aria-pressed="true">Bits spent</button>
+            <button class="seg" type="button" data-mode="saved" aria-pressed="false">Bits saved</button>
+        </div>
+        <div id="bits-view"></div>
+        <div class="scale" id="bits-scale" hidden><span>0 bits</span><i></i><span>6 or more per byte</span></div>
+        <p class="probe" id="bits-probe"></p>
+        <p class="small" id="data-credit"></p>
+    </section>
+
+    <section aria-labelledby="h-savings">
+        <h2 id="h-savings">Where the bits are saved</h2>
+        <p class="sub">Every byte starts at 8 bits. The design is rebuilt one part at a time, on the fitness sample, to see what each part is worth.</p>
+        <div class="list savings" id="savings"><p class="small">It appears with the first champion.</p></div>
+    </section>
+
+    <section class="two">
+        <div>
+            <h2 id="anatomy-title">The algorithm</h2>
+            <p class="sub" id="anatomy-name">Nothing has been evolved yet.</p>
+            <div class="steps" id="anatomy"></div>
+            <div class="actions" id="anatomy-actions" hidden>
+                <button class="btn-text" id="btn-algo2">Download this algorithm</button>
+                <button class="btn-text" id="btn-copy">Copy as JSON</button>
+            </div>
+        </div>
+        <div>
+            <h3>Standings</h3>
+            <p class="small">Evolved families next to existing tools. Select a family to read its best design.</p>
+            <div class="list board" id="board"></div>
+            <h3 style="margin-top: var(--s48)">Discoveries</h3>
+            <div class="log" id="log"></div>
+            <button class="btn-text small" id="log-more" hidden>Show all</button>
+        </div>
+    </section>
+
+    <section aria-labelledby="h-proof">
+        <h2 id="h-proof">Proof it is real</h2>
+        <p class="sub">The compressed file carries its own recipe in the first bytes, so it restores with no other information. Every champion is decoded again and compared byte for byte.</p>
+        <div class="facts">
+            <div class="fact"><b id="pf-size">–</b><span>compressed file</span></div>
+            <div class="fact"><b id="pf-header">–</b><span>of which is the algorithm</span></div>
+            <div class="fact"><b id="pf-verified">–</b><span>decoded and compared</span></div>
+            <div class="fact"><b id="pf-speed">–</b><span>compress / restore speed</span></div>
+        </div>
+        <div class="actions">
+            <button class="btn-text" id="btn-download" disabled>Download the compressed file</button>
+            <button class="btn-text" id="btn-open">Restore a .cev file</button>
+        </div>
+    </section>
+
+    <footer class="small">
+        <p>Everything runs in this tab; no file leaves your browser. The reference tools were run once, offline, on the same bytes. <button class="btn-text" id="btn-about">About this page</button></p>
+    </footer>
+</main>
+
+<dialog id="settings" aria-labelledby="h-settings">
+    <div class="sheet">
+        <h2 id="h-settings">Settings</h2>
+        <p class="sub">Changing a slider restarts evolution from the current designs.</p>
+        <div class="group">
+            <label class="field"><span class="field-top"><span>Parallel workers</span><b id="lb-workers">4</b></span><input type="range" id="sl-workers" min="1" max="16" value="4" step="1"></label>
+            <label class="field"><span class="field-top"><span>Designs per generation</span><b id="lb-pop">40</b></span><input type="range" id="sl-pop" min="20" max="96" value="40" step="4"></label>
+            <label class="field"><span class="field-top"><span>Fitness sample</span><b id="lb-sample">64 KB</b></span><input type="range" id="sl-sample" min="0" max="5" value="2" step="1"></label>
+            <label class="field"><span class="field-top"><span>Experts per design, at most</span><b id="lb-experts">12</b></span><input type="range" id="sl-experts" min="2" max="12" value="12" step="1"></label>
+        </div>
+        <div class="group">
+            <span class="eyebrow">This run</span>
+            <p class="small" id="run-note">Runs are saved in this browser as you go and continue when you come back.</p>
+            <div class="sheet-actions">
+                <button class="btn-text" id="btn-save">Save run to a file</button>
+                <button class="btn-text" id="btn-load">Load a saved run</button>
+                <button class="btn-text" id="btn-reset">Start over</button>
+            </div>
+        </div>
+        <div class="sheet-actions"><button class="btn btn-quiet" data-close>Done</button></div>
+    </div>
+</dialog>
+
+<dialog id="about" aria-labelledby="h-about">
+    <div class="sheet">
+        <h2 id="h-about">Compression Evolution</h2>
+        <p class="sub">A genetic algorithm invents lossless compression algorithms, starting from nothing but counting which byte values are common. Every candidate is a real compressor. It is run, its output is counted in bytes, and the champion is decoded again and checked bit for bit.</p>
+        <p class="sub">The grey lines on the chart are gzip, bzip2, xz, zstd, PNG, WebP, FLAC and others, measured on the same bytes. The point is not to beat them. It is to watch what a compressor is take shape: what it looks at, what it guesses, and where the bits go.</p>
+        <p class="sub">By default one design is evolved for all five files at once. Pick a single file to specialise; it starts from the shared design rather than from nothing.</p>
+        <div class="sheet-actions">
+            <button class="btn btn-primary" id="about-go">Evolve</button>
+            <button class="btn-text" id="about-replay">Replay a recorded run</button>
+            <button class="btn-text" data-close>Look around first</button>
+        </div>
+    </div>
+</dialog>
+
+<input type="file" id="file-input" hidden>
+<input type="file" id="cev-input" accept=".cev" hidden>
+<input type="file" id="run-input" accept=".json,application/json" hidden>
+
+<script src="corpus_meta.js"></script>
+<script src="codec.js"></script>
+<script src="analyze.js"></script>
+<script src="genome.js"></script>
+<script src="evolution.js"></script>
+<script src="pool.js"></script>
+<script src="run.js"></script>
+<script src="corpus.js"></script>
+<script src="champions.js"></script>
+<script src="render.js"></script>
+<script src="views.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

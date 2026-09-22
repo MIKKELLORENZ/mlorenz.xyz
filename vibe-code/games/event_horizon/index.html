@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Event Horizon — a relativity flight school</title>
+<meta name="description" content="Fly a ship through real general relativity: orbits, GPS clock drift, the twin paradox, time dilation near a black hole, light bending, tides, and a one-way trip through the horizon.">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../../shared_assets/mobile.css">
+</head>
+<body>
+
+<div id="app">
+    <header id="topbar">
+        <div class="brand">
+            <span class="brand-dot"></span>
+            <h1>Event Horizon</h1>
+            <span class="brand-sub">a relativity flight school</span>
+        </div>
+        <div id="top-stats">
+            <span class="tstat badge" id="ts-mission">–</span>
+            <span class="tstat" title="Your own clock. The game always runs at a steady rate on this one.">ship <b id="ts-ship">–</b></span>
+            <span class="tstat" title="The clock you left behind."><span id="ts-base-label">far</span> <b id="ts-base">–</b></span>
+            <span class="tstat" id="ts-rate-wrap" title="How fast your clock is running compared with a clock at rest far away. Exactly the product of the gravity and speed factors in the Instruments panel."><span id="ts-rate-label">your clock runs at</span> <b id="ts-rate">–</b></span>
+        </div>
+        <div id="top-actions" data-mob-bar>
+            <div id="warp-group" aria-label="Time warp" title="Time warp  ( , and . )"></div>
+            <button id="btn-pause" class="btn" title="Pause  (P)">Pause</button>
+            <button id="btn-restart" class="btn" title="Restart this mission  (R)">Restart</button>
+            <button id="btn-sound" class="btn" title="Sound: two clocks ticking — yours, and the one you left behind">Sound off</button>
+            <button id="btn-guide" class="btn" title="Field guide">Guide</button>
+            <button id="btn-menu" class="btn primary">Missions</button>
+        </div>
+    </header>
+
+    <main id="layout">
+        <aside id="panel-left" data-mob-label="Mission">
+            <section class="card" id="card-mission">
+                <h2>Mission <span id="ms-chapter" class="hint"></span></h2>
+                <div class="ms-title" id="ms-title">–</div>
+                <div class="ms-tag" id="ms-tag"></div>
+                <ul id="goals"></ul>
+                <button id="btn-finish" class="btn wide primary" hidden>Finish mission</button>
+                <button id="btn-demo" class="btn wide" title="Watch the scripted pilot fly it. Touch any control to take over.">Show me how</button>
+            </section>
+            <section class="card" id="card-learn">
+                <h2>What this is about</h2>
+                <div id="learn"></div>
+            </section>
+            <section class="card" id="card-hints">
+                <h2>How to fly it</h2>
+                <ol id="hints"></ol>
+                <div class="keys" id="keys"></div>
+            </section>
+            <section class="card" id="card-fact">
+                <h2>In the real world</h2>
+                <p class="fact" id="fact"></p>
+            </section>
+        </aside>
+
+        <div id="canvas-wrap">
+            <canvas id="scene"></canvas>
+            <div id="hud"></div>
+            <div id="banner" aria-live="polite"></div>
+            <div id="warn" aria-live="assertive"></div>
+            <div id="demo-tag" hidden>AUTOPILOT<span class="wide-only"> DEMO — touch any control to take over</span></div>
+            <div id="port-wrap">
+                <canvas id="porthole"></canvas>
+                <div id="port-label"></div>
+            </div>
+            <div id="touch" aria-label="Touch controls">
+                <div class="tc-left">
+                    <button class="tc" data-key="left" aria-label="Turn left">⟲</button>
+                    <button class="tc" data-key="right" aria-label="Turn right">⟳</button>
+                </div>
+                <div class="tc-mid">
+                    <button class="tc small" data-key="pro" aria-label="Point prograde">PRO</button>
+                    <button class="tc small" data-key="retro" aria-label="Point retrograde">RETRO</button>
+                    <button class="tc small toggle" data-key="hover" aria-label="Hover autopilot">HOVER</button>
+                </div>
+                <div class="tc-right">
+                    <button class="tc small" data-key="down" aria-label="Reverse thrust, or descend">▼</button>
+                    <button class="tc big" data-key="up" aria-label="Thrust, climb, or fire">▲</button>
+                </div>
+            </div>
+        </div>
+
+        <aside id="panel-right" data-mob-label="Instruments" data-mob-default>
+            <section class="card" id="card-clocks">
+                <h2>Two clocks</h2>
+                <div class="clock-row"><span>Ship clock</span><b id="ck-ship">–</b></div>
+                <div class="clock-row"><span id="ck-base-label">Far clock</span><b id="ck-base">–</b></div>
+                <div class="kv lead"><span id="ck-lead-label">ahead of you by</span><b id="ck-lead">–</b></div>
+                <p class="hint" id="ck-note"></p>
+            </section>
+
+            <section class="card" id="card-dilation">
+                <h2>Why your clock runs slow</h2>
+                <div class="bar-row" title="The rate of a clock hovering at your radius, compared with one far away: sqrt(1 − rs/r).">
+                    <span>gravity</span><div class="bar"><i id="bar-grav"></i></div><b id="dl-grav">–</b>
+                </div>
+                <div class="bar-row" title="The extra slowing from your speed, as measured by somebody hovering right where you are: sqrt(1 − v²/c²).">
+                    <span>speed</span><div class="bar"><i id="bar-speed"></i></div><b id="dl-speed">–</b>
+                </div>
+                <div class="bar-row total" title="The two multiplied together — exactly, not approximately.">
+                    <span>total</span><div class="bar"><i id="bar-total"></i></div><b id="dl-total">–</b>
+                </div>
+                <p class="hint" id="dl-note"></p>
+            </section>
+
+            <section class="card" id="card-flight">
+                <h2>Flight</h2>
+                <div class="kv"><span id="fl-r-label">radius</span><b id="fl-r">–</b></div>
+                <div class="kv"><span id="fl-v-label">speed</span><b id="fl-v">–</b></div>
+                <div class="kv"><span>orbit</span><b id="fl-orbit">–</b></div>
+                <div class="kv" title="What an accelerometer on board reads. In free fall it is zero, however strong the gravity."><span>you feel</span><b id="fl-g">–</b></div>
+                <div class="kv" id="fl-tide-row" title="The difference in pull between the pilot's head and feet."><span>tide across you</span><b id="fl-tide">–</b></div>
+                <div class="fuel" title="Fuel, counted as the total change of velocity it can deliver."><div class="bar"><i id="bar-fuel"></i></div><b id="fl-fuel">–</b></div>
+            </section>
+
+            <section class="card" id="card-energy">
+                <h2>Energy landscape</h2>
+                <canvas id="chart-energy" width="290" height="150"></canvas>
+                <div class="legend">
+                    <span><i class="sw sw-gr"></i>Einstein</span>
+                    <span><i class="sw sw-newton"></i>Newton</span>
+                    <span><i class="sw sw-e"></i>your energy</span>
+                </div>
+                <p class="hint">The hill your distance from the centre rolls on, for the angular momentum you have right now. You can only be where your energy line is above the curve.</p>
+            </section>
+
+            <section class="card" id="card-signals">
+                <h2>Signals</h2>
+                <div class="kv" title="Frequency of your beacon as received far away, over the frequency you sent it at. Gravitational redshift and Doppler shift together."><span>your beacon, heard far away</span><b id="sg-out">–</b></div>
+                <div class="spectrum"><i id="sg-marker"></i></div>
+                <div class="kv"><span id="sg-colour-label">sent green (530 nm), arrives</span><b id="sg-colour">–</b></div>
+                <div class="kv" title="Frequency of light arriving from straight overhead, compared with what it was far away."><span id="sg-in-label">starlight overhead looks</span><b id="sg-in">–</b></div>
+                <div id="pinglog"></div>
+            </section>
+
+            <section class="card" id="card-view">
+                <h2>View</h2>
+                <label class="check-row"><input type="checkbox" data-ov="predict"><span>Coasting path <i class="hint">— where you go with the engine off</i></span></label>
+                <label class="check-row"><input type="checkbox" data-ov="rings"><span>Horizon, photon sphere, last orbit</span></label>
+                <label class="check-row"><input type="checkbox" data-ov="contours"><span>Clock-rate rings</span></label>
+                <label class="check-row"><input type="checkbox" data-ov="river"><span>The river of space</span></label>
+                <label class="check-row"><input type="checkbox" data-ov="cone"><span>Light circle <i class="hint">— where your future can be</i></span></label>
+                <label class="check-row"><input type="checkbox" data-ov="pulses"><span>Beacon flashes</span></label>
+                <label class="check-row"><input type="checkbox" data-ov="disc"><span>Orbiting gas</span></label>
+                <label class="check-row"><input type="checkbox" id="chk-port" checked><span>Window view</span></label>
+            </section>
+        </aside>
+    </main>
+</div>
+
+<!-- ───────────────────────────── title ───────────────────────────── -->
+<div id="intro" class="modal" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+    <div class="intro-card">
+        <span class="intro-dot"></span>
+        <h2 id="intro-title">Event Horizon</h2>
+        <p>A flight school for <b>gravity, time and black holes</b>. Every mission is one idea from relativity, and you learn it by flying through it:
+           why orbits are free fall, why GPS has to correct for Einstein, why the traveller comes home younger, what a horizon really is.</p>
+        <p class="intro-small">Nothing here is faked with a fudge factor. The ship moves through the exact spacetime of a black hole, the clocks are integrated along your path,
+           and the round window shows a ray-traced sky.</p>
+        <div class="intro-choices">
+            <button id="intro-start" class="intro-choice primary">
+                <b>▶&nbsp; Start flight school</b>
+                <small id="intro-start-sub">Eight short missions, from low Earth orbit to the singularity</small>
+            </button>
+            <button id="intro-menu" class="intro-choice">
+                <b>☰&nbsp; Choose a mission</b>
+                <small>Everything is unlocked — skip to whatever you are curious about</small>
+            </button>
+            <button id="intro-free" class="intro-choice">
+                <b>∞&nbsp; Free flight</b>
+                <small>A black hole, unlimited fuel, every instrument on</small>
+            </button>
+        </div>
+        <button id="intro-guide" class="intro-dismiss">or read the field guide →</button>
+    </div>
+</div>
+
+<!-- ───────────────────────────── mission list ───────────────────────────── -->
+<div id="menu" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+    <div class="sheet-card">
+        <div class="sheet-head"><h2 id="menu-title">Missions</h2><button class="x" data-close="menu" aria-label="Close">×</button></div>
+        <div id="menu-list"></div>
+    </div>
+</div>
+
+<!-- ───────────────────────────── briefing ───────────────────────────── -->
+<div id="brief" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="brief-title">
+    <div class="intro-card brief-card">
+        <div class="brief-chapter" id="brief-chapter"></div>
+        <h2 id="brief-title"></h2>
+        <div class="brief-tag" id="brief-tag"></div>
+        <p id="brief-text"></p>
+        <div id="brief-variants" class="intro-choices"></div>
+        <div class="btn-row big">
+            <button id="brief-fly" class="btn primary">Fly</button>
+            <button id="brief-demo" class="btn">Show me first</button>
+            <button id="brief-back" class="btn">Missions</button>
+        </div>
+    </div>
+</div>
+
+<!-- ───────────────────────────── debrief ───────────────────────────── -->
+<div id="debrief" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="deb-title">
+    <div class="intro-card brief-card">
+        <div class="stars" id="deb-stars"></div>
+        <h2 id="deb-title"></h2>
+        <div id="deb-lines"></div>
+        <p class="fact" id="deb-fact"></p>
+        <div class="btn-row big">
+            <button id="deb-next" class="btn primary">Next mission</button>
+            <button id="deb-again" class="btn">Fly it again</button>
+            <button id="deb-menu" class="btn">Missions</button>
+        </div>
+    </div>
+</div>
+
+<!-- ───────────────────────────── field guide ───────────────────────────── -->
+<div id="guide" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="guide-title">
+    <div class="sheet-card guide-card">
+        <div class="sheet-head"><h2 id="guide-title">Field guide</h2><button class="x" data-close="guide" aria-label="Close">×</button></div>
+        <div class="guide-body">
+            <nav id="guide-nav"></nav>
+            <article id="guide-page"></article>
+        </div>
+    </div>
+</div>
+
+<script src="physics.js"></script>
+<script src="sky.js"></script>
+<script src="sim.js"></script>
+<script src="missions.js"></script>
+<script src="missions_bh.js"></script>
+<script src="pilot.js"></script>
+<script src="guide.js"></script>
+<script src="render.js"></script>
+<script src="porthole.js"></script>
+<script src="hud.js"></script>
+<script src="audio.js"></script>
+<script src="main.js"></script>
+<script src="../../shared_assets/mobile.js"></script>
+</body>
+</html>

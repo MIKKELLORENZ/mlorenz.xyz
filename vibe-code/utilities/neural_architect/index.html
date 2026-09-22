@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neural Architect</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="../../shared_assets/mobile.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+    <div class="app" data-mob-root data-mob-layout>
+
+        <!-- One bar. Document on the left, view on the right, everything else under ≡ or ⌘K. -->
+        <header class="topbar">
+            <button class="tbtn icon-only" id="tb-menu" title="Menu"><i data-lucide="menu"></i></button>
+            <nav class="crumbs" id="crumbs"></nav>
+            <span class="tb-sep"></span>
+            <button class="tbtn" id="tb-undo" title="Undo (Ctrl+Z)"><i data-lucide="undo-2"></i><span>Undo</span></button>
+            <button class="tbtn" id="tb-redo" title="Redo (Ctrl+Shift+Z)"><i data-lucide="redo-2"></i><span>Redo</span></button>
+            <button class="tbtn" id="tb-tidy" title="Tidy up (Shift+T) — the selected blocks when several are selected, otherwise the whole model"><i data-lucide="layout-grid"></i><span>Tidy</span></button>
+            <span class="tb-sep"></span>
+            <div class="seg tools" data-mob-bar>
+                <button class="tool active" data-tool="select" title="Select (V)"><i data-lucide="mouse-pointer-2"></i></button>
+                <button class="tool" data-tool="hand" title="Hand (H) — right-drag also pans"><i data-lucide="hand"></i></button>
+                <button class="tool" data-tool="wire" title="Wire (W) — drag from anywhere on a block"><i data-lucide="spline"></i></button>
+            </div>
+            <div class="tb-spacer"></div>
+            <div class="seg mode" id="tb-mode" title="Training view shows dropout and batch statistics; inference view shows the model under model.eval() (Shift+I)">
+                <button class="tool active" data-mode="train" data-short="Train"><span>Training</span></button>
+                <button class="tool" data-mode="infer" data-short="Infer"><span>Inference</span></button>
+            </div>
+            <button class="tbtn zoom" id="tb-zoom" title="Fit all (F) · zoom with the wheel, + and −"><span id="zoom-label">100%</span></button>
+            <span class="tb-sep"></span>
+            <button class="tbtn" id="tb-share" title="Copy a link that opens this exact model"><i data-lucide="link"></i><span>Share</span></button>
+            <button class="tbtn primary" id="tb-export" title="Export (Ctrl+E)"><span>Export</span></button>
+        </header>
+
+        <aside class="rail" data-mob-panel data-mob-label="Blocks">
+            <div class="rail-tabs">
+                <button data-rtab="palette" class="active">Blocks</button>
+                <button data-rtab="module-palette">Modules</button>
+            </div>
+            <input type="search" id="palette-search" class="rail-search" placeholder="Filter" spellcheck="false" autocomplete="off" aria-label="Filter blocks">
+            <div class="rail-body">
+                <div id="palette" class="rail-pane active"></div>
+                <div id="module-palette" class="rail-pane"></div>
+            </div>
+        </aside>
+
+        <main class="stage" id="stage" data-mob-stage>
+            <canvas id="scene"></canvas>
+            <canvas id="overlay"></canvas>
+            <div id="action-bar" class="action-bar"></div>
+            <div id="inline-edit" class="inline-edit" hidden><input type="text" spellcheck="false"></div>
+            <div id="popover" class="popover" hidden></div>
+            <canvas id="minimap" width="180" height="110"></canvas>
+            <div id="hud" class="hud"></div>
+            <div id="empty-hero" class="empty-hero" hidden>
+                <h1>New model</h1>
+                <div class="hero-actions">
+                    <button class="hero-btn" id="hero-add"><b>Start blank</b><span>Begin with an input block</span></button>
+                    <button class="hero-btn" id="hero-robot"><b>Robot control policy</b><span>Sensors, objective and physics into one action head</span></button>
+                    <button class="hero-btn" id="hero-templates"><b>Templates</b><span>MLP, CNN, transformer, U-Net…</span></button>
+                    <button class="hero-btn" id="hero-open"><b>Open</b><span>.neural.json · exported .py · .onnx</span></button>
+                </div>
+            </div>
+            <div class="drop-hint" id="drop-hint"><p>Drop a .json, .py or .onnx file</p></div>
+            <input type="file" id="project-input" accept=".json,.naproj,.py,.onnx,application/json" hidden>
+        </main>
+
+        <aside class="inspector" data-mob-panel data-mob-label="Inspector" data-mob-default>
+            <div id="inspector-body" class="insp-body"></div>
+        </aside>
+    </div>
+
+    <div id="cmdk" class="cmdk" hidden>
+        <div class="cmdk-box">
+            <div class="cmdk-input-wrap"><i data-lucide="search"></i><input id="cmdk-input" type="text" placeholder="Command, block, template or block name" spellcheck="false" autocomplete="off"></div>
+            <div id="cmdk-list" class="cmdk-list"></div>
+        </div>
+    </div>
+
+    <div class="modal" id="export-modal">
+        <div class="modal-box wide">
+            <div class="modal-head">
+                <div class="seg tabs">
+                    <button class="tab active" data-fmt="pytorch">PyTorch</button>
+                    <button class="tab" data-fmt="keras">Keras</button>
+                    <button class="tab" data-fmt="json">Model file</button>
+                </div>
+                <code id="export-filename" class="filename"></code>
+                <button class="tbtn icon-only" data-close title="Close"><i data-lucide="x"></i></button>
+            </div>
+            <div id="export-notes" class="export-notes"></div>
+            <pre id="code-preview" class="code"></pre>
+            <div class="modal-foot">
+                <span class="foot-note">The exported .py re-opens here — the model is embedded in its docstring.</span>
+                <button class="btn ghost" id="export-copy">Copy</button>
+                <button class="btn" id="export-download">Download</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="templates-modal">
+        <div class="modal-box">
+            <div class="modal-head"><h3>Templates</h3><button class="tbtn icon-only" data-close title="Close"><i data-lucide="x"></i></button></div>
+            <div id="template-list" class="tgrid"></div>
+        </div>
+    </div>
+
+    <div class="modal" id="shortcuts-modal">
+        <div class="modal-box">
+            <div class="modal-head"><h3>Keyboard shortcuts</h3><button class="tbtn icon-only" data-close title="Close"><i data-lucide="x"></i></button></div>
+            <div id="shortcut-list" class="sc-list"></div>
+        </div>
+    </div>
+
+    <div class="ctx-menu" id="ctx-menu" hidden></div>
+
+    <script src="core.js"></script>
+    <script src="codegen.js"></script>
+    <script src="render.js"></script>
+    <script src="interact.js"></script>
+    <script src="ui.js"></script>
+    <script src="app.js"></script>
+    <script src="../../shared_assets/mobile.js"></script>
+</body>
+</html>

@@ -151,7 +151,7 @@ struct Fit {
      * on purpose becomes a way to farm it. */
     double RECOVER = 120;
     int    RECOVER_CAP = 4;
-    double COM_RISE_PER_M = 700; // directional: per metre of NEW best height
+    double COM_RISE_PER_M = 700; // directional: per metre of NEW best height; scaled by --rise-pay
     double COM_HOLD = 90;        // dense: per second, scaled by how high the mass is
     double COM_RISE_CAP = 500;   // …both together, capped per episode
     /* Floor of the rise GATE in fitness(). A walker that never lifts its mass
@@ -206,7 +206,12 @@ inline void setReward(const std::string& model) {
 
 constexpr double STAND_HOLD = 0.6;    // s at full height before "stood" is credited
 constexpr double BALANCE_HOLD = 2.0;  // s upright after standing before walking scores
+/* How long a new maximum COM height must be SUSTAINED before the rise ratchet
+ * pays for it. Short enough that a real rise never notices, long enough that a
+ * flail cannot collect on a height it merely touched. Mirrors walker.js. */
+constexpr double RISE_CREDIT_HOLD = 0.20;
 constexpr double RISE_HOLD = 0.35;    // s upright at height before a recovery counts
+constexpr double RISE_HANDOFF = 1.0;  // s the rise net keeps driving after a recovery (two-net brain)
 constexpr double DOWN_TIMEOUT = 6.0;  // s down with no progress before we stop simulating
 
 /* ------------------------------------- foot-referenced terrain perception
@@ -244,10 +249,20 @@ constexpr double NORMAL_STEP = 0.05;     // central difference, not an analytic 
  * literals, and the day the body gained a joint the network began reading joint
  * rates where it expected foot load, silently, with no error anywhere.
  *
- * DYADIC LAGS. Each channel carries a SET of past control ticks, not a run of
- * consecutive ones. Spacing them {0,1,2,4,8} reaches 160 ms for four samples
- * where four consecutive ones reach 80 — the same trick a dilated convolution
- * uses, and it costs nothing but bookkeeping. */
+ * DIFFERENCED WINDOWS, replacing six ad-hoc raw-lag ladders. Every history tap
+ * is now (now - mean of the channel over a window), scaled by a measured gain:
+ *
+ *     tap = clamp((now - mean(W)) * gain, -1.5, 1.5)
+ *
+ * The old taps were RAW LAGGED SAMPLES, and for a slowly-varying channel the
+ * reading at lag 30 is nearly the reading at lag 0 — a near-duplicate of an input
+ * the network already has, which a GA has no reason to spend weights on. Ablation
+ * was blunt about it: zeroing all thirty of COM velocity's history inputs left the
+ * walker at 3.17 m against 3.17 m intact, while a random thirty-input lesion left
+ * 0.09-0.23 m. A difference instead carries only novelty, is centred near zero,
+ * and averages away roughly sqrt(N) of the sensor noise. See walker.js for the
+ * full argument; this file must mirror it exactly or the C++ and JS walkers
+ * perceive different pasts and every parity check downstream is meaningless. */
 /* One sensor group, recorded as the layout is built so that documentation is
  * GENERATED from the thing it documents. A hand-written table of what the brain
  * senses is a second source of truth, and this file has already been bitten once
@@ -256,17 +271,21 @@ constexpr double NORMAL_STEP = 0.05;     // central difference, not an analytic 
  * expected foot load. `walk3d_verify --inputs` prints this. */
 struct SensorGroup {
     const char* name;
-    const char* what;       // plain-language: what the number MEANS
-    int ch0, nch;           // first channel and how many
-    std::vector<int> lags;  // which past control ticks are fed
-    int inputs;             // nch * lags.size()
+    const char* what;         // plain-language: what the number MEANS
+    int ch0, nch;             // first channel and how many
+    std::vector<int> wins;    // which difference windows are fed (indices into WIN)
+    std::vector<double> gain; // parallel to wins
+    int inputs;               // nch * (1 + wins.size())
 };
 
 struct Layout {
     int NJ = 0, NC = 0, NIN = 0, NOUT = 0, MAXHIST = 0, N_FAN = 0;
-    std::vector<std::vector<int>> LAGS;
+    std::vector<std::vector<int>> TEMPORAL;           // window indices per channel
+    std::vector<std::vector<double>> TGAIN;           // parallel gains per channel
     std::vector<SensorGroup> groups;
-    std::vector<int> planLag, planCh;                 // the flattened read plan
+    /* The flattened read plan. planWin is -1 for a present-tense tap. */
+    std::vector<int> planWin, planCh;
+    std::vector<double> planGain;
     int C_GRAV=0, C_GYRO=0, C_VEL=0, C_HEIGHT=0, C_UPRIGHT=0, C_QA=0, C_QD=0,
         C_LOAD=0, C_CONTACT=0, C_FOOTPOS=0, C_WPDIST=0, C_WPBEAR=0, C_GAIT=0,
         C_TERRAIN=0, C_WIND=0, C_EFFERENCE=0, C_COMVEL=0, C_COMH=0, C_COMPOS=0,
@@ -284,45 +303,65 @@ struct Layout {
 constexpr int RING_DIRS = 12;
 constexpr int N_RING = 3 * RING_DIRS;
 
+/* The difference windows, in control ticks at 50 Hz: 20-60 ms, 80-300 ms,
+ * 320-1200 ms. DISJOINT on purpose — three nested or exponentially-weighted
+ * averages are heavily correlated with one another, so each extra input would
+ * mostly repeat the last; disjoint eras are close to independent, which is what
+ * makes three inputs worth three inputs. Must match WIN in walker.js exactly. */
+constexpr int NWIN = 3;
+constexpr int WIN_A[NWIN] = { 1,  4, 16 };
+constexpr int WIN_B[NWIN] = { 3, 15, 60 };
+
 inline const Layout& LAY() {
     static const Layout L = []{
         Layout L;
-        const std::vector<int> L0 {0};
-        const std::vector<int> L_FAST {0,1,2,4};       // 0-80 ms: things that change every tick
-        const std::vector<int> L_MID {0,2,4};
-        const std::vector<int> L_LONG {0,2,8};         // 0-160 ms: slow posture trends
-        const std::vector<int> L_EVENT {0,2,4,8};      // contact events, where onset matters
-        /* 20 ms … 600 ms at 50 Hz: dense near the present, sparse further back.
-         * Long enough to see across a stride, which nothing else here can do. */
-        const std::vector<int> L_MOMENTUM {0,1,2,3,4,6,8,10,15,20,30};
+        /* T_STD is all three windows, reaching 1200 ms. T_LITE is the middle
+         * window alone and exists purely for budget: joint angles, joint rates and
+         * the efference copy are 66 channels between them, and three windows each
+         * would be 198 inputs — more than half the vector for a third of the
+         * sensors. One window still takes them from 40-80 ms to 300 ms of reach. */
+        const std::vector<int> T_STD {0,1,2};
+        const std::vector<int> T_LITE {1};
+        const std::vector<int> T_NONE {};
 
         const int NJ = HUMANOID().nj;
         L.NJ = NJ;
-        auto here = [&]{ return (int)L.LAGS.size(); };
-        auto put = [&](const char* name, const char* what, int n, const std::vector<int>& set) {
-            SensorGroup g { name, what, here(), n, set, n * (int)set.size() };
-            for (int i = 0; i < n; i++) L.LAGS.push_back(set);
-            L.groups.push_back(g);
+        auto here = [&]{ return (int)L.TEMPORAL.size(); };
+        /* `gains` is indexed by WINDOW, not by position in `set`, so a channel can
+         * move between T_STD and T_LITE without its numbers being re-shuffled.
+         * Every value is MEASURED — probe_delta_gains.js reports the 95th
+         * percentile of |now - mean(W)| over real walking and floor-pose episodes,
+         * and gain is 1/p95 so a typical large excursion lands at 1.0. An ungained
+         * difference arrives as a near-zero input mutation has no reason to touch;
+         * an over-gained one sits pinned at the clamp. Both look like "the GA is
+         * slow" from outside. */
+        auto put = [&](const char* name, const char* what, int n,
+                       const std::vector<int>& set, std::vector<double> gains) {
+            std::vector<double> g;
+            for (int w : set) g.push_back(gains.at((size_t)w));
+            SensorGroup sg { name, what, here(), n, set, g, n * (1 + (int)set.size()) };
+            for (int i = 0; i < n; i++) { L.TEMPORAL.push_back(set); L.TGAIN.push_back(g); }
+            L.groups.push_back(sg);
         };
 
-        L.C_GRAV = here();     put("gravity direction", "which way is down, in the pelvis's own frame — the inner ear", 3, L_FAST);
-        L.C_GYRO = here();     put("pelvis turn rate", "how fast the hips are rotating about each axis", 3, L_FAST);
-        L.C_VEL = here();      put("pelvis velocity", "how fast the hips are travelling, in the pelvis's own frame", 3, L_MID);
-        L.C_HEIGHT = here();   put("hip height", "hip clearance above the ground below, 1.0 = standing tall", 1, L_LONG);
-        L.C_UPRIGHT = here();  put("uprightness", "1 = torso vertical, 0 = past ~60 degrees over", 1, L_LONG);
-        L.C_QA = here();       put("joint angles", "where every joint currently is, scaled to its own limits", NJ, {0,2});
-        L.C_QD = here();       put("joint speeds", "how fast every joint is moving", NJ, {0,4});
-        L.C_LOAD = here();     put("foot load", "weight on each foot as a fraction of body weight", 2, L_FAST);
-        L.C_CONTACT = here();  put("foot contact", "is each foot touching the ground at all: 0 or 1", 2, L_EVENT);
-        L.C_FOOTPOS = here();  put("foot positions", "where each foot is relative to the hips (x,y,z each)", 6, L_MID);
-        L.C_WPDIST = here();   put("waypoint distance", "how far to the target it is walking to", 1, L0);
-        L.C_WPBEAR = here();   put("waypoint bearing", "which way the target is, as sin/cos of the angle off the nose", 2, L0);
-        L.C_GAIT = here();     put("gait clock", "an internal metronome, as sin/cos — the beat it steps to", 2, L0);
+        L.C_GRAV = here();     put("gravity direction", "which way is down, in the pelvis's own frame — the inner ear", 3, T_STD, {16, 4.8, 2.4});
+        L.C_GYRO = here();     put("pelvis turn rate", "how fast the hips are rotating about each axis", 3, T_STD, {4.8, 2.4, 2.7});
+        L.C_VEL = here();      put("pelvis velocity", "how fast the hips are travelling, in the pelvis's own frame", 3, T_STD, {13, 4.8, 4.6});
+        L.C_HEIGHT = here();   put("hip height", "hip clearance above the ground below, 1.0 = standing tall", 1, T_STD, {41, 11, 3.5});
+        L.C_UPRIGHT = here();  put("uprightness", "1 = torso vertical, 0 = past ~60 degrees over", 1, T_STD, {25, 6.3, 2.5});
+        L.C_QA = here();       put("joint angles", "where every joint currently is, scaled to its own limits", NJ, T_LITE, {9.2, 2.9, 2.1});
+        L.C_QD = here();       put("joint speeds", "how fast every joint is moving", NJ, T_LITE, {6, 3.3, 4});
+        L.C_LOAD = here();     put("foot load", "weight on each foot as a fraction of body weight", 2, T_STD, {2.3, 1.4, 1.8});
+        L.C_CONTACT = here();  put("foot contact", "is each foot touching the ground at all: 0 or 1", 2, T_STD, {1.5, 1.1, 1.2});
+        L.C_FOOTPOS = here();  put("foot positions", "where each foot is relative to the hips (x,y,z each)", 6, T_STD, {11, 3.5, 2.4});
+        L.C_WPDIST = here();   put("waypoint distance", "how far to the target it is walking to", 1, T_NONE, {});
+        L.C_WPBEAR = here();   put("waypoint bearing", "which way the target is, as sin/cos of the angle off the nose", 2, T_NONE, {});
+        L.C_GAIT = here();     put("gait clock", "an internal metronome, as sin/cos — the beat it steps to", 2, T_NONE, {});
         L.N_FAN = N_RING;
         L.C_TERRAIN = here();  put("terrain ring",
-            "ground height all round, 3 rings out to 1 m x 12 directions — the road shape, including behind", L.N_FAN, L0);
-        L.C_WIND = here();     put("wind", "wind direction relative to facing, times its strength", 2, L0);
-        L.C_EFFERENCE = here();put("last action", "the command it issued last tick — a copy of its own motor output", NJ, {0,4});
+            "ground height all round, 3 rings out to 1 m x 12 directions — the road shape, including behind", L.N_FAN, T_NONE, {});
+        L.C_WIND = here();     put("wind", "wind direction relative to facing, times its strength", 2, T_NONE, {});
+        L.C_EFFERENCE = here();put("last action", "the command it issued last tick — a copy of its own motor output", NJ, T_LITE, {1.4, 1.1, 1.2});
         /* Centre-of-mass velocity in the pelvis frame, on a long ladder. Pelvis
          * velocity misses the momentum stored in the limbs: a swinging leg moves
          * the centre of mass while the pelvis reads almost unchanged, so the
@@ -330,7 +369,7 @@ inline const Layout& LAY() {
          * step will arrive in time. Realisable on hardware — a real humanoid
          * computes its COM from joint encoders and known link masses. */
         L.C_COMVEL = here();   put("centre-of-mass velocity",
-            "how fast the body's whole mass is moving — catches a swinging leg the pelvis cannot feel", 3, L_MOMENTUM);
+            "how fast the body's whole mass is moving — catches a swinging leg the pelvis cannot feel", 3, T_STD, {17, 8, 9.3});
         /* ------------------------------------------------ the inverted pendulum
          *
          * COM HEIGHT WAS NOT AN INPUT, and the rise tier is PAID ON IT.
@@ -351,42 +390,44 @@ inline const Layout& LAY() {
          * A FOOT MUST LAND not to fall. It needs a square root of one channel
          * times another — the same argument already accepted for foot attitude. */
         L.C_COMH = here();     put("centre-of-mass height",
-            "how high the body's mass actually is — NOT the hips, which lie on the floor either way", 1, L_LONG);
+            "how high the body's mass actually is — NOT the hips, which lie on the floor either way", 1, T_STD, {62, 17, 4});
         L.C_COMPOS = here();   put("mass over the feet",
-            "where the mass sits relative to the midpoint of the feet: forward/back and left/right", 2, L_MID);
+            "where the mass sits relative to the midpoint of the feet: forward/back and left/right", 2, T_STD, {4.3, 1.3, 0.93});
         L.C_CAPTURE = here();  put("capture point",
-            "where a foot must land to stop the fall — the inverted-pendulum answer", 2, L_MID);
+            "where a foot must land to stop the fall — the inverted-pendulum answer", 2, T_STD, {5.5, 1.6, 1.2});
         /* Appended last, so every offset above keeps its value. Clearance and
          * attitude ride L_MID so they also yield a RATE; clearance rate is the
          * toe-scuff predictor, which is the failure that ends most stair attempts. */
         L.C_FOOTCLR = here();  put("foot clearance",
-            "height of each sole above the ground DIRECTLY under it — not under the hips", 2, L_MID);
+            "height of each sole above the ground DIRECTLY under it — not under the hips", 2, T_STD, {12, 3.6, 2.2});
         L.C_FOOTATT = here();  put("foot tilt",
-            "angle between each sole and the slope it is over, two axes per foot", 4, L_MID);
+            "angle between each sole and the slope it is over, two axes per foot", 4, T_STD, {3.7, 0.67, 0.6});
         L.C_PATCH = here();    put("ground under the feet",
-            "a 5x5 height map under each foot, 9 cm spacing — where the next step lands", 2 * PATCH_CELLS, L0);
+            "a 5x5 height map under each foot, 9 cm spacing — where the next step lands", 2 * PATCH_CELLS, T_NONE, {});
         L.patchChannels = true;
 
-        L.NC = (int)L.LAGS.size();
-        L.MAXHIST = 0; L.NIN = 0;
-        for (auto& s : L.LAGS) { L.MAXHIST = std::max(L.MAXHIST, s.back()); L.NIN += (int)s.size(); }
-        L.MAXHIST += 1;
+        L.NC = (int)L.TEMPORAL.size();
+        L.NIN = L.NC;
+        for (auto& t : L.TEMPORAL) L.NIN += (int)t.size();
+        /* One deeper than the deepest window: the rolling sum shifts by adding the
+         * frame entering at lag WIN_A and removing the one leaving at WIN_B + 1, so
+         * that departing frame has to still be in the ring when it is read. */
+        L.MAXHIST = WIN_B[NWIN - 1] + 2;
 
-        /* Flattened read plan: lag 0 of every channel first — so inputs[c] is
-         * still channel c, which every comment here relies on — then each
-         * remaining lag in ascending order. Built once, walked linearly at 50 Hz. */
-        for (int ch = 0; ch < L.NC; ch++) { L.planLag.push_back(0); L.planCh.push_back(ch); }
-        std::vector<int> all;
-        for (auto& s : L.LAGS) for (int v : s) all.push_back(v);
-        std::sort(all.begin(), all.end());
-        all.erase(std::unique(all.begin(), all.end()), all.end());
-        for (int lag : all) {
-            if (lag == 0) continue;
-            for (int ch = 0; ch < L.NC; ch++)
-                if (std::find(L.LAGS[ch].begin(), L.LAGS[ch].end(), lag) != L.LAGS[ch].end()) {
-                    L.planLag.push_back(lag); L.planCh.push_back(ch);
-                }
+        /* Flattened read plan: the PRESENT reading of every channel first — so
+         * inputs[c] is still channel c, which every comment here relies on — then
+         * each window in order. Built once, walked linearly at 50 Hz. */
+        for (int ch = 0; ch < L.NC; ch++) {
+            L.planWin.push_back(-1); L.planCh.push_back(ch); L.planGain.push_back(1.0);
         }
+        for (int w = 0; w < NWIN; w++)
+            for (int ch = 0; ch < L.NC; ch++) {
+                const auto& t = L.TEMPORAL[(size_t)ch];
+                const auto it = std::find(t.begin(), t.end(), w);
+                if (it == t.end()) continue;
+                L.planWin.push_back(w); L.planCh.push_back(ch);
+                L.planGain.push_back(L.TGAIN[(size_t)ch][(size_t)(it - t.begin())]);
+            }
         L.O_CADENCE = NJ;
         L.O_AMP = L.O_CADENCE + 1;
         L.O_PHASE = L.O_AMP + 5;                 // 5 rhythm groups
@@ -463,9 +504,28 @@ inline double clampd(double v, double lo, double hi) { return v < lo ? lo : v > 
 
 class World;   // forward
 
+struct Walker;
+struct World;
+struct ActionHook {
+    virtual ~ActionHook() = default;
+    virtual void onAction(Walker& x, World& w) = 0;
+};
+
 class Walker {
 public:
     Net* brain = nullptr;
+    /* Two-net brain: an evolved RISE net drives while the walker is down and
+     * for RISE_HANDOFF seconds after it recovers, the walking net otherwise.
+     * Null = the single-net brain the browser shipped with. Distilling a 65%
+     * riser into the walking net kept 20% of it; keeping the two nets apart
+     * keeps both skills whole. Must stay identical to walker.js. */
+    Net* riseBrain = nullptr;
+    double riseHold = 0;
+    /* A crouch start is "down" by the episode rules but it is the walking
+     * net's own start posture: g95 holds 42/60 from the deepest crouch where
+     * every rise net (kneel specialists) collapsed. The rise net therefore
+     * takes a crouch-start episode only after a real fall. */
+    bool crouchStart = false;
     const Model* model = nullptr;
     MultiBody mb;
     int nj = 0;
@@ -483,6 +543,8 @@ public:
     std::vector<float> histBuf;
     std::vector<float> nnBuf;      // the network's activation scratch — see Net::forward
     int histWrite = 0;
+    std::vector<double> winSum;      // NWIN x NC rolling window sums
+    int nTicks = 0;                  // control ticks since reset
 
     // ---- episode state ----
     bool done = false, diverged = false, downed = false, startedDown = false;
@@ -493,6 +555,41 @@ public:
     double comPeak = 0;        // decaying max COM height — what a fall fell FROM
     int falls = 0, recoveries = 0;
     double riseIncome = 0, bestComY = 0, standTimer = 0, stoodAt = 0;
+    // candidate new-best height and how long it has been held; see walker_impl
+    double riseCand = 0, riseCandT = 0;
+    /* Time-weighted mean COM height — the ranking signal for rise-trial
+     * generations. A MEAN and not a maximum: the thrash-farming lesson is that
+     * any max-over-episode statistic pays for a spike that collapses. Must stay
+     * identical to Walker.meanCom in walker.js. */
+    double comSum = 0, comTime = 0;
+    double meanCom() const { return comTime > 0 ? comSum / comTime : 0.0; }
+
+    /* SETTLED height: the mean COM over the last half second of the episode.
+     * lateFrom is set by the world; 1e18 means "never", so an ordinary episode
+     * pays nothing for keeping these fields.
+     *
+     * This is the score the open-loop trajectory search used to find a rise at
+     * all (0.812 m from prone against 0.158 m for lying still), so it is known to
+     * have a usable gradient on exactly this problem. It asks the one question
+     * that matters — where did you END UP — and a walker that lunges upward and
+     * falls back scores no better than one that never moved. */
+    double lateWhenLeft = -1, lateSum = 0, lateTime = 0;   // <0 = never accumulate
+    double settledCom() const { return lateTime > 0 ? lateSum / lateTime : 0.0; }
+
+    /* Settled height, plus a quarter weight on the whole-episode mean.
+     *
+     * The settled term alone is nearly flat for a fleet that cannot yet hold any
+     * height: every brain finishes on the floor and scores the same, which is a
+     * plateau with no gradient to climb. The whole-episode mean breaks that tie
+     * in favour of getting higher SOONER and staying there longer, which is the
+     * behaviour the settled term will eventually reward outright. A quarter,
+     * because it must not become worthwhile to spike upward and collapse — the
+     * thrash-farming trap. */
+    double riseScore() const { return settledCom() + 0.25 * meanCom(); }
+    /* True only while a searched reference is driving the joints. The FALLING
+     * edge is the handover, where the rise ratchet is re-baselined so scaffolded
+     * height is never paid for. */
+    bool scaffolded = false;
     double footLoad[2] = {0,0};
     int footContact[2] = {0,0};
     int steps = 0;
@@ -542,11 +639,21 @@ public:
         ptForce.assign(np, 0.0);
         // assign() keeps capacity, so rebuilding a reused Walker allocates nothing
         histBuf.assign((size_t)L.MAXHIST * (size_t)L.NC, 0.0f);
+        /* Rolling sum per window, so a mean over 45 frames costs one add and one
+         * subtract rather than 45 reads. double on purpose: this accumulator is
+         * updated every control tick for a whole episode and in float the
+         * add/subtract pair would drift. */
+        winSum.assign((size_t)NWIN * (size_t)L.NC, 0.0);
+        nTicks = 0;
         nnBuf.assign(b->scratchSize(), 0.0f);
     }
 
     /* ------------------------------------------------------------------ reset */
     void reset(const World* world, double x, double z, double yaw, const Pose* pose);
+    /* After a scripted fall (start pose "fall:x"): keep the body exactly where
+     * it landed, zero every score and timer as reset() does, and mark the
+     * episode as a floor start. Training-only. */
+    void rebaseAfterFall(const World* world);
 
     /* --------------------------------------------------------------- geometry */
     inline double groundClearance(const Terrain& T) const {
@@ -575,6 +682,11 @@ public:
     }
 
     /* --------------------------------------------------- sensing + control */
+    /* Optional per-tick hook, called after the network's outputs are in `out` and
+     * before they are turned into setpoints. Null for the trainer, the exam and
+     * the verifier; walk3d_dagger installs one to label states with a teacher
+     * and, when the teacher drives, to overwrite `out` with its action. */
+    ActionHook* hook = nullptr;
     void control(World& world);
     void stepPhysics(World& world, double dt);
     void tickBook(World& world);

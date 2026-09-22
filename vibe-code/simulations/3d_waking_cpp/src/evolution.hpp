@@ -73,13 +73,34 @@ constexpr double TRACK_SIGMA_LO = 0.008, TRACK_SIGMA_HI = 0.20;
 constexpr int TRACK_JUDGE_GENS = 12;
 constexpr int DEME_JUDGE_GENS = 40;
 
-struct Result { int idx; Net* brain; double fitness; double arrivals; };
+struct Result { int idx; Net* brain; double fitness; double arrivals; double meanCom = 0; };
 
 struct DemeRec { std::string act; int n; double best, avg; };
 
 struct HistRec {
     double best = 0, avg = 0;
     int stage = 1;
+    /* True when this generation was a CURRICULUM REHEARSAL — the fleet was run at
+     * an earlier stage as a brush-up, so its numbers describe an easier exam than
+     * the one the ratchet is gating on. Every consumer that averages across
+     * generations has to skip these, or a stage-1 brush-up inflates balancedFrac
+     * and avgArr and triggers a promotion the fleet never earned on the stage it
+     * is actually on. Persisted so a resumed run keeps the distinction. */
+    bool rehearsal = false;
+    int rehearsalStage = 0;
+    /* True when this generation was a RISE TRIAL: the fleet was all minor
+     * variations of the elite, spawned prone, and ranked on mean COM height
+     * instead of the ledger. best/avg are CARRIED FORWARD from the previous
+     * generation rather than being the trial's own numbers, which are metres.
+     *
+     * A row is written at all only to keep `index + 1 == generation` true. That
+     * invariant is load-bearing: the dashboard and the PNG both date every chart
+     * point by array index, and skipping the row silently shifted every series
+     * left by the number of trials — 172 generations and growing before it was
+     * caught. Every consumer that averages across generations must skip these,
+     * exactly as it skips a rehearsal. */
+    bool riseTrial = false;
+    double riseMean = 0;
     double terrainDifficulty = 1;
     double stoodFrac = 0, balancedFrac = 0, avgArr = 0, bestArr = 0;
     double avgUpright = 0, maxUpright = 0, avgProg = 0, bestProg = 0;
@@ -91,6 +112,11 @@ struct HistRec {
     js::ValuePtr toJSON() const {
         auto o = js::Value::makeObj();
         o->set("best", best); o->set("avg", avg); o->set("stage", (double)stage);
+        /* Written only when set, so an ordinary generation's row is identical to
+         * what it was before rehearsal existed and every existing dashboard series
+         * keeps reading exactly what it read before. */
+        if (rehearsal) { o->set("rehearsal", 1.0); o->set("rehearsalStage", (double)rehearsalStage); }
+        if (riseTrial) { o->set("riseTrial", 1.0); o->set("riseMean", riseMean); }
         o->set("terrainDifficulty", terrainDifficulty);
         o->set("stoodFrac", stoodFrac); o->set("balancedFrac", balancedFrac);
         o->set("avgArr", avgArr); o->set("bestArr", bestArr);
@@ -117,6 +143,10 @@ struct HistRec {
         HistRec h;
         h.best = v->numOr("best", 0); h.avg = v->numOr("avg", 0);
         h.stage = (int)v->numOr("stage", 1);
+        h.rehearsal = v->numOr("rehearsal", 0) != 0;
+        h.riseTrial = v->numOr("riseTrial", 0) != 0;
+        h.riseMean = v->numOr("riseMean", 0);
+        h.rehearsalStage = (int)v->numOr("rehearsalStage", 0);
         h.terrainDifficulty = v->numOr("terrainDifficulty", 1);
         h.stoodFrac = v->numOr("stoodFrac", 0); h.balancedFrac = v->numOr("balancedFrac", 0);
         h.avgArr = v->numOr("avgArr", 0); h.bestArr = v->numOr("bestArr", 0);
@@ -197,6 +227,35 @@ inline std::vector<double> normaliseBySurface(const std::vector<std::vector<doub
     return out;
 }
 
+/* ---- the elite-mutant fleet -------------------------------------------------
+ *
+ * Counting one generation of 192 seats found only 8 of them — 4.2% — carrying a
+ * direct experiment on the champion, and the smallest non-zero move anywhere in
+ * the population being 354 weights. The population could jump but not refine.
+ *
+ * The fleet replaces those 8 seats with ~17%, dealt across a 2-D lottery: how
+ * MANY weights move, and how HARD each one moves. The axes are independent on
+ * purpose — sparse-and-weak is a refinement, sparse-and-strong is a targeted
+ * jump, and one rate/sigma pair cannot express both.
+ *
+ * Density is dealt by STRATIFIED BAND, not sampled, for the same reason quota()
+ * stratifies episodes: 33 independent draws over two decades of k would leave
+ * whole generations with no refiner by luck, and a band missing by luck looks
+ * exactly like a band that does not work. Bands are log-spaced because k spans
+ * 25..1100.
+ *
+ * The sigma clamps tighten as density rises. Not symmetry — sigma at 2.4x on a
+ * dense mutation put the whole bottom half of the population past the point
+ * where any offspring survives (see the risk-gradient note in breedDeme). A
+ * sparse mutation can afford to be violent; it is only moving 25 weights.
+ *
+ * Must stay identical to the constants at the top of evolution.js. */
+static const double ELITE_MUT_FRAC = 0.17;
+static const double K_BANDS[4][2]   = {{25, 60}, {60, 180}, {180, 450}, {450, 1100}};
+static const double SIG_CLAMP[4][2] = {{0.25, 4.0}, {0.25, 3.0}, {0.35, 2.0}, {0.40, 1.5}};
+static const double SIG_SPREAD = 0.55;    // 68% of draws land in 0.58x..1.73x
+static const double ROW_FOCUS_P = 0.5;    // share of the two SPARSE bands kept in one neuron
+
 struct EvoLimits {
     double immZeroFit = 6000, childZeroFit = 15000;
     bool evalMode = false, injectChampion = true;
@@ -216,6 +275,13 @@ public:
     bool interbreed = false;
     std::vector<Deme> demes;
     std::string demeEvent, probeEvent, migrantEvent, graceEvent;
+    // rise trials — see the note above riseTrial()
+    int riseEvery = 0;
+    bool riseOnly = false;        // every generation is a trial; nothing else runs
+    bool riseChampReset = false;  // championFit rebased onto the rise scale, once
+    std::string risePose = "prone";
+    std::string riseEvent;
+    double lastRiseBest = 0;
     bool culled = false;
 
     std::vector<Net> brains;
@@ -313,6 +379,167 @@ public:
 
 private:
     struct Made { std::vector<Net> brains; int elites, fresh; };
+    /* ---- rise trials -------------------------------------------------------
+     *
+     * Every Nth generation the whole population becomes minor variations of each
+     * deme's own elite, every episode spawns on the floor, and ranking switches
+     * from the fitness ledger to MEAN COM HEIGHT. For one generation the only
+     * question asked is "which of these near-identical brains gets highest and
+     * stays there" — a far cleaner signal than the rise component buried inside a
+     * ledger that also pays for walking.
+     *
+     * The next generation breeds from the winners, so the pressure reaches the
+     * lineage. But a trial never updates the champion, never advances the stage
+     * and never enters `hist`, because its numbers are metres of COM height and
+     * the ledger's are not: feeding them in would make the plateau detector
+     * compare two different units and the stage gate read a rise score as a
+     * collapse.
+     *
+     * Variations are deliberately MINOR. One generation of rise-only selection on
+     * near-clones cannot trade away walking, because nothing in the pool is far
+     * enough from the elite to trade it for. That bound is what makes an
+     * alternating objective safe at one generation in ten.
+     *
+     * Skipped while plateau tracks are open — those are a separate experiment on
+     * a shared population and a trial would contaminate their measurement.
+     * Must stay identical to Evolution._riseTrial in evolution.js. */
+public:
+    bool isRiseTrial() const {
+        if (riseOnly) return true;
+        return riseEvery > 0 && gen > 1 && gen % riseEvery == 0 && tracks.empty();
+    }
+
+    /* Fill the population with minor variations of each deme's elite, ready for a
+     * trial. Called at the END of the generation BEFORE it, and the ordering is
+     * the entire safety argument.
+     *
+     * IT WAS THE OTHER WAY ROUND AND IT DESTROYED A LIVE RUN. Building the
+     * variations after the trial ranked meant the trial ranked the ORDINARY
+     * population on mean COM height from a prone spawn — and that statistic
+     * mostly measures body CONFIGURATION, not skill: a brain that curls up sits
+     * higher than one lying flat whether or not it can walk. The winner was an
+     * arbitrary poor walker, the whole next generation became near-clones of it,
+     * and training fitness fell from 21,653 to 781 in one generation.
+     *
+     * Seeding first removes the failure by construction: every candidate in a
+     * trial is already a near-clone of a proven elite. "Minor variations" has to
+     * bound the choice of PARENT, not just the size of the mutation.
+     * Must stay identical to Evolution._riseSeed in evolution.js. */
+    void riseSeed() {
+        std::vector<Net> out;
+        out.reserve(brains.size());
+        size_t off = 0;
+        for (const auto& d : demes) {
+            const size_t dn = (size_t)d.n;
+            if (off + dn > brains.size()) break;
+            const Net& elite = brains[off];               // rank 0 is the untouched elite
+            off += dn;
+            out.push_back(elite.clone());
+            for (size_t i = 1; i < dn; i++) {
+                Net g = elite.clone();
+                static const int KS[4] = {25, 60, 150, 300};
+                static const double SS[3] = {0.4, 0.7, 1.0};
+                out.push_back(std::move(g.mutateSparse(KS[i & 3],
+                    MutDefault::sigma * SS[i % 3], rng, (i & 4) == 0)));
+            }
+        }
+        if (out.size() == brains.size()) brains = std::move(out);
+    }
+
+    HistRec runRiseTrial(std::vector<Result>& all, double mutRate, double mutSigma) {
+        std::vector<Net> out;
+        out.reserve(brains.size());
+        size_t off = 0;
+        double bestMean = 0, worstMean = 1e300;
+        /* A COPY, not a pointer. `brains = std::move(out)` below destroys the
+         * population these Result::brain pointers refer to, so cloning after the
+         * move read moved-from memory and asked for a garbage-sized allocation:
+         * std::bad_alloc, one generation in. Copy while the old pool is alive. */
+        Net bestCopy;
+        bool haveBest = false;
+        double meanSum = 0; int meanN = 0;
+        for (const auto& d : demes) {
+            const size_t dn = (size_t)d.n;
+            if (off + dn > all.size()) break;
+            std::vector<Result> seats(all.begin() + (long)off, all.begin() + (long)(off + dn));
+            off += dn;
+            if (seats.empty()) continue;
+            std::sort(seats.begin(), seats.end(),
+                      [](const Result& a, const Result& b) { return a.meanCom > b.meanCom; });
+            for (const auto& r : seats) { meanSum += r.meanCom; meanN++; }
+            if (!haveBest || seats.front().meanCom > bestMean) {
+                bestCopy = seats.front().brain->clone();
+                haveBest = true;
+            }
+            bestMean = std::max(bestMean, seats.front().meanCom);
+            worstMean = std::min(worstMean, seats.back().meanCom);
+            /* Bred with the NORMAL operator, seeded by the rise ranking, so the
+             * diversity a seeded generation gave up comes straight back. Leaving
+             * the population as near-clones would make one generation in ten a
+             * permanent bottleneck. */
+            Made made = breedDeme(seats, d.n, mutRate, mutSigma, false, 0.0, d.act);
+            for (auto& b : made.brains) out.push_back(std::move(b));
+        }
+        brains = std::move(out);
+        char buf[192];
+        std::snprintf(buf, sizeof buf,
+            "rise trial: %d variations of the elite spawned %s, mean COM %.3f m best / %.3f m worst",
+            (int)brains.size(), risePose.c_str(), bestMean,
+            worstMean > 1e299 ? 0.0 : worstMean);
+        /* In a dedicated rise run the rise score IS the objective, so the
+         * champion ratchets on it and every existing save path keeps working
+         * unchanged. Guarded on riseOnly: during a mixed run the champion must
+         * stay the walking champion, or one trial generation would overwrite it
+         * with whichever brain lay highest. */
+        /* Rebase the champion bar onto the rise scale, once, before comparing.
+         *
+         * A rise-only run is seeded with --resume from a WALKING champion, and
+         * that carries its walking fitness in with it: championFit arrives at
+         * ~17,988 while a rise score is a COM height around 0.5. The ratchet
+         * `bestMean > championFit` can then never fire, so champion.json stayed
+         * the untouched seed brain while the run improved for hundreds of
+         * generations — a saved file that looked right and contained nothing the
+         * run had learned.
+         *
+         * Same trap as childZeroFit: an absolute threshold compared against a
+         * quantity whose SCALE changed underneath it. Any bar carried across a
+         * change of objective has to be rebased, not inherited. */
+        if (riseOnly && !riseChampReset) { championFit = -1e18; riseChampReset = true; }
+        if (riseOnly && haveBest && bestMean > championFit) {
+            championFit = bestMean;
+            champion = bestCopy.clone();
+            lastLeaderGen = gen;
+        }
+        riseEvent = buf;
+        lastRiseBest = bestMean;
+        /* Carried forward, not zeroed. A zero row would draw a spike to the floor
+         * on every chart every tenth generation and read as the fleet collapsing;
+         * carrying the previous values keeps the line flat across a generation
+         * that simply was not measured on this axis. Consumers skip the row
+         * anyway — this only governs what a chart that forgets to would show. */
+        HistRec r;
+        if (!history.empty()) r = history.back();
+        /* In a dedicated rise run the rise score IS the objective, so it goes in
+         * best/avg where the dashboard and the PNG already plot it. During a
+         * MIXED run those fields must keep carrying the walking ledger forward —
+         * writing metres of COM height into a chart of fitness would put two
+         * units on one axis, which is the whole reason a trial row carries
+         * forward rather than reporting its own numbers. */
+        if (riseOnly) {
+            r.best = bestMean;
+            r.avg = meanN ? meanSum / meanN : 0.0;
+            r.stage = 1;
+        }
+        r.riseTrial = true;
+        r.rehearsal = false;
+        r.rehearsalStage = 0;
+        r.riseMean = bestMean;
+        history.push_back(r);
+        gen++;
+        return r;
+    }
+
+private:
     Made breedDeme(const std::vector<Result>& sorted, int n, double mutRate, double mutSigma,
                    bool noChildren, double immFrac, const std::string& act);
     std::vector<Net> breedTrack(const std::vector<Result>& sorted, const Track& t);
@@ -641,6 +868,11 @@ inline HistRec Evolution::evolve(std::vector<Result> allResults, double mutRate,
     }
 
     brains = std::move(next);
+    /* gen++ is BELOW, so `gen` is still the generation that just ran and the
+     * population being built belongs to gen + 1. Testing `gen` here instead
+     * silently seeded nothing at all. */
+    if (riseEvery > 0 && (gen + 1) % riseEvery == 0 && (gen + 1) > 1 && tracks.empty())
+        riseSeed();
     gen++;
     return rec;
 }
@@ -652,7 +884,7 @@ inline Evolution::Made Evolution::breedDeme(const std::vector<Result>& sorted, i
                                             double mutRate, double mutSigma,
                                             bool noChildren, double immFrac, const std::string& act) {
     const int ELITES = std::min(4, n);
-    const int MUT_ELITES = std::min(8, std::max(2, (int)(n * 0.16)));
+    const int ELITE_MUT = std::max(4, (int)std::floor(n * ELITE_MUT_FRAC + 0.5));
     const int ELITE_CROSS = std::min(8, std::max(2, (int)(n * 0.16)));
     const int FRESH_MAX = n >= 32 ? 2 : 1;
     const int FRESH = (int)std::floor(FRESH_MAX * immFrac + 0.5);
@@ -662,9 +894,20 @@ inline Evolution::Made Evolution::breedDeme(const std::vector<Result>& sorted, i
     out.reserve((size_t)n);
     for (int i = 0; i < ELITES && (int)out.size() < n; i++)
         out.push_back(sorted[(size_t)std::min(i, last)].brain->clone());
-    for (int i = 0; i < MUT_ELITES && (int)out.size() < n; i++) {
+    /* The fleet. Band is assigned by position, not drawn, so every generation
+     * contains all four densities; only k within the band and the strength are
+     * random. Draw order — parent, k, sigma, rowFocus, then the mutation — must
+     * match _breedDeme in evolution.js exactly. */
+    for (int i = 0; i < ELITE_MUT && (int)out.size() < n; i++) {
+        const int band = i % 4;
         Net p = sorted[(size_t)std::min((int)(rng() * ELITES), last)].brain->clone();
-        out.push_back(std::move(p.mutate(mutRate, mutSigma, rng)));
+        const double klo = K_BANDS[band][0], khi = K_BANDS[band][1];
+        const int k = std::max(1, (int)std::floor(
+            std::exp(std::log(klo) + (std::log(khi) - std::log(klo)) * rng()) + 0.5));
+        const double slo = SIG_CLAMP[band][0], shi = SIG_CLAMP[band][1];
+        const double sm = std::min(shi, std::max(slo, std::exp(gaussRand(rng) * SIG_SPREAD)));
+        const bool row = band <= 1 && rng() < ROW_FOCUS_P;
+        out.push_back(std::move(p.mutateSparse(k, mutSigma * sm, rng, row)));
     }
     const int topPool = std::min(6, (int)sorted.size());
     for (int i = 0; i < ELITE_CROSS && (int)out.size() < n; i++) {
@@ -975,6 +1218,12 @@ struct Curriculum {
     // stage-2 generations, so this floor holds it where the waypoints are until
     // walking is real rather than incidental.
     double floor2 = 0.30, floorProg3 = 0.90, floor4 = 0.02, floor5 = 0.40;
+    /* Curriculum rehearsal: every Nth generation the fleet is run at an EARLIER
+     * stage as a brush-up, so a skill banked at stage 2 is not quietly bred out
+     * while the population specialises on stage 5. 0 disables it. 7 is about 1.5
+     * generations in ten, enough to keep an earlier rung exercised without
+     * spending real search budget on ground already covered. */
+    int rehearseEvery = 7;
     int stageLock = 0, maxStage = 0;
     // Negative means "not supplied"; an explicit grid-search value overrides.
     double terrainDifficulty = -1;
@@ -982,16 +1231,32 @@ struct Curriculum {
 
 struct StagePick { int stage; double terrainDifficulty; };
 
+/* Which earlier stage a rehearsal generation runs, or 0 for "not a rehearsal".
+ * Cycles through every rung below the current one rather than always dropping to
+ * stage 1: the point is to keep the WHOLE past curriculum exercised, and a fleet
+ * on stage 5 has four earlier rungs it can lose, not one. Deterministic in the
+ * generation number, so a resumed run rehearses the schedule it would have. */
+inline int rehearsalStageFor(int gen, int ratchetStage, int every) {
+    if (every <= 0 || ratchetStage <= 1 || (gen % every) != every - 1) return 0;
+    return 1 + (gen / every) % (ratchetStage - 1);
+}
+
 inline StagePick stageFor(int gen, const std::vector<HistRec>& history, const Curriculum& c) {
     const double td = c.terrainDifficulty >= 0 ? c.terrainDifficulty : 1.0;
     if (c.stageLock) return { c.stageLock, td };
-    const int from = std::max(0, (int)history.size() - 5);
-    const int cnt = (int)history.size() - from;
+    /* The window walks back over the last five NON-REHEARSAL generations. Letting
+     * a brush-up into the mean would gate promotion on how well the fleet does at
+     * stage 1, which is not what any of these thresholds mean. */
+    int from = (int)history.size(), cnt = 0;
+    while (from > 0 && cnt < 5) { from--; if (!history[(size_t)from].rehearsal && !history[(size_t)from].riseTrial) cnt++; }
     auto mean = [&](double HistRec::*f) {
         if (!cnt) return 0.0;
-        double s = 0;
-        for (int i = from; i < (int)history.size(); i++) s += history[(size_t)i].*f;
-        return s / cnt;
+        double s = 0; int n = 0;
+        for (int i = from; i < (int)history.size(); i++) {
+            if (history[(size_t)i].rehearsal || history[(size_t)i].riseTrial) continue;
+            s += history[(size_t)i].*f; n++;
+        }
+        return n ? s / n : 0.0;
     };
     /* The ratchet only turns one way. An advanced stage makes life harder, so the
      * metric that triggered it dips right after — letting the stage fall back

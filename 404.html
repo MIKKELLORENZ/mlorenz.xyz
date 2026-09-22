@@ -3,64 +3,72 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>404 — Mikkel Lorenz</title>
+    <title>Page not found — Mikkel Lorenz</title>
     <meta name="robots" content="noindex">
-    <meta name="theme-color" content="#0a0a0a">
+    <meta name="theme-color" content="#000000">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    <script>
-        // Apply saved theme before first paint to avoid a flash of the wrong theme
-        (function () {
-            var t = null;
-            try { t = localStorage.getItem('theme'); } catch (e) {}
-            if (t !== 'dark' && t !== 'light') {
-                t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-            }
-            document.documentElement.classList.add(t === 'dark' ? 'dark-mode' : 'light-mode');
-        })();
-    </script>
+    <script>document.documentElement.classList.add('js');setTimeout(function(){if(!window.siteReady)document.documentElement.classList.remove('js')},3000)</script>
+    <link rel="stylesheet" href="/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"></noscript>
 </head>
 <body>
 
-    <div class="grain-overlay" aria-hidden="true"></div>
+    <a class="skip-link" href="#main">Skip to content</a>
 
-    <nav class="navbar">
+    <!-- Served at any missing address, so every link here is absolute. -->
+    <nav class="navbar" aria-label="Main">
         <div class="container">
-            <div class="logo">MLORENZ<span class="logo-dot">.</span>XYZ</div>
+            <a class="logo" href="/">Mikkel Lorenz</a>
             <div class="nav-items">
-                <a href="/index.html">Home</a>
-                <a href="/vibe-code/index.html">Vibe Code</a>
-                <a href="/inventions/index.html">Inventions</a>
-                <a href="/consultancy/index.html">Consultancy</a>
+                <a href="/blog/">Blog</a>
+                <a href="/vibe-code/">Vibe Code</a>
+                <a href="/consultancy/">Consultancy</a>
             </div>
-            <button id="theme-toggle" aria-label="Toggle dark mode"></button>
         </div>
     </nav>
 
-    <main class="container" style="display: flex; align-items: center; justify-content: center; flex-grow: 1;">
-        <section class="section" style="text-align: center;">
-            <p class="hero-kicker">Error 404</p>
-            <h1 class="hero-headline" style="margin-bottom: 16px;">
-                This page <span class="gradient-text">doesn't exist</span>.
-            </h1>
-            <p class="hero-sub" style="margin: 0 auto 32px;">
-                Maybe it moved, maybe it never existed, maybe it was vibe-coded at 2 AM and quietly deleted.
+    <main id="main" class="hero lost">
+        <div class="hero-copy">
+            <p class="eyebrow">Error 404</p>
+            <h1 class="display">Lost beyond the event&nbsp;horizon.</h1>
+            <p class="hero-sub headline">
+                This page doesn’t exist. Maybe it moved, maybe it never existed, maybe it was
+                vibe-coded at 2 AM and quietly deleted.
             </p>
-            <a href="/" class="cta-button">Back to Home</a>
-        </section>
+            <div class="actions">
+                <a class="btn" href="/">Back to home</a>
+                <a class="link-more" href="/blog/">Read the blog</a>
+            </div>
+        </div>
+        <div class="hero-stage">
+            <div class="hero-visual">
+                <picture>
+                    <source media="(max-width: 734px)" srcset="/assets/hero/blackhole-square-720.jpg 720w, /assets/hero/blackhole-square-1080.jpg 1080w" sizes="100vw" width="1080" height="1080">
+                    <img src="/assets/hero/blackhole-1920.jpg"
+                         srcset="/assets/hero/blackhole-1280.jpg 1280w, /assets/hero/blackhole-1920.jpg 1920w, /assets/hero/blackhole-2880.jpg 2880w"
+                         sizes="clamp(1100px, 100vw, 1560px)" width="2880" height="1440" decoding="async" alt="">
+                </picture>
+            </div>
+        </div>
     </main>
 
-    <footer>
-        <div class="container">
-            <p>&copy; 2026 — Mikkel Lorenz</p>
+    <footer class="footer">
+        <div class="container footer-inner">
+            <p>&copy; <span data-year>2026</span> Mikkel Lorenz</p>
+            <ul class="footer-links">
+                <li><a href="mailto:mikkelvind@gmail.com">Email</a></li>
+                <li><a href="https://github.com/MIKKELLORENZ" target="_blank" rel="noopener">GitHub</a></li>
+                <li><a href="https://www.linkedin.com/in/mikkel-lorenz-67b0a636/" target="_blank" rel="noopener">LinkedIn</a></li>
+                <li><a href="/blog/feed.xml">RSS</a></li>
+            </ul>
         </div>
     </footer>
 
-    <script src="/js/darkmode.js" defer></script>
+    <script src="/js/main.js" defer></script>
 </body>
 </html>

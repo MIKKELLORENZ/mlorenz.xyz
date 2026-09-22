@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Mikkel Lorenz — Blog</title>
+    <link>https://mlorenz.xyz/blog/</link>
+    <description>Notes on physics, biology and code, and the places they meet.</description>
+    <language>en</language>
+    <lastBuildDate>Tue, 22 Sep 2026 08:00:00 GMT</lastBuildDate>
+    <atom:link href="https://mlorenz.xyz/blog/feed.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>Laws of physics, or engineering decisions?</title>
+      <link>https://mlorenz.xyz/blog/1_laws_of_physics_or_engineering_decisions/</link>
+      <guid isPermaLink="true">https://mlorenz.xyz/blog/1_laws_of_physics_or_engineering_decisions/</guid>
+      <pubDate>Tue, 22 Sep 2026 08:00:00 GMT</pubDate>
+      <description>If we were living inside a simulation, what would give it away? Probably not a glitch in the sky. More likely it would be the rules themselves.</description>
+    </item>
+  </channel>
+</rss>

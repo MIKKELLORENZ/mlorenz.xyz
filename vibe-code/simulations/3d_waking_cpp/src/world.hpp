@@ -29,6 +29,7 @@
 #include <cmath>
 #include <limits>
 #include "walker.hpp"
+#include "rise_scaffold.hpp"
 
 constexpr double PHASE_STAND = 1.6;
 constexpr double PHASE_BALANCE = 3.2;
@@ -42,6 +43,8 @@ constexpr double ARRIVAL_TIME = 50;
 constexpr double MAX_CLOCK = 90;
 constexpr double RISE_GRACE = 5.0;         // s of extra clock and phase delay for a floor start
 constexpr double EPISODE_HARD_CAP = 130;   // s of sim, last-resort backstop
+inline double RISE_ONLY_SECONDS = 3.0;   // one get-up attempt; --rise-seconds
+inline double RISE_SETTLE_WINDOW = 0.5;  // the tail that must still be held
 constexpr int MAX_ARRIVALS = 40;
 
 enum class Phase { STAND, BALANCE, WALK };
@@ -65,19 +68,39 @@ enum class Phase { STAND, BALANCE, WALK };
  * early is practice. Wind and shoves are DISTURBANCES: they add variance to the
  * measurement without teaching anything, so front-loading them makes selection
  * noisier about who is actually better. */
-struct Stage { int n; const char* name; double pushes, wind, terrain, turn, spin, ground, crouchDepth, seat, seatDepth, pose; };
+/* How far through the searched rise the reference drives before the brain
+ * takes over. Dealt from a fixed ladder rather than sampled, so every generation
+ * contains the easy rung: at 0.90 the brain only has to finish the last 0.3 s,
+ * which is the first rewarding step this skill has ever had. Must stay identical
+ * to SCAFFOLD_HANDOVER in world.js. */
+static const double SCAFFOLD_HANDOVER[4] = {0.90, 0.75, 0.55, 0.35};
+
+/* Selected by POSE NAME, not by a pose field. The obvious test is "does this
+ * pose carry a rise parameter", but here BOTH crouchAt and riseAt set seatT
+ * while in the JS only riseAt sets riseT — testing the field would scaffold
+ * crouch episodes in the trainer and not in the oracle, and the builds would
+ * drift apart while every test still passed. The name comes from the same
+ * "rise%.2f" format on both sides. */
+static const RiseRef* riseRefFor(double u) {
+    const char* want = u >= 0.90 ? "prone" : u >= 0.65 ? "quadruped" : u >= 0.35 ? "kneel" : nullptr;
+    if (!want) return nullptr;
+    for (const auto& r : RISE_SCAFFOLD) if (std::string(r.name) == want) return &r;
+    return nullptr;
+}
+
+struct Stage { int n; const char* name; double pushes, wind, terrain, turn, spin, ground, crouchDepth, seat, seatDepth, pose, scaffold; };
 inline const std::vector<Stage>& STAGES() {
     static const std::vector<Stage> s = {
-        { 1, "stand",   0.00, 0.00, 0.35, 0.15, 0.00, 0.45, 0.35, 0.35, 0.15, 0.40 },
-        { 2, "balance", 0.20, 0.00, 0.55, 0.30, 0.18, 0.45, 0.45, 0.35, 0.30, 0.40 },
+        { 1, "stand",   0.00, 0.00, 0.35, 0.15, 0.00, 0.33, 0.35, 0.66, 0.15, 0.10, 0.60 },
+        { 2, "balance", 0.20, 0.00, 0.55, 0.30, 0.18, 0.33, 0.45, 0.66, 0.30, 0.10, 0.60 },
         // Stage 3 is purely "learn to turn". It used to raise four demands at once
         // — shoves x2, turn x3.3, crouch depth x1.7, turn-arounds x1.55 — and a
         // fleet worth 21,572 on stage 2 scored 3,605 on arrival, twice.
-        { 3, "turn",    0.35, 0.00, 0.75, 0.70, 0.30, 0.45, 0.55, 0.40, 0.50, 0.40 },
+        { 3, "turn",    0.35, 0.00, 0.75, 0.70, 0.30, 0.33, 0.55, 0.66, 0.50, 0.10, 0.60 },
         // Stage 4 is where the disturbances start to bite, one notch at a time.
-        { 4, "terrain", 0.50, 0.35, 0.90, 1.00, 0.33, 0.45, 0.75, 0.40, 0.75, 0.40 },
+        { 4, "terrain", 0.50, 0.35, 0.90, 1.00, 0.33, 0.33, 0.75, 0.66, 0.75, 0.10, 0.60 },
         // Stage 5 consolidates: full shoves, full wind, the deepest starts.
-        { 5, "wind",    1.00, 1.00, 1.00, 1.00, 0.33, 0.45, 1.00, 0.30, 1.00, 0.40 }
+        { 5, "wind",    1.00, 1.00, 1.00, 1.00, 0.33, 0.33, 1.00, 0.66, 1.00, 0.10, 0.60 }
     };
     return s;
 }
@@ -99,6 +122,14 @@ struct WorldOpts {
     int episodeSlot = 0, episodeCount = 0;
     double groundFrac = UNSET, crouchDepth = UNSET, seatFrac = UNSET, seatDepth = UNSET;
     double poseFrac = UNSET;
+    double scaffoldFrac = UNSET;
+    std::string riseTrial;        // non-empty = pin this floor pose, scaffold off
+    /* Rise-only: the episode is nothing but a get-up attempt. Three seconds on a
+     * flat floor from a pinned pose, no waypoints to chase and no clock to earn.
+     * The searched trajectory completes a rise in about 1.5-2 s, so three is
+     * enough to finish and hold, and short enough that a thousand generations is
+     * minutes rather than hours. */
+    bool riseOnly = false;
     double windScale = UNSET, pushScale = UNSET;
     bool terrainFixed = false;
     double startBudget = 0;                 // 0 = fall back to START_BUDGET, like `||`
@@ -135,6 +166,10 @@ public:
     bool hasStartPose = false;
     Pose startPose;
     double riseGrace = 0, phaseStand = PHASE_STAND, phaseBalance = PHASE_BALANCE;
+    // rise scaffolding — the reference drives the joints until scaffoldUntil
+    const double* scaffoldGene = nullptr;
+    int scaffoldKnots = 0;
+    double scaffoldT = 0, scaffoldUntil = 0, scaffoldAt = 0;
 
     Walker walker;
 
@@ -261,7 +296,10 @@ public:
         if (gFrac > 0 && seatFrac > 0 && !M.groundPoses.empty() &&
             (strat ? seatHit : (rng() < gFrac * seatFrac))) {
             const double maxSeat = pick(o.seatDepth, stage.seatDepth);
-            startPose = M.seatAt(maxSeat * (0.25 + 0.75 * rng()));
+            /* riseAt, not seatAt — see body.hpp. Exactly one rng() either way,
+             * so the draw stream is unchanged and the JS oracle still replays
+             * these episodes tick for tick. */
+            startPose = M.riseAt(maxSeat * (0.25 + 0.75 * rng()));
             hasStartPose = true;
         }
         /* ---- the pose pool ----
@@ -294,6 +332,77 @@ public:
             startPose = M.crouchAt(0.25 * maxDepth + 0.75 * maxDepth * rng());
             hasStartPose = true;
         }
+        /* ---- rise scaffolding ----
+         *
+         * TWO DRAWS, TAKEN UNCONDITIONALLY — not inside the `if` where they are
+         * used. Every episode consumes exactly two numbers here whether or not it
+         * ends up scaffolded; a branch-dependent draw count would make the stream
+         * depend on which pose happened to be drawn and the trainer and the JS
+         * oracle would stop replaying the same episodes.
+         *
+         * Unscaffolded rise episodes remain in the bank at (1 - scaffoldFrac), so
+         * a brain that can only rise with help still scores nothing on those. */
+        /* Reset before the draws: World is REUSED per worker thread, so a member
+         * initialiser runs once at construction and a scaffold set in an earlier
+         * episode would leak into every later one on that thread. */
+        scaffoldGene = nullptr; scaffoldKnots = 0; scaffoldT = 0; scaffoldUntil = 0; scaffoldAt = 0;
+        const double sHit = rng(), sPick = rng();
+        const double sFrac = pick(o.scaffoldFrac, stage.scaffold);
+        const bool isRise = hasStartPose && startPose.name.rfind("rise", 0) == 0;
+        if (sFrac > 0 && isRise) {
+            const RiseRef* ref = riseRefFor(startPose.seatT);
+            if (ref && sHit < sFrac) {
+                const int hi = std::min(3, (int)(sPick * 4));
+                const double h = SCAFFOLD_HANDOVER[hi];
+                scaffoldGene = ref->gene.data();
+                scaffoldKnots = ref->knots;
+                scaffoldT = ref->T;
+                scaffoldUntil = h * ref->T;
+                scaffoldAt = h;
+            }
+        }
+        /* ---- rise trial ----
+         *
+         * Every Nth generation the whole fleet starts on the floor in one fixed
+         * pose and is ranked on mean COM height alone. Pinning the pose is
+         * legitimate here precisely because the generation is quarantined: it
+         * never updates the champion, never advances the stage and never enters
+         * the history the plateau detector reads.
+         *
+         * The scaffold is switched OFF, and that is the point: the scaffold
+         * exists to create a gradient during ordinary training, but a trial that
+         * measures rising must measure the brain unaided or it is measuring the
+         * reference. Applied after every draw, so the mission stream is untouched.
+         * Must stay identical to the rise-trial block in world.js. */
+        if (!o.riseTrial.empty()) {
+            /* by name (identical to the JS) or, training-only, by spec —
+             * "crouch:0.75", "lerp:kneel:quadruped:0.3" — see Model::poseBySpec */
+            Pose p;
+            if (M.poseBySpec(o.riseTrial, p)) { startPose = p; hasStartPose = true; }
+            /* "jit:<pose>:<amp>" — the pose with mission-seeded noise of +-amp
+             * rad on every joint and +-amp/2 on pelvis pitch and roll (the
+             * ordinary jitter is 0.025). A curriculum on amp widens the basin
+             * around a pose the brain can already rise from, toward the heaps
+             * a real fall leaves it in. Training-only. */
+            else if (o.riseTrial.rfind("jit:", 0) == 0) {
+                const size_t c = o.riseTrial.rfind(':');
+                const double amp = std::atof(o.riseTrial.c_str() + c + 1);
+                if (c > 4 && M.poseBySpec(o.riseTrial.substr(4, c - 4), p)) {
+                    for (int j = 0; j < M.nj; j++) p.q[(size_t)j] += amp * (2 * rng() - 1);
+                    p.pitch += 0.5 * amp * (2 * rng() - 1);
+                    p.roll  += 0.5 * amp * (2 * rng() - 1);
+                    p.name = o.riseTrial;
+                    startPose = p; hasStartPose = true;
+                }
+            }
+            /* "fall:x" spawns STANDING and is felled below. The stage's own
+             * crouch / pool-pose deal has already run by here, and leaving its
+             * pose in place gave a "heap" GA one episode in five that started
+             * in a crouch — which it then got paid for standing up from. */
+            else if (o.riseTrial.rfind("fall:", 0) == 0) hasStartPose = false;
+            scaffoldGene = nullptr; scaffoldKnots = 0;
+            scaffoldT = 0; scaffoldUntil = 0; scaffoldAt = 0;
+        }
         // Rising takes time an ordinary crouch does not need, so the phase
         // boundaries and the clock both slide when the episode starts low.
         riseGrace = hasStartPose ? RISE_GRACE * startPose.graceDepth() : 0.0;
@@ -305,9 +414,46 @@ public:
         walker.build(brain, M);
         walker.reset(this, spawn.x, spawn.z, startYaw, hasStartPose ? &startPose : nullptr);
         walker.timeLeft = (o.startBudget > 0 ? o.startBudget : START_BUDGET) + riseGrace;
+        /* Bypasses riseGrace deliberately. A prone spawn normally earns ~10 s of
+         * extra clock because rising takes time an ordinary episode does not
+         * need; here the whole episode IS the rise, so the grace would just make
+         * every episode four times longer for nothing. */
+        if (o.riseOnly) {
+            walker.timeLeft = RISE_ONLY_SECONDS;
+            walker.lateWhenLeft = RISE_SETTLE_WINDOW;
+        }
         walker.rng.reseed(o.noiseSeed);
 
         time = 0; tick = 0; phase = Phase::STAND;
+
+        /* "fall:x" — a HEAP start, training-only. The walker spawns standing,
+         * holds its nominal posture with no brain, takes one hard shove
+         * (x scales it) in a mission-seeded direction, and the episode proper
+         * begins one second after it is down: score, timers and clock rebased,
+         * the body left exactly where it landed. The rise net trained on these
+         * meets the states a real fall produces, which no named pose is. */
+        if (!hasStartPose && o.riseTrial.rfind("fall:", 0) == 0) {
+            const double strength = std::max(0.2, std::atof(o.riseTrial.c_str() + 5));
+            static const Net& still = *[]{ Net* n = new Net(LAY().NET_SIZES, nullptr, Act::RELU); for (auto& w : n->weights) std::fill(w.begin(), w.end(), 0.f); return n; }();
+            Net* saved = walker.brain; walker.brain = const_cast<Net*>(&still);
+            const double dir = rng() * 6.283185307179586, mag = 350.0 * strength * (0.8 + 0.4 * rng());
+            double tDown = -1; bool shoved = false;
+            for (int s = 0; s < (int)(4.0 / DT); s++) {
+                step();
+                if (!shoved && time >= 0.4) { walker.pushX = std::cos(dir) * mag; walker.pushZ = std::sin(dir) * mag; walker.pushLeft = 0.3; shoved = true; }
+                if (walker.downed && tDown < 0) tDown = time;
+                if ((tDown >= 0 && time - tDown >= 1.0) || walker.done) break;
+            }
+            walker.brain = saved;
+            walker.rebaseAfterFall(this);
+            riseGrace = RISE_GRACE;
+            phaseStand = PHASE_STAND + riseGrace;
+            phaseBalance = PHASE_BALANCE + riseGrace;
+            nextPush = pushLevel > 0 ? phaseStand + 1.0 : std::numeric_limits<double>::infinity();
+            walker.timeLeft = (o.startBudget > 0 ? o.startBudget : START_BUDGET) + riseGrace;
+            if (o.riseOnly) { walker.timeLeft = RISE_ONLY_SECONDS; walker.lateWhenLeft = RISE_SETTLE_WINDOW; }
+            time = 0; tick = 0; phase = Phase::STAND;
+        }
     }
 
     /* Next waypoint: a stride or two away, turned by at most the stage's limit.
