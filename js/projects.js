@@ -411,6 +411,18 @@ document.addEventListener('DOMContentLoaded', function() {
             type: "iframe"
         },
 
+        {
+            id: "image_to_stl",
+            title: "Image to STL",
+            description: "Turn an image into a 3D-printable STL. Dark areas become a flat cutout or a variable-height relief; draw rectangle and polygon regions that each get their own settings, rename and reorder them as layers, add a base plate so separate pieces print as one, and check the mesh in a 3D preview before exporting binary STL. Projects save to a single file, and everything runs in the browser, so nothing is uploaded.",
+            thumbnail: "../vibe-code/utilities/image_to_stl/thumbnail.png",
+            category: "utilities",
+            tags: ["stl", "3d printing", "image to stl", "relief", "lithophane", "extrude", "mesh", "height map", "webgl", "web workers", "javascript"],
+            date: "2026-10-18",
+            path: "utilities/image_to_stl/index.html",
+            type: "iframe"
+        },
+
 
     ];
 
@@ -418,18 +430,36 @@ document.addEventListener('DOMContentLoaded', function() {
        Config & derived data
        ═══════════════════════════════════════════════════════════ */
 
-    const FEATURED_COUNT = 5;      // slides in the showcase carousel
-    const NEW_WINDOW_DAYS = 21;    // "NEW" badge window, measured from the latest project
-    const SLIDE_DURATION = 7000;   // ms per carousel slide
+    const NEW_WINDOW_DAYS = 21;    // "New" label window, measured from the latest project
 
     const CATEGORY_LABELS = {
-        all: 'Everything',
+        all: 'All',
         simulations: 'Simulations',
         games: 'Games',
         utilities: 'Utilities'
     };
 
+    const CATEGORY_SINGULAR = {
+        simulations: 'Simulation',
+        games: 'Game',
+        utilities: 'Utility'
+    };
+
+    // Quick filters under the search bar. A topic matches a project when one
+    // of its terms is in the title or the tags, never only the description,
+    // where words like "physics" or "space" turn up in passing.
+    const TOPICS = [
+        { id: 'evolution',    label: 'Evolution',    terms: ['evolution', 'genetic algorithm'] },
+        { id: 'control',      label: 'Control',      terms: ['control', 'pid', 'traffic', 'power grid', 'docking', 'balance'] },
+        { id: 'physics',      label: 'Physics',      terms: ['physics', 'fusion', 'gravity', 'orbit', 'aerodynamics'] },
+        { id: 'space',        label: 'Space',        terms: ['space', 'moon', 'planet', 'orbit', 'rocket', 'starship'] },
+        { id: 'robotics',     label: 'Robotics',     terms: ['robot', 'humanoid', 'locomotion'] },
+        { id: 'images',       label: 'Images',       terms: ['image', 'hdr', 'computer vision', 'pixels', 'dithering'] },
+        { id: 'productivity', label: 'Productivity', terms: ['productivity', 'writing', 'documents', 'notes', 'to-do'] }
+    ];
+
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const phoneQuery = window.matchMedia('(max-width: 560px)');
 
     // Parse "YYYY-MM-DD" as a local date — new Date(str) treats it as UTC,
     // which can render as the previous day in western time zones.
@@ -450,30 +480,100 @@ document.addEventListener('DOMContentLoaded', function() {
         ));
     }
 
-    const byNewest = [...projects].sort((a, b) => parseDate(b.date) - parseDate(a.date));
-    const latestTime = byNewest.length ? parseDate(byNewest[0].date).getTime() : 0;
+    const SORTS = {
+        newest: (a, b) => parseDate(b.date) - parseDate(a.date),
+        oldest: (a, b) => parseDate(a.date) - parseDate(b.date),
+        az: (a, b) => a.title.localeCompare(b.title),
+        za: (a, b) => b.title.localeCompare(a.title)
+    };
+
+    const latestTime = projects.reduce((max, p) => Math.max(max, parseDate(p.date).getTime()), 0);
     const newCutoff = latestTime - NEW_WINDOW_DAYS * 86400000;
 
     const isNew = project => parseDate(project.date).getTime() >= newCutoff;
 
-    // Opt a project out of the showcase with `featured: false` when its
-    // thumbnail doesn't hold up at hero size. It still appears in the grid.
-    const featured = byNewest
-        .filter(project => project.featured !== false)
-        .slice(0, FEATURED_COUNT);
+    // Lower-cased fields, computed once, for search and topics
+    const fields = new Map(projects.map(p => [p.id, {
+        title: p.title.toLowerCase(),
+        tags: p.tags.map(tag => tag.toLowerCase()),
+        category: `${p.category} ${(CATEGORY_SINGULAR[p.category] || '').toLowerCase()}`,
+        desc: p.description.toLowerCase()
+    }]));
+
+    /* ═══════════════════════════════════════════════════════════
+       Search
+       ═══════════════════════════════════════════════════════════ */
+
+    const tokenize = query => query.toLowerCase().split(/\s+/).filter(Boolean);
+
+    // Every word has to turn up somewhere. The tier is the weakest place any
+    // word was found (3 title, 2 tags or category, 1 description), so
+    // "chess" puts Chess Neuroevolution above a project that merely says it.
+    function matchTier(project, toks) {
+        const f = fields.get(project.id);
+        let tier = 3;
+        for (const t of toks) {
+            if (f.title.includes(t)) continue;
+            if (f.category.includes(t) || f.tags.some(tag => tag.includes(t))) tier = Math.min(tier, 2);
+            else if (f.desc.includes(t)) tier = 1;
+            else return 0;
+        }
+        return tier;
+    }
+
+    function matchesTopic(project, topic) {
+        const f = fields.get(project.id);
+        return topic.terms.some(term => f.title.includes(term) || f.tags.some(tag => tag.includes(term)));
+    }
+
+    // Escaped HTML with every occurrence of every word wrapped in <mark>
+    function highlight(text, toks) {
+        if (!toks.length) return esc(text);
+        const lower = text.toLowerCase();
+        const ranges = [];
+        toks.forEach(t => {
+            for (let i = lower.indexOf(t); i !== -1; i = lower.indexOf(t, i + t.length)) {
+                ranges.push([i, i + t.length]);
+            }
+        });
+        ranges.sort((a, b) => a[0] - b[0]);
+        let html = '';
+        let pos = 0;
+        ranges.forEach(([start, end]) => {
+            if (end <= pos) return;
+            const from = Math.max(start, pos);
+            html += `${esc(text.slice(pos, from))}<mark>${esc(text.slice(from, end))}</mark>`;
+            pos = end;
+        });
+        return html + esc(text.slice(pos));
+    }
+
+    // Cards show two lines of description. When the first hit is further in
+    // than that, start the visible text a few words before it.
+    function snippet(text, toks) {
+        const lower = text.toLowerCase();
+        const hits = toks.map(t => lower.indexOf(t)).filter(i => i >= 0);
+        if (!hits.length) return text;
+        const first = Math.min(...hits);
+        if (first < 90) return text;
+        return `…${text.slice(text.lastIndexOf(' ', first - 40) + 1)}`;
+    }
 
     /* ═══════════════════════════════════════════════════════════
        DOM references & view state
        ═══════════════════════════════════════════════════════════ */
 
     const projectsContainer = document.getElementById('projects-container');
-    const showcaseEl = document.getElementById('showcase');
     const searchInput = document.getElementById('search-input');
     const searchClear = document.getElementById('search-clear');
     const searchField = searchInput ? searchInput.closest('.vc-search') : null;
     const pillsEl = document.getElementById('category-pills');
+    const topicsEl = document.getElementById('topic-chips');
+    const countEl = document.getElementById('result-count');
     const sortOptions = document.getElementById('sort-options');
+    const viewButtons = Array.from(document.querySelectorAll('.vc-view button'));
     const searchContainer = document.querySelector('.search-container');
+    const sentinel = document.querySelector('.vc-sentinel');
 
     // Store the original navbar content to restore it later
     const navbar = document.querySelector('.navbar');
@@ -482,157 +582,245 @@ document.addEventListener('DOMContentLoaded', function() {
     // Flag to track if a game/simulation is active
     let isInteractiveContentActive = false;
 
-    let activeCategory = 'all';
-    let carousel = null;   // teardown handle for the showcase
-    let cardObserver = null;
+    const state = { query: '', category: 'all', topic: null, sort: 'newest', view: 'grid' };
+
+    // The search, category, topic and sort live in the URL, so a search can
+    // be shared and survives a round trip into a project and back.
+    function readUrl() {
+        const params = new URLSearchParams(window.location.search);
+        const category = params.get('c');
+        const topic = params.get('t');
+        const sort = params.get('sort');
+        state.query = params.get('q') || '';
+        state.category = projects.some(p => p.category === category) ? category : 'all';
+        state.topic = TOPICS.some(t => t.id === topic) ? topic : null;
+        state.sort = SORTS[sort] ? sort : 'newest';
+    }
+
+    function writeUrl() {
+        const params = new URLSearchParams();
+        if (state.query.trim()) params.set('q', state.query.trim());
+        if (state.category !== 'all') params.set('c', state.category);
+        if (state.topic) params.set('t', state.topic);
+        if (state.sort !== 'newest') params.set('sort', state.sort);
+        try {
+            const url = new URL(window.location.href);
+            url.search = params.toString();
+            history.replaceState(null, '', url);
+        } catch (e) { /* some file:// setups refuse; the page still works */ }
+    }
+
+    // Grid or list is a per-browser preference, not part of a shared link
+    function loadView() {
+        try { return localStorage.getItem('vc-view') === 'list' ? 'list' : 'grid'; }
+        catch (e) { return 'grid'; }
+    }
+
+    function saveView(view) {
+        try { localStorage.setItem('vc-view', view); } catch (e) { /* private mode */ }
+    }
 
     /* ═══════════════════════════════════════════════════════════
-       Featured showcase carousel
+       Cards — built once, reordered and re-highlighted on every search
        ═══════════════════════════════════════════════════════════ */
 
-    function buildShowcase(items) {
-        if (!showcaseEl || !items.length) return;
-
-        const slides = items.map((project, i) => `
-            <a class="vc-slide${i === 0 ? ' is-active' : ''}" href="?project=${encodeURIComponent(project.id)}"
-               role="group" aria-roledescription="slide" aria-label="${i + 1} of ${items.length}: ${esc(project.title)}"
-               ${i === 0 ? '' : 'tabindex="-1" aria-hidden="true"'}>
-                <div class="vc-slide-media">
-                    <img src="${esc(project.thumbnail)}" alt="" ${i === 0 ? '' : 'loading="lazy"'} decoding="async">
+    function createProjectCard(project) {
+        // A real anchor gives keyboard access, middle-click, and link previews for free
+        const card = document.createElement('a');
+        card.className = 'card';
+        card.href = `?project=${encodeURIComponent(project.id)}`;
+        const meta = `${esc(CATEGORY_SINGULAR[project.category] || project.category)} · ${formatDate(project.date)}`;
+        card.innerHTML = `
+            <div class="card-image">
+                <img src="${esc(project.thumbnail)}" alt="" loading="lazy" decoding="async" onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
+                <div class="card-image-fallback" hidden>
+                    <span>${esc(project.title)}</span>
                 </div>
-                <div class="vc-slide-scrim"></div>
-                <div class="vc-slide-body">
-                    <div class="vc-eyebrow">
-                        ${isNew(project) ? '<span class="vc-chip-new">New</span>' : ''}
-                        <span>${esc(CATEGORY_LABELS[project.category] || project.category)}</span>
-                        <span class="vc-sep"></span>
-                        <span>${formatDate(project.date)}</span>
-                    </div>
-                    <h2 class="vc-slide-title">${esc(project.title)}</h2>
-                    <p class="vc-slide-desc">${esc(project.description)}</p>
-                    <span class="vc-slide-cta">Open project <i class="fas fa-arrow-right" aria-hidden="true"></i></span>
-                </div>
-            </a>
-        `).join('');
-
-        const dots = items.map((project, i) => `
-            <button type="button" class="vc-dot${i === 0 ? ' is-active' : ''}" data-index="${i}"
-                    aria-label="Show ${esc(project.title)}"${i === 0 ? ' aria-current="true"' : ''}>
-                <span class="vc-dot-fill"></span>
-            </button>
-        `).join('');
-
-        showcaseEl.innerHTML = `
-            <div class="vc-showcase${prefersReducedMotion || items.length < 2 ? ' no-autoplay' : ''}"
-                 style="--vc-duration:${SLIDE_DURATION}ms">
-                <div class="vc-showcase-viewport">${slides}</div>
-                <button type="button" class="vc-showcase-arrow prev" aria-label="Previous project">
-                    <i class="fas fa-chevron-left" aria-hidden="true"></i>
-                </button>
-                <button type="button" class="vc-showcase-arrow next" aria-label="Next project">
-                    <i class="fas fa-chevron-right" aria-hidden="true"></i>
-                </button>
-                <div class="vc-dots">${dots}</div>
+            </div>
+            <div class="card-content">
+                <h3 class="card-title">${esc(project.title)}</h3>
+                <p class="card-description">${esc(project.description)}</p>
+                <p class="card-match" hidden></p>
+                <p class="card-meta">${isNew(project) ? '<span class="card-new">New</span> · ' : ''}${meta}</p>
             </div>
         `;
-
-        const root = showcaseEl.querySelector('.vc-showcase');
-        const slideEls = Array.from(root.querySelectorAll('.vc-slide'));
-        const dotEls = Array.from(root.querySelectorAll('.vc-dot'));
-        const autoplay = !prefersReducedMotion && items.length > 1;
-        let index = 0;
-
-        function show(next) {
-            index = (next + slideEls.length) % slideEls.length;
-
-            slideEls.forEach((slide, i) => {
-                const active = i === index;
-                slide.classList.toggle('is-active', active);
-                slide.setAttribute('aria-hidden', String(!active));
-                slide.tabIndex = active ? 0 : -1;
-            });
-
-            dotEls.forEach((dot, i) => {
-                const active = i === index;
-                dot.classList.toggle('is-active', active);
-                if (active) dot.setAttribute('aria-current', 'true');
-                else dot.removeAttribute('aria-current');
-            });
-
-            // Restart the progress animation on the newly active dot
-            if (autoplay) {
-                const fill = dotEls[index].querySelector('.vc-dot-fill');
-                fill.style.animation = 'none';
-                void fill.offsetWidth; // force reflow so the animation replays
-                fill.style.animation = '';
-            }
-        }
-
-        // Autoplay is driven by the progress bar finishing, so pausing the CSS
-        // animation (hover, focus, hidden tab) pauses advancement for free.
-        function onProgressEnd(e) {
-            if (e.animationName === 'vc-progress' && e.target.closest('.vc-dot.is-active')) {
-                show(index + 1);
-            }
-        }
-
-        const setPaused = paused => root.classList.toggle('is-paused', paused);
-        const onVisibility = () => setPaused(document.hidden);
-
-        if (autoplay) {
-            root.addEventListener('animationend', onProgressEnd);
-            root.addEventListener('pointerenter', () => setPaused(true));
-            root.addEventListener('pointerleave', () => setPaused(false));
-            root.addEventListener('focusin', () => setPaused(true));
-            root.addEventListener('focusout', () => setPaused(false));
-            document.addEventListener('visibilitychange', onVisibility);
-        }
-
-        root.querySelector('.prev').addEventListener('click', () => show(index - 1));
-        root.querySelector('.next').addEventListener('click', () => show(index + 1));
-        dotEls.forEach(dot => dot.addEventListener('click', () => show(Number(dot.dataset.index))));
-
-        root.addEventListener('keydown', e => {
-            if (e.key === 'ArrowLeft') { e.preventDefault(); show(index - 1); }
-            if (e.key === 'ArrowRight') { e.preventDefault(); show(index + 1); }
-        });
-
-        // Swipe — and swallow the click that a swipe would otherwise trigger
-        let startX = null;
-        let swiped = false;
-        root.addEventListener('pointerdown', e => { startX = e.clientX; swiped = false; });
-        root.addEventListener('pointerup', e => {
-            if (startX === null) return;
-            const dx = e.clientX - startX;
-            startX = null;
-            if (Math.abs(dx) > 45) {
-                swiped = true;
-                show(dx < 0 ? index + 1 : index - 1);
-            }
-        });
-        root.addEventListener('click', e => {
-            if (swiped) { e.preventDefault(); swiped = false; }
-        }, true);
-
-        show(0);
-
-        carousel = {
-            destroy() {
-                document.removeEventListener('visibilitychange', onVisibility);
-                showcaseEl.innerHTML = '';
-                carousel = null;
-            }
+        card.vcText = {
+            title: card.querySelector('.card-title'),
+            desc: card.querySelector('.card-description'),
+            match: card.querySelector('.card-match'),
+            query: ''
         };
+        return card;
     }
 
-    function destroyShowcase() {
-        if (carousel) carousel.destroy();
-        else if (showcaseEl) showcaseEl.innerHTML = '';
+    // Marks the words in the title and description; a word found only in
+    // the tags gets a "Tagged …" line, so every result shows why it matched.
+    function paintCard(card, project, toks) {
+        const text = card.vcText;
+        const key = toks.join(' ');
+        if (text.query === key) return;
+        text.query = key;
+
+        const f = fields.get(project.id);
+        const allInTitle = toks.every(t => f.title.includes(t));
+        text.title.innerHTML = highlight(project.title, toks);
+        text.desc.innerHTML = highlight(allInTitle ? project.description : snippet(project.description, toks), toks);
+
+        const tagged = [...new Set(toks
+            .filter(t => !f.title.includes(t) && !f.desc.includes(t))
+            .map(t => project.tags.find(tag => tag.toLowerCase().includes(t)))
+            .filter(Boolean))];
+        text.match.hidden = !tagged.length;
+        text.match.innerHTML = tagged.length
+            ? `Tagged ${tagged.map(tag => highlight(tag, toks)).join(', ')}`
+            : '';
+    }
+
+    const cardEls = new Map(projects.map(p => [p.id, createProjectCard(p)]));
+
+    // .container here rather than on the projects container, which an open
+    // project needs at the full width of the window
+    const gridEl = document.createElement('div');
+    gridEl.className = 'vc-grid container';
+
+    // Remember the gallery as it is (its URL carries the search) so the
+    // project's Back button can return to it
+    gridEl.addEventListener('click', e => {
+        if (!e.target.closest('.card')) return;
+        try { sessionStorage.setItem('vc-return', window.location.href); } catch (err) { /* storage blocked */ }
+    });
+
+    const emptyEl = document.createElement('div');
+    emptyEl.className = 'vc-empty container';
+    emptyEl.hidden = true;
+    emptyEl.innerHTML = `
+        <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+        <strong>No matches</strong>
+        <span>Try another word, or clear the filters.</span>
+        <div><button type="button">Clear filters</button></div>
+    `;
+    emptyEl.querySelector('button').addEventListener('click', () => resetFilters());
+
+    /* ═══════════════════════════════════════════════════════════
+       Rendering
+       ═══════════════════════════════════════════════════════════ */
+
+    function hasFilters() {
+        return !!(state.query.trim() || state.category !== 'all' || state.topic);
+    }
+
+    function render() {
+        const toks = tokenize(state.query);
+        const topic = TOPICS.find(t => t.id === state.topic) || null;
+        const compare = SORTS[state.sort] || SORTS.newest;
+
+        let list = projects
+            .filter(p => state.category === 'all' || p.category === state.category)
+            .filter(p => !topic || matchesTopic(p, topic))
+            .map(p => ({ p, tier: toks.length ? matchTier(p, toks) : 1 }))
+            .filter(r => r.tier > 0)
+            .sort((a, b) => (b.tier - a.tier) || compare(a.p, b.p))
+            .map(r => r.p);
+
+        // The newest project gets the big tile, but only on the untouched
+        // grid: once someone is looking for something it would be in the way.
+        // Phones always list, and keep the tile at the top of the list.
+        const isPhone = phoneQuery.matches;
+        let featuredId = null;
+        if (!hasFilters() && state.sort === 'newest' && (state.view === 'grid' || isPhone)) {
+            const pick = list.find(p => p.featured !== false);
+            if (pick) {
+                featuredId = pick.id;
+                list = [pick, ...list.filter(p => p !== pick)];
+            }
+        }
+
+        if (!projectsContainer.contains(gridEl)) projectsContainer.replaceChildren(gridEl, emptyEl);
+
+        gridEl.classList.toggle('is-list', state.view === 'list' || isPhone);
+        list.forEach(p => {
+            const card = cardEls.get(p.id);
+            card.classList.toggle('is-featured', p.id === featuredId);
+            paintCard(card, p, toks);
+        });
+        gridEl.replaceChildren(...list.map(p => cardEls.get(p.id)));
+        gridEl.hidden = !list.length;
+        emptyEl.hidden = !!list.length;
+
+        if (countEl) {
+            const total = projects.length;
+            countEl.innerHTML = hasFilters()
+                ? `${list.length} of ${total} projects<button type="button">Clear</button>`
+                : `${total} projects`;
+            const clear = countEl.querySelector('button');
+            if (clear) clear.addEventListener('click', () => resetFilters());
+        }
+
+        if (searchField) searchField.classList.toggle('has-value', !!state.query);
+    }
+
+    // Each change of filter: re-render, remember it in the URL, and if the
+    // bar is stuck to the top, bring the first result up under it rather
+    // than leaving the reader somewhere in the middle of a shorter page.
+    function update() {
+        endReveal();
+        render();
+        writeUrl();
+        if (searchContainer && searchContainer.classList.contains('is-stuck') && sentinel) {
+            const top = sentinel.getBoundingClientRect().top + window.scrollY - navHeight();
+            if (window.scrollY > top) window.scrollTo(0, top);
+        }
+    }
+
+    function navHeight() {
+        return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--nav-h')) || 52;
     }
 
     /* ═══════════════════════════════════════════════════════════
-       Toolbar — segmented category control
+       Entrance — first render only, so typing never replays it
        ═══════════════════════════════════════════════════════════ */
+
+    let revealObserver = null;
+
+    function startReveal() {
+        if (prefersReducedMotion || !('IntersectionObserver' in window)) return;
+        revealObserver = new IntersectionObserver((entries, obs) => {
+            let k = 0;
+            entries.forEach(entry => {
+                if (!entry.isIntersecting) return;
+                const card = entry.target;
+                card.style.transitionDelay = `${Math.min(k++, 8) * 50}ms`;
+                card.classList.remove('is-pending');
+                obs.unobserve(card);
+                // Drop the stagger once played, or it would delay hover too
+                setTimeout(() => { card.style.transitionDelay = ''; }, 1000);
+            });
+        }, { threshold: 0.05, rootMargin: '0px 0px -40px 0px' });
+        gridEl.querySelectorAll('.card').forEach(card => {
+            card.classList.add('is-pending');
+            revealObserver.observe(card);
+        });
+    }
+
+    function endReveal() {
+        if (!revealObserver) return;
+        revealObserver.disconnect();
+        revealObserver = null;
+        cardEls.forEach(card => {
+            card.classList.remove('is-pending');
+            card.style.transitionDelay = '';
+        });
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       Toolbar — categories, topics, sort, layout
+       ═══════════════════════════════════════════════════════════ */
+
+    function newestIn(category) {
+        return projects
+            .filter(p => p.category === category)
+            .reduce((max, p) => Math.max(max, parseDate(p.date).getTime()), 0);
+    }
 
     function buildPills() {
         if (!pillsEl) return;
@@ -646,8 +834,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const order = Object.keys(counts).sort((a, b) => newestIn(b) - newestIn(a));
 
         const buttons = ['all', ...order].map(key => `
-            <button type="button" class="vc-pill${key === activeCategory ? ' is-active' : ''}"
-                    data-category="${key}" role="tab" aria-selected="${key === activeCategory}">
+            <button type="button" class="vc-pill" data-category="${key}" role="tab" aria-selected="false">
                 ${esc(CATEGORY_LABELS[key] || key)}<span class="vc-pill-count">${key === 'all' ? projects.length : counts[key]}</span>
             </button>
         `).join('');
@@ -656,18 +843,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         pillsEl.querySelectorAll('.vc-pill').forEach(pill => {
             pill.addEventListener('click', () => {
-                activeCategory = pill.dataset.category;
-                pillsEl.querySelectorAll('.vc-pill').forEach(p => {
-                    const on = p === pill;
-                    p.classList.toggle('is-active', on);
-                    p.setAttribute('aria-selected', String(on));
-                });
-                moveThumb();
-                applyFilters();
+                state.category = pill.dataset.category;
+                syncControls();
+                update();
             });
         });
 
-        moveThumb();
         window.addEventListener('resize', moveThumb);
         // Pill widths change once the web font swaps in
         if (document.fonts && document.fonts.ready) {
@@ -675,27 +856,67 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function newestIn(category) {
-        return projects
-            .filter(p => p.category === category)
-            .reduce((max, p) => Math.max(max, parseDate(p.date).getTime()), 0);
+    function buildTopics() {
+        if (!topicsEl) return;
+        topicsEl.innerHTML = TOPICS.map(t => `
+            <button type="button" class="vc-topic" data-topic="${t.id}" aria-pressed="false">${esc(t.label)}</button>
+        `).join('');
+        topicsEl.querySelectorAll('.vc-topic').forEach(chip => {
+            chip.addEventListener('click', () => {
+                state.topic = state.topic === chip.dataset.topic ? null : chip.dataset.topic;
+                syncControls();
+                update();
+            });
+        });
     }
 
-    function moveThumb() {
+    function moveThumb(instant) {
         if (!pillsEl) return;
         const thumb = pillsEl.querySelector('.vc-pill-thumb');
         const active = pillsEl.querySelector('.vc-pill.is-active');
-        if (!thumb || !active) return;
-        /* Y as well as X: on a phone the pills wrap onto two rows rather than
-           scrolling sideways with the last one sliced in half, and a thumb
-           that only tracks X would sit above whichever pill is lit. */
+        if (!thumb || !active || !active.offsetWidth) return;
+        if (instant === true) thumb.style.transition = 'none';
         thumb.style.width = `${active.offsetWidth}px`;
         thumb.style.height = `${active.offsetHeight}px`;
-        thumb.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop - 3}px)`;
+        thumb.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+        if (instant === true) {
+            void thumb.offsetWidth; // commit the jump before transitions return
+            thumb.style.transition = '';
+        }
+    }
+
+    // Puts every control in line with `state`
+    function syncControls() {
+        if (searchInput && searchInput.value !== state.query) searchInput.value = state.query;
+        if (pillsEl) {
+            pillsEl.querySelectorAll('.vc-pill').forEach(p => {
+                const on = p.dataset.category === state.category;
+                p.classList.toggle('is-active', on);
+                p.setAttribute('aria-selected', String(on));
+            });
+            moveThumb();
+        }
+        if (topicsEl) {
+            topicsEl.querySelectorAll('.vc-topic').forEach(chip => {
+                chip.setAttribute('aria-pressed', String(chip.dataset.topic === state.topic));
+            });
+        }
+        if (sortOptions) sortOptions.value = state.sort;
+        viewButtons.forEach(btn => {
+            btn.setAttribute('aria-pressed', String(btn.dataset.view === state.view));
+        });
+    }
+
+    function resetFilters() {
+        state.query = '';
+        state.category = 'all';
+        state.topic = null;
+        syncControls();
+        update();
     }
 
     /* ═══════════════════════════════════════════════════════════
-       Grid rendering
+       Interactive mode — a project open full-screen
        ═══════════════════════════════════════════════════════════ */
 
     function setInteractiveMode(enabled, projectTitle = null) {
@@ -718,9 +939,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             `;
 
-            // Add event listener to the new back button
+            // Back to the gallery as it was left (search and filters) when the
+            // project was opened from it; otherwise to the gallery itself.
+            // A tab-scoped note rather than document.referrer, which is empty
+            // when the site is opened from disk.
             document.getElementById('nav-back-button').addEventListener('click', () => {
-                window.location.href = 'index.html';
+                let target = 'index.html';
+                try {
+                    const saved = sessionStorage.getItem('vc-return');
+                    sessionStorage.removeItem('vc-return');
+                    if (saved && new URL(saved).pathname === window.location.pathname) target = saved;
+                } catch (e) { /* storage blocked */ }
+                window.location.href = target;
             });
 
             // Re-initialize dark mode toggle
@@ -748,162 +978,6 @@ document.addEventListener('DOMContentLoaded', function() {
         isInteractiveContentActive = enabled;
     }
 
-    // Reveal cards as they scroll in, staggered per grid row
-    function observeCards(cards) {
-        if (prefersReducedMotion) {
-            cards.forEach(card => card.classList.add('is-in'));
-            return;
-        }
-
-        if (!cardObserver) {
-            cardObserver = new IntersectionObserver((entries, obs) => {
-                entries.forEach(entry => {
-                    if (!entry.isIntersecting) return;
-                    const card = entry.target;
-                    card.classList.add('is-in');
-                    obs.unobserve(card);
-                    // Drop the stagger once the entrance has played, otherwise it
-                    // would also delay the hover lift for the rest of the session.
-                    setTimeout(() => { card.style.transitionDelay = ''; }, 1200);
-                });
-            }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
-        }
-
-        cards.forEach((card, i) => {
-            card.style.transitionDelay = `${Math.min(i, 7) * 0.055}s`;
-            cardObserver.observe(card);
-        });
-    }
-
-    function sectionHeader(title, count) {
-        const head = document.createElement('div');
-        head.className = 'vc-section-head';
-        head.innerHTML = `
-            <h2 class="vc-section-title">${esc(title)}</h2>
-            <span class="vc-section-count">${count}</span>
-            <span class="vc-section-rule"></span>
-        `;
-        return head;
-    }
-
-    function renderGrid(items) {
-        const grid = document.createElement('div');
-        grid.className = 'grid';
-        items.forEach(project => grid.appendChild(createProjectCard(project)));
-        return grid;
-    }
-
-    // Function to display projects as cards
-    function displayProjects(projectsArray, options = {}) {
-        const { grouped = true, heading = null } = options;
-
-        // Show the toolbar when viewing the project list. The showcase's own
-        // visibility is decided by applyFilters(), so it is deliberately untouched.
-        if (searchContainer) searchContainer.style.display = '';
-
-        // Reset interactive mode when viewing projects list
-        setInteractiveMode(false);
-
-        projectsContainer.innerHTML = '';
-
-        if (!projectsArray.length) {
-            projectsContainer.innerHTML = `
-                <div class="vc-empty">
-                    <i class="fas fa-ghost" aria-hidden="true"></i>
-                    <strong>Nothing here yet</strong>
-                    <span>No project matches that search.</span>
-                    <div><button type="button" id="vc-reset">Clear filters</button></div>
-                </div>
-            `;
-            const reset = document.getElementById('vc-reset');
-            if (reset) reset.addEventListener('click', resetFilters);
-            return;
-        }
-
-        const cards = [];
-
-        if (grouped) {
-            // Categories ordered by their most recent project, so a brand new
-            // project pulls its whole section to the top of the page.
-            const groups = groupByCategory(projectsArray);
-            Object.keys(groups)
-                .sort((a, b) => newestIn(b) - newestIn(a))
-                .forEach(category => {
-                    projectsContainer.appendChild(
-                        sectionHeader(CATEGORY_LABELS[category] || category, groups[category].length)
-                    );
-                    const grid = renderGrid(groups[category]);
-                    projectsContainer.appendChild(grid);
-                    cards.push(...grid.children);
-                });
-        } else {
-            projectsContainer.appendChild(sectionHeader(heading || 'Results', projectsArray.length));
-            const grid = renderGrid(projectsArray);
-            projectsContainer.appendChild(grid);
-            cards.push(...grid.children);
-        }
-
-        observeCards(cards);
-    }
-
-    // Function to group projects by category
-    function groupByCategory(projects) {
-        return projects.reduce((acc, project) => {
-            const category = project.category;
-            if (!acc[category]) {
-                acc[category] = [];
-            }
-            acc[category].push(project);
-            return acc;
-        }, {});
-    }
-
-    // Function to create a project card
-    function createProjectCard(project) {
-        // A real anchor gives keyboard access, middle-click, and link previews for free
-        const card = document.createElement('a');
-        card.classList.add('card');
-        card.href = `?project=${encodeURIComponent(project.id)}`;
-        card.innerHTML = `
-            <div class="card-image">
-                ${isNew(project) ? '<span class="card-badge">New</span>' : ''}
-                <img src="${esc(project.thumbnail)}" alt="${esc(project.title)}" loading="lazy" decoding="async" onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
-                <div class="card-image-fallback" hidden>
-                    <span>${esc(project.title)}</span>
-                </div>
-            </div>
-            <div class="card-content">
-                <div class="card-meta">
-                    <span>${esc(CATEGORY_LABELS[project.category] || project.category)}</span>
-                    <span class="vc-sep"></span>
-                    <span>${formatDate(project.date)}</span>
-                </div>
-                <h3 class="card-title">${esc(project.title)}</h3>
-                <p class="card-description">${esc(project.description)}</p>
-                <div class="card-tags">
-                    ${project.tags.slice(0, 4).map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}
-                </div>
-            </div>
-        `;
-
-        return card;
-    }
-
-    // Spotlight follows the cursor across whichever card it is over
-    if (window.matchMedia('(hover: hover)').matches) {
-        let frame = null;
-        projectsContainer.addEventListener('pointermove', e => {
-            const card = e.target.closest('.card');
-            if (!card || frame) return;
-            frame = requestAnimationFrame(() => {
-                frame = null;
-                const rect = card.getBoundingClientRect();
-                card.style.setProperty('--mx', `${e.clientX - rect.left}px`);
-                card.style.setProperty('--my', `${e.clientY - rect.top}px`);
-            });
-        });
-    }
-
     // Function to load a specific project
     function loadProject(projectId) {
         const project = projects.find(p => p.id === projectId);
@@ -911,8 +985,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (project) {
             // Hide the gallery chrome while a project is open
             if (searchContainer) searchContainer.style.display = 'none';
-            destroyShowcase();
-            if (showcaseEl) showcaseEl.style.display = 'none';
 
             // Clear the main content
             projectsContainer.innerHTML = '';
@@ -1129,99 +1201,86 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     /* ═══════════════════════════════════════════════════════════
-       Filtering
-       ═══════════════════════════════════════════════════════════ */
-
-    function applyFilters() {
-        const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
-        const sortValue = sortOptions ? sortOptions.value : 'newest';
-
-        if (searchField) searchField.classList.toggle('has-value', !!searchTerm);
-
-        let filteredProjects = projects.filter(project => {
-            const matchesSearch = !searchTerm ||
-                project.title.toLowerCase().includes(searchTerm) ||
-                project.description.toLowerCase().includes(searchTerm) ||
-                project.category.toLowerCase().includes(searchTerm) ||
-                project.tags.some(tag => tag.toLowerCase().includes(searchTerm));
-
-            const matchesCategory = activeCategory === 'all' || project.category === activeCategory;
-
-            return matchesSearch && matchesCategory;
-        });
-
-        switch(sortValue) {
-            case 'newest':
-                filteredProjects.sort((a, b) => parseDate(b.date) - parseDate(a.date));
-                break;
-            case 'oldest':
-                filteredProjects.sort((a, b) => parseDate(a.date) - parseDate(b.date));
-                break;
-            case 'az':
-                filteredProjects.sort((a, b) => a.title.localeCompare(b.title));
-                break;
-            case 'za':
-                filteredProjects.sort((a, b) => b.title.localeCompare(a.title));
-                break;
-        }
-
-        // The showcase is a "start here" surface — it only belongs on the
-        // unfiltered view, where it isn't competing with the user's own query.
-        const isDefaultView = !searchTerm && activeCategory === 'all';
-        if (showcaseEl) showcaseEl.style.display = isDefaultView ? '' : 'none';
-
-        const heading = searchTerm
-            ? `Results for “${searchTerm}”`
-            : (CATEGORY_LABELS[activeCategory] || activeCategory);
-
-        displayProjects(filteredProjects, {
-            grouped: isDefaultView,
-            heading
-        });
-    }
-
-    function resetFilters() {
-        if (searchInput) searchInput.value = '';
-        activeCategory = 'all';
-        if (pillsEl) {
-            pillsEl.querySelectorAll('.vc-pill').forEach(p => {
-                const on = p.dataset.category === 'all';
-                p.classList.toggle('is-active', on);
-                p.setAttribute('aria-selected', String(on));
-            });
-            moveThumb();
-        }
-        applyFilters();
-    }
-
-    /* ═══════════════════════════════════════════════════════════
        Boot
        ═══════════════════════════════════════════════════════════ */
 
-    if (searchInput) searchInput.addEventListener('input', applyFilters);
-    if (sortOptions) sortOptions.addEventListener('change', applyFilters);
+    if (searchInput) {
+        searchInput.placeholder = `Search ${projects.length} projects`;
+        searchInput.addEventListener('input', () => {
+            state.query = searchInput.value;
+            update();
+        });
+        searchInput.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                if (searchInput.value) {
+                    state.query = '';
+                    syncControls();
+                    update();
+                } else {
+                    searchInput.blur();
+                }
+            } else if (e.key === 'Enter' && window.matchMedia('(hover: none)').matches) {
+                searchInput.blur(); // put the phone keyboard away
+            }
+        });
+    }
+
     if (searchClear) {
         searchClear.addEventListener('click', () => {
-            if (searchInput) searchInput.value = '';
-            applyFilters();
+            state.query = '';
+            syncControls();
+            update();
             if (searchInput) searchInput.focus();
         });
     }
 
-    // "/" focuses search, Escape clears it — the way a gallery should behave
+    if (sortOptions) {
+        sortOptions.addEventListener('change', () => {
+            state.sort = sortOptions.value;
+            update();
+        });
+    }
+
+    viewButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            state.view = btn.dataset.view;
+            saveView(state.view);
+            syncControls();
+            update();
+        });
+    });
+
+    // "/" focuses search from anywhere on the gallery
     document.addEventListener('keydown', e => {
         if (isInteractiveContentActive || !searchInput) return;
-        if (e.key === '/' && document.activeElement !== searchInput) {
+        const typing = e.target.closest && e.target.closest('input, select, textarea, [contenteditable]');
+        if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
             e.preventDefault();
             searchInput.focus();
             searchInput.select();
-        } else if (e.key === 'Escape' && document.activeElement === searchInput) {
-            searchInput.value = '';
-            applyFilters();
         }
     });
 
+    // The bar gets its fill and hairline only once it is stuck under the nav
+    if (sentinel && searchContainer && 'IntersectionObserver' in window) {
+        new IntersectionObserver(([entry]) => {
+            searchContainer.classList.toggle('is-stuck',
+                !entry.isIntersecting && entry.boundingClientRect.top < navHeight() + 1);
+        }, { rootMargin: `-${navHeight() + 1}px 0px 0px 0px` }).observe(sentinel);
+    }
+
+    function showGallery() {
+        if (searchContainer) searchContainer.style.display = '';
+        setInteractiveMode(false);
+        readUrl();
+        syncControls();
+        moveThumb(true);
+        render();
+    }
+
     buildPills();
+    buildTopics();
+    state.view = loadView();
 
     // Check if we need to load a specific project
     const urlParams = new URLSearchParams(window.location.search);
@@ -1230,9 +1289,14 @@ document.addEventListener('DOMContentLoaded', function() {
     if (projectId) {
         loadProject(projectId);
     } else {
-        buildShowcase(featured);
-        applyFilters();
+        showGallery();
+        startReveal();
     }
+
+    // Phones always list; crossing the breakpoint changes the layout
+    phoneQuery.addEventListener('change', () => {
+        if (!isInteractiveContentActive) render();
+    });
 
     // Handle browser back/forward navigation
     window.addEventListener('popstate', (event) => {
@@ -1240,8 +1304,7 @@ document.addEventListener('DOMContentLoaded', function() {
             loadProject(event.state.projectId);
         } else {
             isInteractiveContentActive = false; // Reset flag when returning to project list
-            if (!carousel) buildShowcase(featured);
-            applyFilters();
+            showGallery();
             document.title = 'Vibe Code - Projects Gallery';
         }
     });

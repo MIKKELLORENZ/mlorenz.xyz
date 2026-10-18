@@ -15,10 +15,13 @@ const SHORT = { cat: 'Cat photo', alice: 'Alice', guitar: 'Guitar', meow: 'Meow'
 const CHAMPS = window.CE_CHAMPIONS || {};
 const params = new URLSearchParams(location.search);
 
-const S = { ds: null, run: null, pool: null, poolSize: 0, running: false, token: 0, family: null, part: 0, user: null, lastSave: 0, speedT: 0, speedE: 0, speed: 0 };
+const S = { ds: null, run: null, pool: null, poolSize: 0, running: false, starting: false, pv: { armed: false, done: true, base: 0, gen: null }, token: 0, family: null, part: 0, user: null, lastSave: 0, speedT: 0, speedE: 0, speed: 0 };
 const chart = new R.Chart($('chart'), $('chart-tip'), $('legend'), pickFamily);
 const log = new R.Log($('log'), $('log-more'));
 const bits = new V.Bits($('bits-view'), $('bits-sub'), $('bits-scale'), $('bits-probe'));
+const preview = new R.Preview($('chart-preview'), chart);
+const side = new V.Bits($('side-bits'), $('side-sub'), $('side-scale'), $('side-probe'), { compact: true });
+const views = [bits, side];               // the full map below, and the small one beside the chart
 
 // ------------------------------------------------------------- utilities
 function fmtBytes(n) { return n >= 1048576 ? (n / 1048576).toFixed(2) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B'; }
@@ -90,8 +93,17 @@ async function choose(id, opt) {
     await restart(opt);
 }
 function showPart() {
-    const p = S.ds.parts[S.part], m = p.meta || {};
-    bits.setData(m, p.data, p.info);
+    const p = S.ds.parts[S.part], m = p.meta || {}, many = S.ds.parts.length > 1, sel = $('side-file');
+    views.forEach(v => v.setData(m, p.data, p.info));
+    $('side-title').textContent = p.title; $('side-title').hidden = many; sel.hidden = !many;
+    if (many) {
+        if (sel.dataset.key !== S.ds.key) {
+            sel.textContent = '';
+            S.ds.parts.forEach((q, i) => { const o = el('option', '', q.title); o.value = String(i); sel.appendChild(o); });
+            sel.dataset.key = S.ds.key;
+        }
+        sel.value = String(S.part);
+    }
     const cr = $('data-credit');
     cr.textContent = (m.blurb ? m.blurb + ' ' : '') + (m.credit || '');
     if (m.source) { cr.appendChild(document.createTextNode(' ')); const a = el('a', '', 'Source'); a.href = m.source; a.target = '_blank'; a.rel = 'noopener'; cr.appendChild(a); }
@@ -102,6 +114,7 @@ function showPart() {
 function halt(save) {
     if (save) autosave(true);
     S.running = false;
+    syncPreview();
     if (S.run) S.run.cancel();
     if (S.pool) S.pool.flush();
     $('btn-run').textContent = 'Evolve';
@@ -123,9 +136,10 @@ async function restart(opt) {
     status('Preparing');
     if (!S.pool || S.poolSize !== st.workers) { if (S.pool) S.pool.terminate(); S.pool = new CE.Pool({ workers: st.workers, onError: e => console.error('worker:', e) }); S.poolSize = st.workers; }
     chart.reset(ds.baselines); log.clear(); S.family = null;
+    preview.reset(); preview.hide(false);
     $('hero').textContent = '–'; $('hero-note').textContent = '';
     $('hero-sub').textContent = ds.parts.length > 1 ? 'of the original size, averaged over ' + ds.parts.length + ' files' : 'of the original size';
-    bits.setCosts(null); V.anatomy($('anatomy'), null); $('anatomy-name').textContent = 'Nothing has been evolved yet.'; $('anatomy-actions').hidden = true;
+    views.forEach(v => v.setCosts(null)); V.anatomy($('anatomy'), null); $('anatomy-name').textContent = 'Nothing has been evolved yet.'; $('anatomy-actions').hidden = true;
     $('btn-algo').disabled = true; $('bits-mode').hidden = true; S.savedFor = null; drawSavings(null);
     drawProof(null); drawFiles(); drawBoard();
 
@@ -135,10 +149,18 @@ async function restart(opt) {
         const gen = stored('all') || CHAMPS.all;
         if (gen && gen.genome) { seeds = Object.values(gen.families || {}).map(f => f.genome).filter(Boolean).concat([gen.genome]); note = 'The design evolved for all files, as the starting point for this one.'; }
     }
+    // evolving straight on (a tab switched mid-run): the preview covers the preparation
+    // too. A run picked up from a save already has its chart and never needs it.
+    S.pv = { armed: !!opt.autostart && !history, done: !!history, base: 0, gen: null };
+    S.starting = !!opt.autostart;
+    preview.setStage('Preparing the data');
+    syncPreview();
     const run = new CE.Run({
         dataset: ds, pool: S.pool, baselines: ds.baselines, settings: st, history, seeds, seedNote: opt.seedNote || (note ? 'carried over: ' + note.charAt(0).toLowerCase() + note.slice(1) : ''),
         on: {
-            series: (sp, points) => chart.setSeries(sp, points),
+            series: (sp, points) => { chart.setSeries(sp, points); syncPreview(); },
+            batch: (n, gen) => { preview.batch(n, gen, run.evo && run.evo.gen === 0 ? (n > 1 ? 'Measuring the carried-over designs' : 'Measuring the starting point') : null); preview.setFoot(previewFoot()); },
+            tried: (job, r) => preview.tried(job, r && !r.aborted ? (run.multi ? r.size / 1e4 : 100 * r.size / run.samples[0].sample.length) : Infinity),
             species: () => { drawBoard(); if (S.family) drawShown(); },
             champion: () => drawShown(),
             extinct: (sp, gen) => { chart.setExtinct(sp, gen); drawBoard(); },
@@ -166,20 +188,51 @@ async function restart(opt) {
 async function start() {
     if (S.running || !S.run || !S.run.evo) return;
     const run = S.run, token = S.token;
-    S.running = true;
+    S.running = true; S.starting = false;
     $('btn-run').textContent = 'Pause';
+    if (!run.gen()) status('Measuring the starting point');
+    if (!S.pv.armed && !S.pv.done) S.pv = { armed: true, done: false, base: pointCount(), gen: run.gen() };
+    syncPreview();
     while (S.running && token === S.token) {
         await run.generation();
         await new Promise(r => setTimeout(r, 0));
     }
-    if (token === S.token) { status('Paused at generation ' + run.gen().toLocaleString()); autosave(true); }
+    if (token === S.token) { status('Paused at generation ' + run.gen().toLocaleString()); autosave(true); syncPreview(); }
+}
+
+// The preview stands in for the chart from the moment evolution is asked for (Evolve,
+// or a tab switched while evolving) until this run puts something new on it: a fresh
+// run's first measured point or, where carried-over designs were measured already, the
+// first point after them. Once per run, so pausing and resuming a run that has its
+// results never brings it back; and once the chart has points and five generations
+// have passed it steps aside even if no design has beaten the carried-over ones yet,
+// because the lines then visibly carry on.
+function pointCount() { return S.run ? Object.values(S.run.series).reduce((a, s) => a + s.filter(e => !e.f).length, 0) : 0; }
+function syncPreview() {
+    const pv = S.pv, run = S.run;
+    if (pv.armed && !pv.done && run) {
+        if (pv.gen === null) pv.gen = run.gen();
+        const n = pointCount();
+        if (n > pv.base || (n > 0 && run.gen() - pv.gen >= 5)) pv.done = true;
+    }
+    if (pv.armed && !pv.done && (S.running || S.starting)) { preview.setFoot(previewFoot()); preview.show(); }
+    else preview.hide(true);
+}
+function previewFoot() {
+    const run = S.run, n = S.ds.parts.length, whole = n > 1 ? 'all ' + n + ' files in full' : 'the whole file';
+    if (!run || !run.samples) return '';
+    if (S.pv.base) return 'The carried-over designs are on the chart already. It carries on as soon as evolution beats them on ' + (n > 1 ? 'these files.' : 'this file.');
+    if ([...run.species.values()].some(r => r.askedKey && !r.best)) return 'Now compressing ' + whole + ' with the best design. That measurement is the first point on the chart.';
+    const full = run.samples.every((s, i) => s.sample.length >= S.ds.parts[i].data.length), kb = Math.round(run.samples[0].sample.length / 1024);
+    return (full ? 'Scores so far are on the whole data' : 'Scores so far are on about ' + kb + ' KB of ' + (n > 1 ? 'each file' : 'the file')) + '. The chart starts once the best design has compressed ' + whole + '.';
 }
 
 function onGeneration(st) {
     chart.setGen(st.gen);
     const now = Date.now();
     if (now - S.speedT > 1500) { S.speed = (st.evals - S.speedE) / ((now - S.speedT) / 1000); S.speedT = now; S.speedE = st.evals; }
-    if (S.running) status('Generation ' + st.gen.toLocaleString() + ' · ' + st.evals.toLocaleString() + ' designs tried' + (S.speed ? ' · ' + S.speed.toFixed(S.speed < 10 ? 1 : 0) + ' per second' : ''));
+    if (S.running) status('Generation ' + st.gen.toLocaleString() + ' · ' + st.evals.toLocaleString() + (st.evals === 1 ? ' design' : ' designs') + ' tried' + (S.speed ? ' · ' + S.speed.toFixed(S.speed < 10 ? 1 : 0) + ' per second' : ''));
+    syncPreview();
     drawBoard(); autosave(false);
 }
 
@@ -209,7 +262,7 @@ function drawShown() {
     $('anatomy-name').textContent = G.shortName(c.genome) + '. ' + c.pct.toFixed(2) + '%, found in generation ' + c.gen.toLocaleString() + '.';
     V.anatomy($('anatomy'), c.genome, ctx, q.influence, S.ds.parts.length === 1 ? part.info.period : 3);
     $('anatomy-actions').hidden = false; $('btn-algo').disabled = false; $('bits-mode').hidden = !q.costs;
-    bits.setCosts(q.costs, q.costsMapped);
+    views.forEach(v => v.setCosts(q.costs, q.costsMapped));
     measureSavings(c);
     drawProof(q); drawFiles(); drawBoard();
 }
@@ -283,7 +336,7 @@ function drawFiles() {
         row.appendChild(el('span', 'val', c && c.parts[i] ? R.pctText(100 * c.parts[i].size / p.data.length) : '…'));
         row.appendChild(el('span', 'val dim opt', gz ? R.pctText(100 * gz.bytes / p.data.length) : '–'));
         row.appendChild(el('span', 'val dim', refs.length ? R.pctText(100 * refs[0].bytes / p.data.length) + '  ' + refs[0].name.replace(' lossless', '').replace(' (7-Zip)', '') : '–'));
-        row.addEventListener('click', () => { S.part = i; showPart(); if (shown()) drawShown(); else drawFiles(); });
+        row.addEventListener('click', () => pickPart(i));
         host.appendChild(row);
     });
 }
@@ -314,11 +367,13 @@ $('cev-input').addEventListener('change', async e => {
     toast('Restored ' + r.data.length.toLocaleString() + ' bytes in ' + (r.ms / 1000).toFixed(1) + ' s' + (match ? '. Identical to “' + match.title + '”.' : '.'), 5200);
     download(r.data, f.name.replace(/\.cev$/i, '') + '.restored');
 });
+function pickPart(i) { S.part = i; showPart(); if (shown()) drawShown(); else drawFiles(); }
+$('side-file').addEventListener('change', e => pickPart(+e.target.value));
 $('btn-algo').addEventListener('click', downloadAlgorithm);
 $('btn-algo2').addEventListener('click', downloadAlgorithm);
 document.querySelectorAll('#bits-mode .seg').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('#bits-mode .seg').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    bits.setMode(b.dataset.mode);
+    views.forEach(v => v.setMode(b.dataset.mode));
     $('bits-scale').firstElementChild.textContent = b.dataset.mode === 'saved' ? '0 bits saved' : '0 bits';
     $('bits-scale').lastElementChild.textContent = b.dataset.mode === 'saved' ? 'all 8' : '6 or more per byte';
 }));
@@ -370,7 +425,7 @@ $('file-input').addEventListener('change', e => { userFile(e.target.files[0]); e
 window.addEventListener('drop', e => { const f = e.dataTransfer && e.dataTransfer.files[0]; if (f) userFile(f); });
 
 // ------------------------------------------------------------- controls
-$('btn-run').addEventListener('click', () => { if (S.running) { S.running = false; $('btn-run').textContent = 'Evolve'; } else start(); });
+$('btn-run').addEventListener('click', () => { if (S.running) { S.running = false; $('btn-run').textContent = 'Evolve'; syncPreview(); } else start(); });
 $('btn-settings').addEventListener('click', () => $('settings').showModal());
 $('btn-about').addEventListener('click', () => $('about').showModal());
 document.querySelectorAll('dialog').forEach(d => {

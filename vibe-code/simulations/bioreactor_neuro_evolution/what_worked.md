@@ -12,12 +12,12 @@ knobs. Written for whoever builds the next one of these, including me.
 | file | `default_brain.js` — `window.DEFAULT_BRAIN`, written by `train.js --bake` |
 | architecture | `103 → 96 → 48 → 15`, tanh hidden and tanh out, 15,375 parameters |
 | action space | six process knobs, six *generic* dosing pumps, three medium slots — the same fifteen channels whichever of the five products was ordered |
-| generation | 80, of a run allowed 8,000 |
+| generation | 80, of a run allowed 8,000 and stopped at 670 |
 | rung | 1, of 0–4 |
 | gate score | held-out exam advantage 0.915 |
 | gate, per product | cardiac 0.88 · dopamine 0.57 · β 1.50 (at the clamp) · kidney 0.49 · hepatic 1.14 |
 | shipped on | 120 paired batches against the champion it replaced — 0.983 against 0.969 overall, weakest product 0.65 against 0.59 |
-| produced by | re-seeding that champion at `--mutsigma 0.20 --minlin 0.8` |
+| produced by | run P: re-seeding that champion (run L, generation 140) at `--mutsigma 0.20 --minlin 0.8` |
 | sha1 | `5ed1bf2c74b9` (the baked file) |
 
 Two things about that table matter more than the numbers in it.
@@ -27,13 +27,19 @@ per-product line says kidney organoids, at 0.49. The hundred-and-twenty-batch
 paired duel says dopamine neurons, at 0.65, with kidney at 0.67. Same brain, two
 banks, and they do not even rank the failures in the same order. That is the
 concrete form of a rule the rest of this file keeps re-learning: a gate score is
-steering a run, never for deciding what ships.
+for steering a run, never for deciding what ships.
 
-**The run that produced it is gone.** `training/` is git-ignored and the run
-lived on a shared training box, so the generation-80 checkpoint cannot be
-re-examined — only re-derived. What is left is the baked brain. That is the
-intended trade (the checkpoints are megabytes of JSON that say nothing a reader
-needs), but it is worth knowing before someone goes looking for run P.
+**The run that produced it is not in this repository, but it is not gone.**
+`training/` is git-ignored (the checkpoints are megabytes of JSON that say
+nothing a reader needs), and at the end of September 2026 runs A to P are still
+on the shared training box under `bioreactor2/training/`, with their logs,
+launch scripts and every epoch's archived champion. `P/champ_e0_g80.json` there
+holds exactly the weights in `default_brain.js`, and all six duels under *The
+duels* reproduce from that archive to the last digit. The lineage is two seeds
+deep: the class-weighted clone `bc2.json` seeded run L, and L's generation-140
+champion — the brain that shipped before this one — seeded run P. The
+`training/bc.json` in this folder is the *unweighted* control clone, which
+seeded runs M and O and is no ancestor of the shipped brain.
 
 ## The decision that made five protocols possible
 
@@ -123,28 +129,43 @@ however good everything else is.
 
 ## Distilling a sparse-action teacher needs the imbalance weighted
 
-Cloning the five published protocols into a network (`imitate.js`) drove the
-weighted loss to 0.06 and produced a controller that made **zero** dopamine
-neurons and **zero** β cells. The loss curve was not lying about the loss; it
-was lying about the policy. A three-week protocol doses any given reagent for
-two or three days, so nine labels in ten for a dosing channel are *off*, and the
-mean-squared optimum is to leave every pump shut for the entire run.
+Cloning the five published protocols into a network (the first `imitate.js`,
+which weighted the dosing channels four times the gas loops and nothing more)
+drove the weighted loss to 0.06 and produced a controller that made **zero**
+dopamine neurons and **zero** β cells. The loss curve was not lying about the
+loss; it was lying about the policy. A three-week protocol doses any given
+reagent for two or three days, so nine labels in ten for a dosing channel are
+*off*, and the mean-squared optimum is to leave every pump shut for the entire
+run.
 
 The fix is per-sample weighting: a channel that is running counts 20, one
 deliberately held off counts 2, and a pump the current protocol does not own
-counts 1. That one change is the difference between a clone and a placebo. It is
-the same failure as a teacher that idles in nine states out of ten, and it is
+counts 1. At round 0 that one change is the difference between a clone and a
+placebo — advantage −0.21 became +0.27, and both missing products appeared. It
+is the same failure as a teacher that idles in nine states out of ten, and it is
 why the table above lists "playing the clone" rather than "reading its loss" as
 the instrument.
 
-Two corollaries, the second of which cost a run. **Judge a clone at DAgger
-round 2, never round 0** — advantage went −0.21 → 0.66 across the rounds, so
-round 0 reads like a failed experiment. And **a distilled seed is a better GA
-seed than a converged champion**: the clone tolerated `--mutsigma 0.35`
-throughout, where the same sigma took the converged champion monotonically
-downhill for 560 generations. A converged brain sits in a narrow basin and 0.35
-of each layer's init scale walks straight out of it; the clone still has room to
-move.
+DAgger closes much of the rest of the gap on its own, which is worth knowing
+before crediting the weighting with everything. Both versions ran four rounds
+(advantage per round):
+
+| clone | round 0 | round 1 | round 2 | round 3 |
+|---|---|---|---|---|
+| unweighted, `bc.json` | −0.21 | −0.11 | **0.66** | 0.46 |
+| weighted 20 / 2 / 1, `bc2.json` | 0.27 | −0.28 | **0.76** | 0.40 |
+
+Two corollaries, the second of which cost a run. **Judge a clone by its best
+DAgger round — never round 0, and never simply the last.** Round 2 won in both
+runs and round 3 lost ground in both, which is why `imitate.js` keeps the best
+round rather than the final one. And **a distilled seed takes a large mutation
+better than a converged champion does**: from the clone, `--mutsigma 0.35`
+climbed for 330 generations (run O), where the same sigma took the converged
+champion downhill as soon as it reached rung 1 (run N, 560 generations). A
+converged brain sits in a narrow basin and 0.35 of each layer's init scale walks
+straight out of it; the clone still has room to move. It did not save run O in
+the end — O declined from generation 330 like every other run, for the reason
+given under *Why the runs were stopped*.
 
 ## Four lessons that generalise past this project
 
@@ -172,21 +193,22 @@ log read `EXAM adv 2.516 | card 0.18 … beta 7.99` beside `worst 0.18` — two
 scales on one line — and it looks exactly like a brain farming the one product
 the plant scores most generously. It was not: every gate was computed from the
 clamped fit and bounded all along. I nearly restarted two healthy runs over it,
-and the shipped brain's headline advantage was 1.539 raw against 0.979 clamped —
-a 57 % inflation that was one edit away from the README. A per-product figure
-that disagrees with the `worst` on its own line is the tell.
+and the headline advantage of the brain shipping at the time was 1.539 raw
+against 0.979 clamped — a 57 % inflation that was one edit away from the
+README. A per-product figure that disagrees with the `worst` on its own line is
+the tell.
 
 **A held-out gate with a bank that never rotates will deadlock, and the log will
 call it convergence.** The champion was replaced only on beating a monotone
 high-water mark, measured on seeds that were a pure function of index - so the
 bank was identical every generation and the mark could only ever rise. One lucky
-draw at generation 140 froze one run's champion for the next 380 generations;
+draw at generation 140 froze run L's champion for the next 380 generations;
 because the champion is what the ratchet exams, promotion froze with it and the
-run could never record anything again. A second run of the same code showed the
-other face: its champion did move, but *downhill*, held-out fit falling 0.918 to
-0.840 while the stricter mark kept its checkpoint frozen. The training log was
-no help at all - it printed a byte-identical exam line every ten generations,
-which reads as a plateau. **The instrument is to hash the network in
+run could never record anything again. A second run of the same code, M, showed
+the other face: its champion did move, but *downhill*, held-out fit falling
+0.918 to 0.840 while the stricter mark kept its checkpoint frozen. The training
+log was no help at all - it printed a byte-identical exam line every ten
+generations, which reads as a plateau. **The instrument is to hash the network in
 `latest.json` against the one in `checkpoint.json`:** identical nets at
 different generations means frozen, different nets at falling fitness means
 drifting. The bank now rotates on an epoch counter, both marks reset when it
@@ -194,12 +216,12 @@ turns over, and every epoch's best is archived - because once the bank rotates,
 scores stop being comparable across epochs and shipping has to be decided by a
 separate paired duel instead. Which is how the brain below was chosen, so that
 half was already right by accident. And the fix put a number on what the lock
-had been hiding: afterwards a champion sat at a held-out fit of 1.082 for about
-a hundred and ten generations, and the moment its bank rotated the same lineage
-measured 0.738, with the weakest product falling from 0.64 to 0.10. A third of
-that frozen advantage was the scenario draw rather than the controller, which is
-both why the mark was unbeatable and why nothing downstream should ever have
-been decided on it.
+had been hiding: afterwards run O's champion sat at a held-out fit of 1.082 for
+about a hundred and ten generations, and the moment its bank rotated the same
+lineage measured 0.738, with the weakest product falling from 0.64 to 0.10. A
+third of that frozen advantage was the scenario draw rather than the controller,
+which is both why the mark was unbeatable and why nothing downstream should ever
+have been decided on it.
 
 ## Calibration method, unchanged and still the only thing that works
 
@@ -207,8 +229,9 @@ Run the published protocol and break ONE thing, and tune until every failure
 mode points the right way with a defensible magnitude. `experiments.js` does it
 generically — every reagent removed, every reagent held all run, plus a
 per-lineage list from the papers — and `test_headless.js biology` freezes the
-answers. Judge a broken reagent on the SCORE, not the cell count: dropping the
-cardiac Wnt inhibitor costs 19 % of the yield and collapses purity 72 → 52 %.
+answers. Judge a broken reagent on the SCORE, not the cell count: over the
+fifteen reference batches, dropping the cardiac Wnt inhibitor costs a third of
+the cells but three fifths of the score — purity 70 → 57 %, score 75 → 31.
 
 Where it landed: chain efficiencies of 51.5 / 27.5 / 19.0 / 29.6 / 27.7 %,
 giving realised purities of 70 / 39 / 30 / 28 / 22 % — inside the published
@@ -227,17 +250,20 @@ relative to a low `ref.fold`. Re-measured against corrected references it
 baked before a scoring change is executing an argument about the old numbers.
 
 The honest footnote is that every champion since has made the same trade. The
-one baked after it, trained entirely *on* the corrected references, reached 88 %
-purity at 1.57 fold and lost by much the same margin — 18 points against the
-outgoing brain's 17. The one shipping now reaches 89 % at 1.58 and loses by 9.
-So this is not inertia at all. The cardiac yardstick is simply the hardest of
-the five to beat: a protocol that already turns one cell into 2.14 leaves almost
-no room above it, and three consecutive champions, measured against three
-different reference sets, have all preferred a purer, smaller batch than the
-score is willing to pay for. That is the more useful conclusion, and it took
-measuring them at matched settings to see it — the first version of this
-paragraph compared one at `--maxlevel 0` with another at `--maxlevel 1` and made
-the gap look like a regression.
+one baked after it (run L, generation 140), trained entirely *on* the corrected
+references, reached 88 % purity at 1.57 fold and lost by much the same margin —
+18 points against the outgoing brain's 17. The one shipping now reaches 92 % at
+1.73 and loses by 9, all three on the same sixty batches. So this is not inertia
+at all. The cardiac yardstick is simply the hardest of the five to beat: a
+protocol that already turns one cell into more than two leaves almost no room
+above it, and three consecutive champions, measured against three different
+reference sets, have all preferred a purer, smaller batch than the score is
+willing to pay for. That is the more useful conclusion, and it took measuring
+them at matched settings to see it — the first version of this paragraph
+compared one at `--maxlevel 0` with another at `--maxlevel 1` and made the gap
+look like a regression, and the second quoted the shipping brain at a hundred
+and twenty batches beside the other two at sixty. Matched settings include
+`--n`.
 
 ## What shipped
 
@@ -263,11 +289,12 @@ there the deficit has roughly halved from its predecessor's −15.9.
 Against that predecessor, on the same 120 batches: overall 0.983 against 0.969,
 and — the number this project actually promotes on — weakest product 0.65
 against 0.59. It is better on cardiomyocytes, dopamine neurons and hepatocytes,
-a little worse on kidney organoids (0.67 against 0.70), and spends three units
-more reagent. It came from seeding the outgoing champion into a fresh run at
-`--mutsigma 0.20` with `--minlin 0.8`, after an identical run at 0.35 took the
-same seed monotonically *downhill* for 560 generations to negative advantage on
-two products.
+level on β cells (both at the clamp), a little worse on kidney organoids (0.67
+against 0.70), and its batches cost three units more to run (48 against 45,
+medium and reagents together). It came from seeding the outgoing champion into
+a fresh run at `--mutsigma 0.20` with `--minlin 0.8`, after a run at 0.35 (N)
+took the same seed *downhill* for 560 generations to negative advantage on two
+products.
 
 Cardiomyocytes are the honest remaining gap, and the reason is in the scoring
 rather than the search: the protocol already turns one cell into 2.14, and every
@@ -276,23 +303,27 @@ yardstick pays for.
 
 ### The duels
 
-Four archived champions have been duelled against the shipped brain so far.
-Three lost outright: 0.893, 0.848 and 0.765 overall against its 0.969, each
-having abandoned a product (worst 0.42, 0.49 and 0.31).
+Every challenger was duelled against the brain then shipping, run L's
+generation-140 champion, and each is named here by run and generation so that
+its duel can be re-run from the archive. Three lost outright on the sixty-batch
+screen — O's generation 330, O's 310 and N's 160, at 0.893, 0.848 and 0.765
+overall against the incumbent's 0.972 — each having abandoned a product (worst
+0.42, 0.49 and 0.31).
 
-The most instructive of the three posted the best gate number either run has
-produced — a held-out exam fit of 1.082, where the shipped brain's own gate was
-0.942 — and still came fourth in the duel, because it is a β-cell specialist:
-raw advantage 6.82 on β cells with dopamine neurons collapsed to 0.42. The clamp
-and the weakest-product rule exist precisely to refuse that trade, and the
-gate's own forty-episode bank could not see it. Which is the third time in one
-day that deciding by a large paired duel rather than by the gate changed the
-answer.
+The most instructive of the three, O's generation 330, posted the best gate
+number either run had produced — a held-out exam fit of 1.082, where the
+incumbent's own gate was 0.942 — and still came fourth of the five on the
+weakest-product rule, because it is a β-cell specialist: raw advantage 6.82 on
+β cells with dopamine neurons collapsed to 0.42. The clamp and the
+weakest-product rule exist precisely to refuse that trade, and the gate's own
+forty-episode bank could not see it. Which is the third time in one day that
+deciding by a large paired duel rather than by the gate changed the answer.
 
-The fourth, from the exploring run, came back at 0.968 against 0.972 on sixty
-batches — a tie — while looking *better* in the places that matter: it beat the
-dopamine-neuron protocol 56 to 52 on nine batches in twelve where the shipped
-brain only drew, cost less reagent, and won more batches overall.
+The fourth, O's generation 160 from the exploring run, came back at 0.968
+against 0.972 on sixty batches — a tie — while looking *better* in the places
+that matter: it beat the dopamine-neuron protocol 56 to 52 on nine batches in
+twelve where the incumbent only drew, cost less to run (37 against 45), and won
+more batches overall.
 
 Doubling the sample to a hundred and twenty killed it. The dopamine win
 evaporated — 45 against 46 — and overall it sat at 0.960 against 0.969, still
@@ -301,20 +332,21 @@ difference and the reason the duel is large and paired rather than a glance at
 the gate.
 
 One measurement oddity is worth keeping, because it will mislead someone. On
-dopamine neurons the challenger wins **more batches** than the shipped brain (17
-of 24 against 11 of 24) while scoring **lower on average** (−0.7 against +7.4).
+dopamine neurons the challenger wins **more batches** than the incumbent (17 of
+24 against 11 of 24) while scoring **lower on average** (−0.7 against +7.4).
 It wins small and loses big. A win-rate and a mean advantage can point in
 opposite directions on the same data, so decide with the one the objective is
 actually made of — and report both, because the disagreement is information
 about the policy rather than noise.
 
-A fifth candidate, from the run seeded off the shipped brain at low mutation,
-made the criterion earn its keep. Overall it came in at 0.982 against 0.972 —
-marginally *ahead* — and it did something nothing else has: it beat the
-dopamine-neuron protocol outright, 107 to 52, advantage 1.00, nine batches in
-twelve, where the shipped brain only draws. It bought that by abandoning the
-kidney organoids, 0.74 down to 0.40 (46 against 60, three batches in twelve),
-which dropped its weakest product to 0.40 against the shipped brain's 0.62.
+A fifth candidate, P's generation 30, from the run seeded off the incumbent at
+low mutation, made the criterion earn its keep. Overall it came in at 0.982
+against 0.972 — marginally *ahead* — and it did something nothing else had: it
+beat the dopamine-neuron protocol outright, 107 to 52, advantage 1.00, nine
+batches in twelve, where the incumbent only draws. It bought that by abandoning
+the kidney organoids, 0.74 down to 0.40 (46 against 60, three batches in
+twelve), which dropped its weakest product to 0.40 against the incumbent's
+0.62.
 
 So the overall figure said "slightly better" and the weakest-product rule said
 "no", and the rule wins, because the whole point of this project is one
@@ -323,29 +355,48 @@ encouraging result so far: dopamine neurons are not unbeatable, they are just
 not yet beatable *at the same time as* kidney organoids. That is a far more
 useful thing to know than another tie.
 
-The sixth candidate finally cleared both bars. Screened at sixty batches it came
-in at 0.994 overall against 0.972 with its weakest product two hundredths short
-— exactly the margin that had reversed once already — so it went to a hundred
-and twenty, where it held: 0.983 against 0.969 overall and 0.65 against 0.59 on
-the weakest product, better on three of the five and beating the protocol on
-four. That one was baked, and the table above is its scorecard.
+The sixth candidate, P's generation 80, finally cleared both bars. Screened at
+sixty batches it came in at 0.994 overall against 0.972 with its weakest product
+two hundredths short — exactly the margin that had reversed once already — so it
+went to a hundred and twenty, where it held: 0.983 against 0.969 overall and
+0.65 against 0.59 on the weakest product, better on three of the five and
+beating the protocol on four. That one was baked, and the table above is its
+scorecard.
 
 Six duels for one promotion is the right ratio. Five of the six looked promising
-on the gate and lost on the batches.
+on the gate and failed on the batches.
+
+One candidate was never duelled at the time. P's generation 100 was archived a
+minute before the bake, on the same gate bank as generation 80, and the gate
+rated it higher — 0.922 with its weakest product at 0.62, against 0.915 and
+0.49. Duelled since, it trades the mean for the floor: over a hundred and twenty
+batches 0.976 against 0.983 overall but 0.75 against 0.65 on its weakest
+product, and over two hundred and forty 0.943 against 0.974 and 0.73 against
+0.65. At sixty it had looked better on both, 1.038 and 0.87 against 0.994 and
+0.60 — the third time sixty batches has reversed an answer. It cannot unseat
+generation 80, which beats it on the mean, but it would have cleared both bars
+against run L's champion just as generation 80 did. So which of the two shipped
+was settled by which was duelled first, not by the rule. A rule that makes a
+challenger beat the incumbent on two measures is asymmetric: when two candidates
+each win one measure, whichever is duelled first keeps the seat. Duel the
+candidates from one window against each other before baking any of them.
 
 ### Why the runs were stopped, and the one thing to change
 
 Every run eventually walked downhill, and the reason is in the fitness function
-rather than in the biology. Three of them, across three different seed and
-mutation-rate combinations, peaked early and then declined monotonically until
-their champions *lost to the published protocol outright* — on sixty paired
-batches, Δ −12.5 ± 13.0 and −13.8 ± 15.6 overall.
+rather than in the biology. Three of them — N, O and P, across three different
+seed and mutation-rate combinations — peaked early and then declined until
+their champions were worth about half the published protocol on the objective:
+on sixty paired batches, O's generation 830 and P's generation 470 score
+advantage 0.57 and 0.45, where the protocol is 1 by construction, and trail it
+on raw score too, Δ −12.5 ± 13.0 and −13.8 ± 15.6.
 
-What "declined" means per product is worth spelling out. One finished making
-cardiomyocytes at 0.11 fold, 9 % purity and a beating score of 0.17; the other
-made neurons at 0.10 fold, 13 % purity, 0.21 firing. They had stopped making two
-of the five products at all, while pinning β cells against the 1.5 clamp and
-holding hepatocytes near 1.0 — which keeps the *mean* comfortably positive.
+What "declined" means per product is worth spelling out. O's generation 830
+made cardiomyocytes at 0.11 fold, 9 % purity and a beating score of 0.17; P's
+generation 470 made neurons at 0.10 fold, 13 % purity, 0.21 firing. Each had
+given up on two of the five products — advantage at or near zero, no better
+than a reactor nobody touched — while pinning β cells against the 1.5 clamp and
+holding hepatocytes near 0.9, which keeps the *mean* comfortably positive.
 
 That is the mechanism, and it is a design error of mine. Fitness is the mean
 clamped advantage across the episode plan, so abandoning two hard products and
@@ -356,9 +407,11 @@ reason to keep a product alive. The per-episode clamp stops one product
 dominating the mean; it does nothing about two being dropped from it.
 
 Two things follow. The champion that shipped came from **generation 80 of eight
-thousand**, and every later generation of every run was worse, so the lesson is
-to harvest early and duel often rather than to trust a long run. And the fix
-belongs in the fitness, not the gate: a floor penalty such as `fit = mean −
+thousand**, and of everything archived after it, in any run, only P's own
+generation 100 holds up at a hundred and twenty batches — as a trade of mean
+for floor rather than an improvement (*The duels*). So the lesson is to harvest
+early and duel often rather than to trust a long run. And the fix belongs in the
+fitness, not the gate: a floor penalty such as `fit = mean −
 λ·max(0, floor − worst)`, or simply refusing to breed a brain with any product
 below zero. That is untested — the runs were stopped once the duels showed them
 below the protocol, rather than left burning a shared machine.
@@ -370,11 +423,12 @@ below the protocol, rather than left burning a shared machine.
 | An absolute score, `100 × fold × purity²`, across five products | four of the five scored *below* a reactor nobody touched |
 | Fitness as the mean clamped advantage | every run eventually abandoned two products and farmed two easy ones |
 | The weakest-product floor in the promotion gate only | selection was never given a reason to keep a product alive |
-| A held-out bank that was a pure function of index | one champion froze for 380 generations and the log printed it as a plateau |
-| Deciding what to ship on the gate score | the best gate number either run ever posted, 1.082, lost its duel 0.893 against 0.969 |
+| A held-out bank that was a pure function of index | run L's champion froze for 380 generations and the log printed it as a plateau |
+| Deciding what to ship on the gate score | the best gate number either run ever posted, 1.082, lost its duel 0.893 against 0.972 |
 | Promoting on a sixty-batch margin | a 56–52 dopamine win on nine batches in twelve became 45–46 when the sample doubled |
+| Duelling each candidate against the incumbent in the order it was archived | P's generation 100, with the higher floor, was never duelled; under a two-bar rule whoever goes first keeps the seat |
 | Seeding a converged champion at `--mutsigma 0.35` | 560 generations downhill, to negative advantage on two products |
-| Cloning the protocols without class weighting | weighted loss 0.06, two products never made at all |
+| Cloning the protocols without class weighting | round 0: weighted loss 0.06, two products never made at all |
 | Tuning off-target growth to explain a purity collapse | a 3.3× sweep moved purity *not at all*; the cause was three other faults |
 | Calibrating the β protocol at 27 days | six more days of a *correct* protocol exposed three compounding faults |
 | Printing the raw mean advantage beside a clamped `worst` | two scales on one line; it nearly cost two healthy runs |
@@ -389,10 +443,12 @@ behaviour you want.
 ## What this does not establish
 
 **The winning dopamine policy is a caution about the plant, not a recipe.** It
-switches all five cues on in the first hours and never takes them off: SMAD
-inhibition to day 20 where the protocol stops at 11, and the SHH agonist, CHIR
-and FGF8 all running to day 25 at 4.8 µM and 153 ng/mL against a published 3 µM
-and 100 ng/mL, for a reagent bill of 48 against 28. Published schedules withdraw
+switches all five cues on in the first hours and holds them far past their
+published windows: SMAD inhibition to day 20 where the protocol stops at 11, and
+the SHH agonist, CHIR and FGF8 all running to the last day, 25, at 4.8 µM and
+152 ng/mL against a published 3 µM and 100 ng/mL to day 13. A dopamine batch
+costs 48 to run against the protocol's 30, though only 13 against 8 of that is
+reagent; most of the difference is medium. Published schedules withdraw
 factors *because holding them on has consequences*, and this plant models those
 consequences only partly, which makes "leave every pump running" a policy a
 model rewards more easily than a lab could run. `experiments.js` shows
@@ -428,20 +484,36 @@ problem — and the protocol it is measured against already turns one cell into
     node calibrate.js beta --every 72     # the compartment table
     node experiments.js beta --seed 7     # break one reagent at a time
 
-    node imitate.js --rounds 4 --scenarios 40 --epochs 60  # -> bc.json
-    node train.js --init training/bc.json --gens 2000 --pop 96 \
-                  --episodes 10 --workers 6 --minlin 0.8
-    node train.js --bake training/checkpoint.json          # -> default_brain.js
+    # the shipped lineage, as the launch scripts and logs record it
+    node imitate.js --rounds 3 --scenarios 45 --epochs 30 \
+                    --out training/bc2.json                   # weighted clone
+    node train.js --init training/bc2.json --mutsigma 0.35 --minlin 0.7 \
+                  --pop 160 --episodes 10 --gens 8000 --seed 5107 \
+                  --out training/L                            # run L
+    node train.js --init training/L/checkpoint.json --mutsigma 0.20 \
+                  --minlin 0.8 --pop 160 --episodes 10 --gens 8000 \
+                  --examrot 150 --seed 9137 --out training/P  # run P
+    node train.js --bake training/P/champ_e0_g80.json         # -> default_brain.js
 
-    node analyse.js default_brain.js --n 24 --maxlevel 4   # paired vs protocol
+    node analyse.js default_brain.js --n 12 --maxlevel 1   # the scorecard above
+    node analyse.js default_brain.js --n 24 --maxlevel 4   # every rung
     node analyse.js default_brain.js --lin beta            # one product only
+
+The training runs used 32 workers on the training box. Only run P ran on the
+code in this folder. The clones were distilled about an hour before the
+simulation's last edits, and run L ran on the trainer from before the exam bank
+rotated, which is why its champion froze at generation 140. Neither step will
+come out the same today. To re-derive the shipped brain rather than replay its
+history, start run P from `L/checkpoint.json` on the training box. The
+`training/bc.json` in this folder is the unweighted control clone, made by the
+first `imitate.js`.
 
 **There is no duel command.** A "duel" in this file means `analyse.js` run on
 two brains at the same `--n` and `--maxlevel`: the held-out seeds are a function
 of index, so both brains meet identical batches and both are scored against the
 same protocol yardstick, and what is compared is their advantages. Sixty batches
 screens a candidate; a hundred and twenty decides, because sixty has reversed
-the answer twice.
+the answer three times.
 
 Pass `--workers` explicitly on a shared machine.
 

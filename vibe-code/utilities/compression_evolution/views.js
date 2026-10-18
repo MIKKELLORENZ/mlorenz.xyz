@@ -9,7 +9,9 @@
               for images, tinted characters for text, a cost strip under the waveform
               for audio, a byte map for anything else. Magnitude is one neutral ramp
               with a scale; this is where "compression is prediction" becomes visible:
-              flat background is nearly free, fur is not. */
+              flat background is nearly free, fur is not. A `compact` Bits (the column
+              beside the chart) always stacks the file above its cost: plain text over
+              tinted text, and the waveform over a profile of the bits spent. */
 
 (function (root) {
 'use strict';
@@ -113,8 +115,9 @@ function anatomy(host, genome, ctx, influence, unit) {
 }
 
 // ------------------------------------------------------- where the bits go
-function Bits(host, sub, scale, probe) {
+function Bits(host, sub, scale, probe, opts) {
     this.host = host; this.sub = sub; this.scale = scale; this.probe = probe;
+    this.compact = !!(opts && opts.compact);
     this.item = null; this.data = null; this.info = null; this.costs = null; this.mapped = true;
     this.mode = 'spent';                 // or 'saved': 8 bits minus what was paid
     new ResizeObserver(() => { if (this.kind === 'audio') this._drawAudio(); }).observe(host);
@@ -133,10 +136,20 @@ Bits.prototype.setData = function (item, data, info) {
     this.item = item; this.data = data; this.info = info; this.costs = null; this.mapped = true;
     const sh = this.shp = this.shape();
     this.kind = sh.kind;
-    this.host.textContent = ''; this.host.className = 'bits' + (sh.kind === 'text' || sh.kind === 'audio' ? ' single' : '');
+    this.host.textContent = ''; this.host.className = 'bits' + (this.compact ? ' compact' : sh.kind === 'text' || sh.kind === 'audio' ? ' single' : '');
     this.scale.hidden = true; this.probe.textContent = '';
-    const fig = (caption, cls) => { const f = el('figure'), cv = document.createElement('canvas'); if (cls) cv.className = cls; f.appendChild(el('figcaption', '', caption)); f.appendChild(cv); this.host.appendChild(f); return cv; };
-    if (sh.kind === 'text') { this.textEl = el('div', 'bits-text'); this.host.appendChild(this.textEl); }
+    this.textA = null; this.capB = null;
+    const fig = (caption, cls) => { const f = el('figure'), cv = document.createElement('canvas'), cap = el('figcaption', '', caption); if (cls) cv.className = cls; f.appendChild(cap); f.appendChild(cv); this.host.appendChild(f); cv.cap = cap; return cv; };
+    if (this.compact) {
+        const box = caption => { const f = el('figure'), t = el('div', 'bits-text'), cap = el('figcaption', '', caption); f.appendChild(cap); f.appendChild(t); this.host.appendChild(f); t.cap = cap; return t; };
+        if (sh.kind === 'text') { this.textA = box('Original'); this.textEl = box(''); this.capB = this.textEl.cap; }
+        else if (sh.kind === 'audio') { this.cvA = fig('Original', 'wave'); this.cvB = fig('', 'wave'); this.capB = this.cvB.cap; }
+        else {
+            this.cvA = fig('Original', sh.kind === 'bytes' ? 'px' : '');
+            this.cvB = fig('', sh.kind === 'bytes' ? 'px' : ''); this.capB = this.cvB.cap;
+            for (const cv of [this.cvA, this.cvB]) { cv.addEventListener('pointermove', e => this._probe(e, cv)); cv.addEventListener('pointerleave', () => { this.probe.textContent = ''; }); }
+        }
+    } else if (sh.kind === 'text') { this.textEl = el('div', 'bits-text'); this.host.appendChild(this.textEl); }
     else if (sh.kind === 'audio') { this.cvA = fig('The waveform, and under it the bits spent at each moment', 'wave'); this.cvB = null; }
     else {
         this.cvA = fig(sh.kind === 'image' ? 'The file' + (sh.guessed ? ' — its shape, ' + sh.w + ' × ' + sh.h + ', was worked out from its periodicity' : '') : 'The bytes, one pixel each, ' + sh.w + ' to a row', sh.kind === 'bytes' ? 'px' : '');
@@ -151,10 +164,15 @@ Bits.prototype._v = function (c, i) { return this.mode === 'saved' ? Math.max(0,
 Bits.prototype.setCosts = function (costs, mapped) { this.costs = costs || null; this.mapped = mapped !== false; this.scale.hidden = !costs; this.redraw(); };
 Bits.prototype.redraw = function () {
     if (!this.data) return;
+    if (this.capB) {
+        const unit = this.kind === 'image' ? 'pixel' : this.kind === 'text' ? 'character' : this.kind === 'audio' ? 'moment' : 'byte';
+        this.capB.textContent = (this.mode === 'saved' ? 'Bits saved on each ' : 'Bits spent on each ') + unit;
+    }
     if (this.kind === 'text') this._drawText(); else if (this.kind === 'audio') this._drawAudio(); else { this._drawOriginal(); this._drawCost(); }
-    if (!this.costs) { this.sub.textContent = 'What the design pays for every byte. It appears once a first champion has been run on the whole file.'; return; }
+    if (!this.costs) { this.sub.textContent = this.compact ? 'The cost map fills in once a first champion has run on the whole file.' : 'What the design pays for every byte. It appears once a first champion has been run on the whole file.'; return; }
     let tot = 0;
     for (let i = 0; i < this.costs.length; i++) tot += this.costs[i];
+    if (this.compact) { this.sub.textContent = (tot / 8 / Math.max(1, this.costs.length)).toFixed(2) + ' bits for an average byte; 8 would be no compression.' + (this.mapped ? '' : ' Shown in sorted order.'); return; }
     this.sub.textContent = 'The champion pays ' + (tot / 8 / Math.max(1, this.costs.length)).toFixed(2) + ' bits for an average byte of this file; 8 would be no compression.' + (this.mapped ? '' : ' This design sorts the file first, so the costs are shown in sorted order rather than file order.');
 };
 Bits.prototype._size = function (cv, w, h) { if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; } return cv.getContext('2d'); };
@@ -192,7 +210,7 @@ Bits.prototype._probe = function (e, cv) {
     this.probe.textContent = txt;
 };
 Bits.prototype._drawText = function () {
-    const host = this.textEl, d = this.data, c = this.mapped ? this.costs : null, SHOW = 6000, RP = ramp(), K = R.ink();
+    const host = this.textEl, d = this.data, c = this.mapped ? this.costs : null, SHOW = this.compact ? 1400 : 6000, RP = ramp(), K = R.ink();
     // open a quarter of the way in, at the start of a line: by then the model is warm,
     // and what is left is the steady pattern (word beginnings cost, endings are free)
     let from = 0;
@@ -213,6 +231,12 @@ Bits.prototype._drawText = function () {
     }
     flush();
     host.appendChild(frag);
+    if (this.textA) {                                     // compact: the same excerpt, untinted, above
+        let plain = '';
+        for (let i = from; i < N; i++) { const v = d[i]; plain += v === 10 ? '\n' : v === 9 ? '\t' : v === 13 ? '' : (v >= 32 && v < 127) ? String.fromCharCode(v) : '·'; }
+        this.textA.textContent = plain;
+        return;
+    }
     if (N - from < d.length) host.appendChild(el('p', 'small', 'Bytes ' + from.toLocaleString() + ' to ' + N.toLocaleString() + ' of ' + d.length.toLocaleString() + '.'));
 };
 Bits.prototype._drawAudio = function () {
@@ -221,6 +245,7 @@ Bits.prototype._drawAudio = function () {
     const K = R.ink(), RP = ramp(), dpr = Math.min(2, window.devicePixelRatio || 1), W = Math.max(50, Math.round(cv.clientWidth * dpr)), H = Math.max(40, Math.round(cv.clientHeight * dpr));
     const base = this.shp.off || 0, d = base ? this.data.subarray(base) : this.data, g = this._size(cv, W, H), ch = this.shp.ch, frame = 2 * ch, frames = Math.floor(d.length / frame);
     const c = this.mapped && this.costs ? (base ? this.costs.subarray(base) : this.costs) : null;
+    if (this.compact) { this._drawAudioCompact(d, c, frame, frames, g, W, H, K, RP); return; }
     g.clearRect(0, 0, W, H);
     const waveH = c ? Math.round(H * 0.7) : H, mid = waveH / 2;
     let peak = 1;
@@ -238,6 +263,33 @@ Bits.prototype._drawAudio = function () {
             g.fillStyle = 'rgb(' + RP[r] + ',' + RP[r + 1] + ',' + RP[r + 2] + ')';
             g.fillRect(x, waveH + 8 * dpr, 1, H - waveH - 8 * dpr);
         }
+    }
+};
+
+// compact: the waveform alone above, and below it a profile of the bits spent — each
+// column as tall as it was expensive, shaded on the same ramp as everywhere else
+Bits.prototype._drawAudioCompact = function (d, c, frame, frames, g, W, H, K, RP) {
+    g.clearRect(0, 0, W, H);
+    const mid = H / 2;
+    let peak = 1;
+    for (let f = 0; f < frames; f += 7) { const v = Math.abs(((d[f * frame + 1] << 8 | d[f * frame]) << 16) >> 16); if (v > peak) peak = v; }
+    for (let x = 0; x < W; x++) {
+        const f0 = Math.floor(x / W * frames), f1 = Math.max(f0 + 1, Math.floor((x + 1) / W * frames));
+        let lo = 32767, hi = -32768;
+        for (let f = f0; f < f1; f++) { const v = ((d[f * frame + 1] << 8 | d[f * frame]) << 16) >> 16; if (v < lo) lo = v; if (v > hi) hi = v; }
+        const y0 = mid - hi / peak * (mid - 4), y1 = mid - lo / peak * (mid - 4);
+        g.fillStyle = K.ink1; g.fillRect(x, y0, 1, Math.max(1, y1 - y0));
+    }
+    const cv = this.cvB, dpr = Math.min(2, window.devicePixelRatio || 1), W2 = Math.max(50, Math.round(cv.clientWidth * dpr)), H2 = Math.max(40, Math.round(cv.clientHeight * dpr)), g2 = this._size(cv, W2, H2);
+    g2.clearRect(0, 0, W2, H2);
+    if (!c) return;
+    for (let x = 0; x < W2; x++) {
+        const f0 = Math.floor(x / W2 * frames), f1 = Math.max(f0 + 1, Math.floor((x + 1) / W2 * frames));
+        let s = 0;
+        for (let i = f0 * frame; i < f1 * frame; i++) s += this._v(c, i);
+        const bpb = s / 8 / Math.max(1, (f1 - f0) * frame) * (this.mode === 'saved' ? 0.75 : 1), r = rampIndex(bpb) * 3, h = Math.max(1, Math.min(1, bpb / MAX_BITS) * (H2 - 2));
+        g2.fillStyle = 'rgb(' + RP[r] + ',' + RP[r + 1] + ',' + RP[r + 2] + ')';
+        g2.fillRect(x, H2 - h, 1, h);
     }
 };
 

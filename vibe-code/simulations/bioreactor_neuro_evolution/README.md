@@ -20,16 +20,14 @@ product running the identical batch beside it.
 
 Open `index.html`. No build step, no dependencies.
 
-- **`index.html`** — the exhibition: the champion against the protocol, batch
-  after batch, every batch a fresh draw of product, cell line and disasters.
-  That is the only thing the front door offers; the protocol-alone view and
-  evolution from scratch are still there, behind `?sop=1` and the restart
-  button in Evolution settings, but they are not what a visitor is asked to
-  choose between. The header chooses which of the five products to make, or
-  `Any` to keep drawing a different one every batch; `?lin=beta` (or `0`–`4`)
-  picks one from the URL, and `?showcase=1`, `?sop=1`, `?level=N`, `?intro=0`
-  and `?bench=N` set the mode, the rung and a synchronous warm-up for
-  screenshots.
+- **`index.html`** — the built-in network against the published protocol,
+  batch after batch, every batch a fresh draw of product, cell line and
+  faults. The header picks which of the five products to make, or `Any` to
+  draw a different one every batch. `?lab=1` evolves a population in the
+  browser instead and `?sop=1` shows the published protocol on its own;
+  `?lin=beta` (or `0`–`4`), `?level=N`, `?intro=0` and `?bench=N` pick the
+  product, cap the difficulty, skip the intro and run N simulated hours
+  synchronously for screenshots.
 - **`node train.js`** — the headless trainer. `node train.js --bake
   training/checkpoint.json` writes `default_brain.js`.
 - **`node test_headless.js`** — engine, fitness-scale and biology regression

@@ -35,8 +35,22 @@
     <section aria-labelledby="h-chart">
         <h2 id="h-chart">Compressed size by generation</h2>
         <p class="sub" id="chart-sub">Lower is better. Dots are measured on the whole data, the line between them is estimated from the fitness sample. Grey lines are existing tools, measured on the same bytes.</p>
-        <div class="chart-wrap"><canvas id="chart"></canvas><div id="chart-tip" class="tip" hidden></div></div>
-        <div class="legend" id="legend"></div>
+        <div class="chart-row">
+            <div class="chart-col">
+                <div class="chart-wrap"><canvas id="chart"></canvas><div id="chart-tip" class="tip" hidden></div><div id="chart-preview" class="preview" role="group" aria-label="Designs being tried" hidden></div></div>
+                <div class="legend" id="legend"></div>
+            </div>
+            <aside class="side" aria-label="The file, and what the champion pays for it">
+                <div class="side-head">
+                    <span class="side-title" id="side-title"></span>
+                    <select class="side-file" id="side-file" aria-label="File shown" hidden></select>
+                </div>
+                <div id="side-bits"></div>
+                <div class="scale" id="side-scale" hidden><span>0</span><i></i><span>6+ bits</span></div>
+                <p class="side-note" id="side-sub"></p>
+                <p class="probe" id="side-probe"></p>
+            </aside>
+        </div>
     </section>
 
     <section id="files-section" aria-labelledby="h-files" hidden>

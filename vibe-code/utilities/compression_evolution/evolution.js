@@ -66,7 +66,8 @@ Evolution.prototype._score = async function (inds, capsBySpecies) {
         else todo.push(ind);
     }
     if (!todo.length) return;
-    const res = await this.evaluate(todo.map(ind => ({ genome: ind.genome, caps: (capsBySpecies && capsBySpecies.get(ind.species)) || null })));
+    // the note rides along for whoever watches designs come back; the pool ignores it
+    const res = await this.evaluate(todo.map(ind => ({ genome: ind.genome, caps: (capsBySpecies && capsBySpecies.get(ind.species)) || null, note: ind.note })));
     for (let i = 0; i < todo.length; i++) {
         const ind = todo[i], r = res[i] || { aborted: true };
         this.evals++; this.evalMs += r.ms || 0;

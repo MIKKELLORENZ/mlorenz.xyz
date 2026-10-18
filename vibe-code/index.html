@@ -36,29 +36,52 @@
         </div>
     </nav>
 
-    <main class="container vc-gallery" id="main-content">
-        <h1 class="sr-only">Vibe Code — Projects Gallery</h1>
+    <main class="vc-gallery" id="main-content">
+        <header class="vc-head container">
+            <h1 class="vc-title">Vibe Code</h1>
+            <p class="vc-lede">Interactive experiments in physics, machine learning and browser tools.</p>
+        </header>
 
-        <!-- Featured showcase carousel, built by JS from the newest projects -->
-        <section id="showcase" aria-label="Featured projects"></section>
+        <!-- Full-width sticky bar; the sentinel tells JS when it has stuck -->
+        <div class="vc-sentinel" aria-hidden="true"></div>
+        <div class="vc-bar search-container">
+            <div class="container vc-toolbar" role="search">
+                <div class="vc-search">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                    <input type="search" id="search-input" placeholder="Search projects" class="search-input" aria-label="Search projects" autocomplete="off" spellcheck="false" enterkeyhint="search">
+                    <kbd class="vc-kbd" aria-hidden="true">/</kbd>
+                    <button type="button" id="search-clear" class="vc-search-clear" aria-label="Clear search">
+                        <i class="fas fa-xmark" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="vc-pills" id="category-pills" role="tablist" aria-label="Filter by category">
+                    <!-- Category pills injected by JS -->
+                </div>
+                <div class="vc-sort">
+                    <i class="fas fa-arrow-down-wide-short" aria-hidden="true"></i>
+                    <select id="sort-options" class="filter-select" aria-label="Sort projects">
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="az">A – Z</option>
+                        <option value="za">Z – A</option>
+                    </select>
+                </div>
+                <div class="vc-view" role="group" aria-label="Layout">
+                    <button type="button" data-view="grid" aria-label="Grid" aria-pressed="true">
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.5"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1.5"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1.5"/><rect x="9" y="9" width="5.5" height="5.5" rx="1.5"/></svg>
+                    </button>
+                    <button type="button" data-view="list" aria-label="List" aria-pressed="false">
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2" width="4" height="3" rx="1"/><rect x="1.5" y="6.5" width="4" height="3" rx="1"/><rect x="1.5" y="11" width="4" height="3" rx="1"/><path d="M8 3.5h6.5M8 8h6.5M8 12.5h6.5"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
 
-        <div class="search-container vc-toolbar" role="search">
-            <div class="vc-search">
-                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                <input type="text" id="search-input" placeholder="Search projects, tags, ideas…" class="search-input" aria-label="Search projects" autocomplete="off">
-                <button type="button" id="search-clear" class="vc-search-clear" aria-label="Clear search">
-                    <i class="fas fa-xmark" aria-hidden="true"></i>
-                </button>
+        <div class="vc-subbar container">
+            <div class="vc-topics" id="topic-chips" role="group" aria-label="Topics">
+                <!-- Topic chips injected by JS -->
             </div>
-            <div class="vc-pills" id="category-pills" role="tablist" aria-label="Filter by category">
-                <!-- Category pills injected by JS -->
-            </div>
-            <select id="sort-options" class="filter-select" aria-label="Sort projects">
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-                <option value="az">A – Z</option>
-                <option value="za">Z – A</option>
-            </select>
+            <p class="vc-count" id="result-count" aria-live="polite"></p>
         </div>
 
         <div class="projects-container" id="projects-container">

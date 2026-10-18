@@ -178,10 +178,11 @@ Chart.prototype.draw = function () {
     // direct labels at the line ends, kept apart
     ends.sort((a, b2) => a.ly - b2.ly);
     for (let i = 1; i < ends.length; i++) if (ends[i].ly - ends[i - 1].ly < 15) ends[i].ly = ends[i - 1].ly + 15;
-    g.textAlign = 'right';
     for (const e of ends) {
-        const ly = Math.max(m.t + 8, Math.min(m.t + S.ph - 8, e.ly)), txt = G.SPECIES[e.sp].short, tw = g.measureText(txt).width, lx = e.x - 10;
-        g.fillStyle = K.bg; g.globalAlpha = 0.85; g.fillRect(lx - tw - 3, ly - 8, tw + 6, 16); g.globalAlpha = 1;
+        // left of the line end, unless that would run into the axis (a line still at generation 0)
+        const ly = Math.max(m.t + 8, Math.min(m.t + S.ph - 8, e.ly)), txt = G.SPECIES[e.sp].short, tw = g.measureText(txt).width, right = e.x - 10 - tw < m.l + 2, lx = right ? e.x + 10 : e.x - 10;
+        g.textAlign = right ? 'left' : 'right';
+        g.fillStyle = K.bg; g.globalAlpha = 0.85; g.fillRect(right ? lx - 3 : lx - tw - 3, ly - 8, tw + 6, 16); g.globalAlpha = 1;
         g.fillStyle = e.sel ? K.text : K.text2; g.fillText(txt, lx, ly);
     }
     // ---- crosshair
@@ -244,6 +245,130 @@ Chart.prototype.drawLegend = function () {
     if (this.baselines.length) { const it = el('span', 'ref'); it.style.display = 'inline-flex'; it.style.alignItems = 'center'; it.style.gap = '8px'; it.appendChild(el('i')); it.appendChild(el('span', '', 'Existing tools, measured on the same bytes')); L.appendChild(it); }
 };
 
+// ---------------------------------------------------------------- preview
+// What evolution is trying, laid over the empty plot until a design has been measured on
+// the whole data and the chart has something true to draw. Its numbers are fitness-sample
+// scores and say so (≈); the chart itself never shows one. Rows arrive on a steady beat
+// rather than at the workers' pace, so it reads as a ticker instead of a flicker: the
+// newest result waiting is shown, the others only count towards the progress bar.
+const PV_BEAT = 420, PV_ROWS = 4;
+// the design as a chain of parts, in the order the bytes pass through them
+function pipeline(g) {
+    const out = [], ctx = g.experts.filter(e => e.k === 'ctx');
+    if (g.pre.includes('bwt')) out.push('Sort');
+    if (g.pre.includes('mtf')) out.push('Move-to-front');
+    if (g.front8) out.push('Predictor');
+    if (g.front16) out.push('16-bit predictor');
+    if (ctx.length === 1 && !ctx[0].terms.length) out.push('Byte counts');
+    else if (ctx.length) out.push(ctx.length + (ctx.length === 1 ? ' expert' : ' experts'));
+    if (g.experts.some(e => e.k === 'match')) out.push('Repeat-finder');
+    out.push(g.mixers.length > 1 ? g.mixers.length + ' mixers' : 'Mixer');
+    if (g.apms.length) out.push(g.apms.length > 1 ? g.apms.length + ' corrections' : 'Correction');
+    out.push('Coder');
+    return out;
+}
+function Preview(host, chart) {
+    this.host = host; this.chart = chart;
+    const card = el('div', 'pv-card'), head = el('div', 'pv-head'), bestHead = el('div', 'pv-label'), triedHead = el('div', 'pv-label');
+    head.appendChild(el('span', 'pv-live'));
+    this.stage = head.appendChild(el('span', 'pv-stage'));
+    this.count = head.appendChild(el('span', 'pv-count'));
+    this.track = el('div', 'pv-track');
+    this.bar = this.track.appendChild(el('i'));
+    bestHead.appendChild(el('span', '', 'Best so far'));
+    this.bestVal = bestHead.appendChild(el('b'));
+    this.chips = el('div', 'pv-chips');
+    triedHead.appendChild(el('span', '', 'Just tried'));
+    this.rows = el('div', 'pv-rows');
+    this.foot = el('p', 'pv-foot');
+    [head, this.track, bestHead, this.chips, triedHead, this.rows, this.foot].forEach(n => card.appendChild(n));
+    host.appendChild(card);
+    host.hidden = true;
+    this.beat = 0; this.leaveT = 0;
+    this.reset();
+    new ResizeObserver(() => { if (!host.hidden) this.layout(); }).observe(host.parentElement);
+}
+Preview.prototype.reset = function () {
+    this.gen = 0; this.done = 0; this.total = 0; this.label = null; this.best = null; this.waiting = null; this.chipKeys = [];
+    this.rows.textContent = ''; this.chips.textContent = ''; this.foot.textContent = '';
+    this._progress(); this._best();
+};
+// centred on the plot itself, clear of the axis and of the tool labels in the margin
+Preview.prototype.layout = function () {
+    const S = this.chart._scales(), m = S.m;
+    this.host.style.padding = S.narrow ? '0' : m.t + 'px ' + m.r + 'px ' + m.b + 'px ' + m.l + 'px';
+};
+Preview.prototype.show = function () {
+    if (!this.host.hidden && !this.host.classList.contains('is-leaving')) return;
+    clearTimeout(this.leaveT);
+    this.host.classList.remove('is-leaving');
+    this.host.hidden = false;
+    this.layout(); this._progress(); this._best();
+    if (!this.beat) this.beat = setInterval(() => this._tick(), PV_BEAT);
+};
+Preview.prototype.hide = function (fade) {
+    clearInterval(this.beat); this.beat = 0;
+    if (this.host.hidden) return;
+    clearTimeout(this.leaveT);
+    if (!fade) { this.host.hidden = true; this.host.classList.remove('is-leaving'); return; }
+    this.host.classList.add('is-leaving');
+    this.leaveT = setTimeout(() => { this.host.hidden = true; this.host.classList.remove('is-leaving'); }, 450);
+};
+Preview.prototype.setFoot = function (text) { if (this.foot.textContent !== text) this.foot.textContent = text; };
+// a phase with no designs to count yet (loading, preparing the samples)
+Preview.prototype.setStage = function (label) { this.label = label; this.done = 0; this.total = 0; this._progress(); };
+// label: what the batch is, when it is not an ordinary generation
+Preview.prototype.batch = function (n, gen, label) {
+    this.gen = gen; this.done = 0; this.total = n; this.label = label || null;
+    this.bar.style.transition = 'none';                  // a new generation starts empty, it does not rewind
+    this.bar.style.width = '0%';
+    void this.bar.offsetWidth;
+    this.bar.style.transition = '';
+    this._progress();
+};
+// job: { genome, note }, pct: the sample score in percent (Infinity if it was raced out)
+Preview.prototype.tried = function (job, pct) {
+    this.done++;
+    const ok = pct < Infinity, better = ok && (!this.best || pct < this.best.pct);
+    if (better) this.best = { pct, genome: job.genome };
+    // the newest result waits for the next beat; an improvement is never pushed out by
+    // an ordinary result that happened to come back after it
+    const item = { note: job.note, pct: ok ? pct : null, better };
+    if (!this.waiting || better || !this.waiting.better) this.waiting = item;
+    if (this.host.hidden) return;
+    this._progress();
+    if (better) this._best();
+};
+Preview.prototype._tick = function () {
+    const it = this.waiting;
+    if (!it) return;
+    this.waiting = null;
+    const row = el('div', 'pv-row is-new' + (it.better ? ' is-better' : '') + (it.pct === null ? ' is-dropped' : '')), note = it.note || 'a new design';
+    row.appendChild(el('b', '', it.pct === null ? 'dropped' : '≈ ' + pctText(it.pct)));
+    row.appendChild(el('span', '', note.charAt(0).toUpperCase() + note.slice(1)));
+    row.title = it.pct === null ? 'Clearly behind its family part-way through the sample, so it was not finished.' : note;
+    this.rows.prepend(row);
+    while (this.rows.children.length > PV_ROWS) this.rows.lastChild.remove();
+};
+Preview.prototype._progress = function () {
+    const first = this.total <= 1;
+    this.stage.textContent = this.label || (first ? 'Measuring the starting point' : 'Generation ' + this.gen.toLocaleString());
+    this.count.textContent = first ? '' : Math.min(this.done, this.total) + ' of ' + this.total + ' designs';
+    this.track.classList.toggle('is-indeterminate', first);
+    this.bar.style.width = first ? '' : 100 * Math.min(1, this.done / Math.max(1, this.total)) + '%';
+};
+Preview.prototype._best = function () {
+    if (!this.best) { this.bestVal.textContent = '…'; return; }
+    this.bestVal.textContent = '≈ ' + pctText(this.best.pct);
+    const parts = pipeline(this.best.genome), before = new Set(this.chipKeys);
+    this.chips.textContent = '';
+    parts.forEach((p, i) => {
+        if (i) this.chips.appendChild(el('span', 'pv-arrow', '›'));
+        this.chips.appendChild(el('span', 'pv-chip' + (this.chipKeys.length && !before.has(p) ? ' is-new' : ''), p));
+    });
+    this.chipKeys = parts;
+};
+
 // -------------------------------------------------------------- standings
 // rows: [{ kind: 'ref'|'evo', name, pct, how, species, extinct, selected }]
 function board(host, rows, onPick) {
@@ -282,5 +407,5 @@ Log.prototype.render = function () {
     if (this.more) { this.more.hidden = this.rows.length <= 6; this.more.textContent = this.open ? 'Show fewer' : 'Show all ' + this.rows.length; }
 };
 
-CE.render = { Chart, board, Log, el, pctText, ink, onTheme, resetInk: () => { INK = null; } };
+CE.render = { Chart, Preview, pipeline, board, Log, el, pctText, ink, onTheme, resetInk: () => { INK = null; } };
 })(typeof self !== 'undefined' ? self : globalThis);

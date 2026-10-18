@@ -1,0 +1,1279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Turn an image into a 3D-printable STL. Extrude dark areas or build a variable-height relief, entirely in your browser.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; img-src blob: data:; style-src 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Image to STL</title>
+<script>if(window.top!==window.self)document.documentElement.classList.add('embedded');</script>
+<style>
+ :root{color-scheme:light;--ink:#24362f;--muted:#6e7d75;--line:#dce3dc;--paper:#f5f7f2;--panel:#fff;--accent:#22654f;--soft:#e5eee6;--orange:#d3854d;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+ *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink)}button,input,select{font:inherit;color:inherit}button{cursor:pointer}button:disabled{cursor:wait;opacity:.5}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #89bda4;outline-offset:3px}button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px}button:hover:not(:disabled){background:#f1f5ef;border-color:#b7c7ba}input[type=number],select{border:1px solid var(--line);border-radius:7px;background:#fafcf8;padding:7px 9px;min-width:0}input[type=number]{width:100%;font-variant-numeric:tabular-nums}input[type=range]{width:100%;accent-color:var(--accent);height:20px;cursor:pointer}input[type=checkbox]{accent-color:var(--accent)}label{display:block}a{color:var(--accent)}[hidden]{display:none!important}
+ .topbar{height:56px;padding:0 30px;display:flex;align-items:center;gap:11px;border-bottom:1px solid var(--line);background:#fbfcf9}.brand-mark{width:28px;height:28px;border-radius:7px;background:var(--ink);color:#d9edce;display:grid;place-items:center;flex:none}.brand{font-size:16px;font-weight:650;letter-spacing:-.2px;line-height:1;margin:0}.top-actions{margin-left:auto;display:flex;gap:6px}.top-actions button{font-size:12px;padding:6px 11px;background:transparent}.top-actions button:disabled{cursor:default;opacity:.4}.embedded .brand,.embedded .brand-mark{display:none}.embedded .topbar{height:46px}.dot{width:6px;height:6px;border-radius:50%;background:#498d62}
+ .shell{max-width:1570px;padding:26px 30px 30px;margin:0 auto;display:grid;grid-template-columns:292px minmax(0,1fr);gap:24px}.sidebar{background:var(--panel);border:1px solid var(--line);border-radius:14px;align-self:start;overflow:hidden}.section{padding:18px 20px;border-bottom:1px solid var(--line)}.section:last-child{border-bottom:0}.section-title{font-size:13px;font-weight:600;color:var(--ink);margin:0 0 12px;display:flex;gap:8px;align-items:center}.step{color:#abb7ac;font-weight:500;font-variant-numeric:tabular-nums}.dropzone{width:100%;border:1px dashed #b7c8bb;border-radius:9px;min-height:104px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;background:#f8faf6;padding:12px}.dropzone.dragging{background:#e2f0e4;border-color:var(--accent)}.dropzone svg{color:var(--accent);margin-bottom:3px}.dropzone b{font-size:12px;font-weight:650}.dropzone span{font-size:10px;color:var(--muted)}.file-line{display:flex;align-items:center;gap:6px;margin:10px 0 0;min-width:0}.file-name{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.text-button{border:0;padding:1px 0;font-size:11px;color:var(--accent);background:transparent!important;border-radius:1px}.meta{color:var(--muted);font-size:10px;margin-top:2px}
+ .segmented{display:grid;grid-template-columns:1fr 1fr;background:#f1f4ef;padding:3px;gap:3px;border:1px solid #e7ebe4;border-radius:9px}.segmented button{border:0;background:transparent;font-size:12px;font-weight:600;padding:7px}.segmented button[aria-pressed=true]{background:#fff;color:var(--accent);box-shadow:0 1px 4px #263c3012}.mode-description{font-size:11px;color:var(--muted);line-height:1.6;margin:10px 0 14px;min-height:34px}.control{margin-top:14px}.control:first-child{margin-top:0}.control-label{font-size:12px;font-weight:550;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px}.control-label .hint{font-weight:400;color:#8a958d;font-size:10px}.range-line{display:grid;grid-template-columns:1fr 59px;gap:11px;align-items:center}.range-line input[type=number]{padding:4px 5px;font-size:11px;text-align:right}.endpoints{display:flex;justify-content:space-between;font-size:9px;letter-spacing:.2px;color:#8b968d;margin-top:2px}.two-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}.unit-field{position:relative}.unit-field input{padding-right:30px}.unit-field span{position:absolute;right:10px;top:9px;font-size:10px;color:#829084;pointer-events:none}.mini-label{font-size:10px;color:var(--muted);margin-bottom:5px}.check{display:flex;gap:8px;align-items:center;font-size:12px;margin-top:12px}.check input{margin:0}.advanced{margin-top:15px}.advanced summary{font-size:11px;color:var(--accent);cursor:pointer;user-select:none}.advanced p{font-size:10px;color:var(--muted);margin-bottom:0}.export-section{background:#fbfcf9}.export{width:100%;border:1px solid var(--accent);background:var(--accent);color:white;display:flex;align-items:center;justify-content:center;gap:9px;font-weight:600;padding:12px}.export:hover:not(:disabled){background:#164e3b;border-color:#164e3b}.export-note{font-size:10px;color:var(--muted);text-align:center;margin:8px 0 0}
+ .workspace{min-width:0}.preview-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(190px,1fr);gap:15px}.preview-panel{background:white;border:1px solid var(--line);border-radius:13px;overflow:hidden;position:relative}.panel-heading{height:51px;padding:0 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);gap:8px}.panel-heading h2{font-size:12px;font-weight:600;margin:0}.panel-heading .tiny{font-size:9px;color:var(--muted);letter-spacing:.5px}.viewer{height:461px;position:relative;background-color:#f4f7f1;background-image:radial-gradient(#ccd6c8 .65px,transparent .65px);background-size:18px 18px;touch-action:none;overflow:hidden}.viewer canvas{display:block;width:100%;height:100%;cursor:grab}.viewer canvas:active{cursor:grabbing}.viewer-overlay{position:absolute;left:14px;top:14px;display:flex;gap:5px}.viewer-overlay button{padding:5px 9px;font-size:10px;background:#ffffffc9;backdrop-filter:blur(4px);border-color:#dce5d8}.view-help{position:absolute;bottom:15px;left:0;width:100%;text-align:center;font-size:9px;color:#7e8f7e;pointer-events:none;letter-spacing:.2px}.viewer-fallback{position:absolute;inset:0;display:grid;place-items:center;padding:40px;text-align:center;background:#f2f6ee;font-size:12px;color:var(--muted)}.status-pill{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--accent)}.status-pill .dot{width:5px;height:5px}.status-pill.busy .dot{animation:pulse 1s infinite}.status-pill.error{color:#a54d36}.status-pill.error .dot{background:#b85e41}@keyframes pulse{50%{opacity:.25}}
+ .image-view{height:461px;display:flex;flex-direction:column}.image-tabs{display:flex;gap:5px;padding:12px 12px 0}.image-tabs button{font-size:10px;border:0;border-radius:6px;background:transparent;padding:5px 8px;color:var(--muted)}.image-tabs button[aria-pressed=true]{background:var(--soft);color:var(--accent)}.image-fit{flex:1;min-height:0;margin:15px 17px;display:flex;align-items:center;justify-content:center;overflow:hidden}.checker{background-color:white;background-image:linear-gradient(45deg,#edf0ea 25%,transparent 25%),linear-gradient(-45deg,#edf0ea 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#edf0ea 75%),linear-gradient(-45deg,transparent 75%,#edf0ea 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0}.image-fit canvas{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border:1px solid #dce2d9;box-shadow:0 4px 16px #31482c09}.image-caption{padding:0 17px 17px;color:var(--muted);font-size:10px;line-height:1.6}.image-caption .key{display:inline-block;width:7px;height:7px;background:var(--ink);border-radius:2px;margin-right:5px}.image-caption .hollow{background:transparent;border:1px solid #c2ccbc;margin-left:8px}.image-caption .plate{background:#dee4dc;border:1px solid #c2ccbc;margin-left:8px}
+ .stats{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;margin-top:15px;border:1px solid var(--line);border-radius:11px;background:#fff;padding:17px 0}.stat{padding:0 17px;border-right:1px solid var(--line)}.stat:last-child{border-right:0}.stat-label{font-size:11px;color:var(--muted);margin-bottom:3px}.stat-value{font-size:15px;font-weight:550;letter-spacing:-.3px;font-variant-numeric:tabular-nums}.stat-value small{font-size:10px;color:var(--muted);font-weight:400;margin-left:3px}.feedback{font-size:11px;margin:13px 1px 0;padding-left:16px;position:relative;color:var(--muted);min-height:35px}.feedback:before{content:"";width:5px;height:5px;position:absolute;left:1px;top:6px;border-radius:50%;background:#8caa81}.feedback.error{color:#a54d36}.feedback.error:before{background:#b86845}.bottom-note{display:flex;align-items:center;gap:6px;font-size:10px;color:#8b9784;padding-top:12px;margin-top:8px;border-top:1px solid var(--line)}.bottom-note .dot{width:5px;height:5px}
+ dialog{max-width:650px;width:calc(100% - 36px);max-height:85vh;padding:26px;border:1px solid var(--line);border-radius:15px;color:var(--ink);box-shadow:0 20px 90px #192b3033}dialog::backdrop{background:#182c2450;backdrop-filter:blur(3px)}.dialog-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px}.dialog-head h2{font-size:20px;margin:0;letter-spacing:-.5px}.dialog-head button{padding:4px 10px}.help-content{font-size:12px;line-height:1.8}.help-content h3{font-size:12px;margin:18px 0 5px}.help-content p{margin:7px 0}.help-content ol{padding-left:22px}.help-content table{border-collapse:collapse;width:100%;font-size:11px}.help-content td{border-bottom:1px solid #e7ebe3;padding:8px 4px;vertical-align:top}.help-content td:first-child{font-weight:600;width:28%}.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#eef3e9;padding:10px;border-radius:6px;font-size:10px;white-space:normal}.legal{font-size:10px;color:#889482;margin-top:20px}
+ input[type=number]:invalid{border-color:#c58570;background:#fff7f2}
+ .workspace{align-self:start;position:sticky;top:18px}.preview-side{display:flex;flex-direction:column;gap:15px;min-width:0}.image-view{height:205px}.image-fit{margin:9px 12px}.image-tabs{padding:8px 10px 0}.image-caption{font-size:9px;padding:0 12px 11px;line-height:1.45}.image-fit canvas{max-height:100%}.mini-button{font-size:10px;padding:4px 7px;white-space:nowrap}.layer-list{display:flex;flex-direction:column;gap:5px}.layer-row{display:flex;gap:6px;align-items:center;padding:5px 7px;border:1px solid var(--line);border-radius:7px;background:#fafcf8}.layer-row.active{background:#edf4ea;border-color:#a5c4ad}.layer-row input{accent-color:var(--accent);margin:0}.layer-choice{flex:1;min-width:0;text-align:left;border:0;background:transparent!important;padding:1px 3px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.layer-type{font-size:9px;color:var(--muted);white-space:nowrap}.layer-actions{display:flex;gap:5px;margin-top:10px}.layer-actions button{flex:1;padding:5px 4px;font-size:10px}.layer-name-field{width:100%;border:1px solid var(--line);background:#fafcf8;border-radius:7px;padding:7px 9px;font-size:12px;font-weight:550}.name-control{margin:0 0 14px}.layer-rename{flex:1;min-width:0;border:1px solid var(--accent);border-radius:5px;background:#fff;padding:1px 4px;font-size:11px;outline:none}.project-line{display:flex;gap:14px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}.mode-block{margin-top:16px}.detail-note{font-size:11px;line-height:1.45;color:var(--muted);margin:9px 0 0}.layer-note{font-size:10px;color:var(--muted);line-height:1.5;margin:9px 0 0}.appearance-panel{padding:15px 16px}.appearance-panel h2{font-size:12px;font-weight:600;margin:0 0 12px}.color-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;margin:9px 0}.color-row label{flex:1}.color-row input[type=color]{width:37px;height:28px;border:1px solid var(--line);border-radius:6px;background:white;padding:2px;cursor:pointer}.appearance-foot{font-size:9px;color:var(--muted);line-height:1.5;margin:9px 0 0}.appearance-actions{display:flex;justify-content:space-between;align-items:center;gap:8px}.appearance-actions .check{font-size:10px;margin:6px 0}.appearance-actions button{padding:4px 7px;font-size:9px}.export-scope{width:100%;font-size:11px;margin-bottom:9px}.region-dialog{max-width:1050px;width:calc(100% - 36px);max-height:94vh;padding:20px}.region-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px}.region-tools select{max-width:200px;font-size:12px}.region-tools button{font-size:11px;padding:7px 10px}.region-tools button[aria-pressed=true]{background:var(--accent);color:#fff;border-color:var(--accent)}.region-tools button:disabled,.region-footer button:disabled{cursor:default;opacity:.4}.region-tools .history{margin-left:auto;display:flex;gap:6px}.region-stage{position:relative;display:flex;align-items:center;justify-content:center;height:min(64vh,760px);min-height:220px;overflow:hidden;border:1px solid var(--line);border-radius:9px;background:#f2f5ee;padding:10px}.region-stage canvas{display:block;flex:none;touch-action:none;cursor:crosshair;outline:none}.region-stage canvas:focus-visible{outline:2px solid #89bda4;outline-offset:2px}.canvas-rename{position:absolute;z-index:2;font-size:12px;padding:2px 6px;border:1px solid var(--accent);border-radius:4px;background:#fff;outline:none}.region-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px}.region-footer p{font-size:11px;color:var(--muted);margin:0;flex:1}.region-actions{display:flex;gap:8px}.region-footer button{font-size:12px;white-space:nowrap}.region-footer .primary{background:var(--accent);color:#fff;border-color:var(--accent)}.region-footer .primary:hover:not(:disabled){background:#164e3b;border-color:#164e3b}.fit-info{font-size:9px;color:var(--muted);margin-top:6px}
+ @media(min-width:1400px){.viewer{height:530px}.image-view{height:239.5px}.shell{grid-template-columns:310px minmax(0,1fr)}}
+ @media(max-width:1090px){.shell{padding:22px 18px;gap:16px;grid-template-columns:270px minmax(0,1fr)}.section{padding:16px}.preview-layout{grid-template-columns:1fr}.image-view{height:230px}.image-fit{margin-top:10px}.image-tabs{position:absolute;right:10px;top:51px;padding-top:8px;z-index:1}.image-fit canvas{max-width:85%;max-height:145px}.image-caption{padding-bottom:12px}.viewer{height:395px}.stats{grid-template-columns:1fr 1fr;gap:16px 0}.stat:nth-child(2){border-right:0}}
+ @media(max-width:700px){.topbar{height:52px;padding:0 14px;gap:9px}.top-actions button{padding:5px 9px}.shell{display:flex;flex-direction:column;padding:16px 14px;gap:18px}.sidebar{width:100%;order:2}.workspace{order:1}.preview-layout{grid-template-columns:1fr}.viewer{height:310px}.image-view{height:195px}.image-fit canvas{max-height:113px}.stat-value{font-size:13px}.stats{padding:13px 0}.stat-label{font-size:8px}.feedback{min-height:0}.bottom-note{display:none}.section{padding:17px 20px}.mode-description{min-height:0}.sidebar .two-fields{gap:18px}}
+ @media(max-width:1090px){.preview-side{display:grid;grid-template-columns:1fr 1fr;align-items:start}.image-view{height:89.5px}.image-tabs{position:static;padding:7px 8px 0}.image-caption{display:none}.image-fit{margin:6px 10px 10px}.image-fit canvas{max-height:100%;max-width:100%}.appearance-panel{padding:12px}.workspace{position:static}.region-footer{align-items:start}}
+ @media(max-width:700px){.preview-side{grid-template-columns:1fr 1fr;gap:10px}.image-view{height:81px}.image-caption{display:none}.image-preview-panel .panel-heading{height:42px;padding:0 10px}.image-preview-panel .panel-heading h2{font-size:10px}.image-preview-panel .panel-heading button{font-size:8px;padding:3px 4px}.image-preview-panel .tiny{display:none}.appearance-panel h2{font-size:10px}.color-row{font-size:10px}.appearance-foot{font-size:8px}.appearance-actions{flex-wrap:wrap}.region-dialog{padding:14px}.region-stage{height:52vh}.region-footer{flex-direction:column;align-items:stretch;gap:9px}.region-actions{align-self:end}}
+</style>
+</head>
+<body>
+<header class="topbar">
+ <div class="brand-mark" aria-hidden="true"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 3 21 8v9l-9 5-9-5V8l9-5Z" stroke="currentColor" stroke-width="1.5"/><path d="m3 8 9 5 9-5M12 13v9M7.5 5.5l9 5" stroke="currentColor" stroke-width="1.5"/></svg></div>
+ <h1 class="brand">Image to STL</h1>
+ <div class="top-actions"><button id="undo" title="Undo (Ctrl+Z)" disabled>Undo</button><button id="redo" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button><button id="open-help">Guide</button></div>
+</header>
+<main class="shell">
+ <aside class="sidebar" aria-label="Model settings">
+  <section class="section">
+   <h2 class="section-title"><span class="step">01</span> Your image</h2>
+   <input type="file" id="file-input" accept="image/*,.json" hidden><input type="file" id="project-input" accept=".json,application/json" hidden>
+   <button class="dropzone" id="dropzone" type="button" aria-label="Choose an image or drop one here">
+    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3M12 16V3m-5 5 5-5 5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <b>Drop an image or browse</b><span>PNG, JPG, WebP, BMP, SVG</span>
+   </button>
+   <div class="file-line"><span class="file-name" id="file-name">Built-in sample</span><button class="text-button" id="demo-button">Use demo</button></div>
+   <div class="meta" id="file-meta">640 × 480 px</div>
+   <label class="check"><input type="checkbox" id="invert">Invert photo colors</label>
+   <div class="mode-block">
+    <div class="control-label"><span>Mode</span><span class="hint" id="mode-layer"></span></div>
+    <div class="segmented" role="group" aria-label="Conversion mode">
+     <button id="mode-cutout" aria-pressed="true">Cutout</button><button id="mode-relief" aria-pressed="false">Variable relief</button>
+    </div>
+    <p class="mode-description" id="mode-description">Dark areas become solid. Light areas become holes. A constant height throughout.</p>
+   </div>
+   <div class="project-line"><button class="text-button" id="save-project" title="Save the image, layers and settings to one file">Save project</button><button class="text-button" id="open-project" title="Open a saved project file">Open project</button></div>
+  </section>
+  <section class="section">
+   <h2 class="section-title"><span class="step">02</span> Layers <button class="mini-button" id="add-region" style="margin-left:auto">+ Region</button></h2>
+   <div id="layer-list" class="layer-list" aria-label="Image layers"></div>
+   <div class="layer-actions"><button id="layer-forward" title="Increase priority">Forward</button><button id="layer-back" title="Decrease priority">Back</button><button id="layer-duplicate" title="Copy the selected region with its settings">Duplicate</button><button id="layer-remove">Remove</button></div>
+   <p class="layer-note">Double-click a name to rename it. Higher layers override lower ones; uncheck a layer to hide it.</p>
+  </section>
+  <section class="section">
+   <h2 class="section-title"><span class="step">03</span> Layer settings</h2>
+   <div class="name-control"><label class="mini-label" for="layer-name">Name</label><input id="layer-name" class="layer-name-field" type="text" maxlength="48" value="Whole image" autocomplete="off"></div>
+   <div class="control">
+    <label class="control-label" for="cutoff">White cutoff <span class="hint">0–255 brightness</span></label>
+    <div class="range-line"><input id="cutoff" type="range" min="1" max="255" step="1" value="128"><input id="cutoff-number" type="number" min="1" max="255" step="1" value="128" aria-label="White cutoff brightness"></div>
+    <div class="endpoints"><span>Less material</span><span>More material</span></div>
+   </div>
+   <div class="control" id="cutout-height">
+    <label class="control-label" for="thickness">Thickness</label>
+    <div class="unit-field"><input id="thickness" type="number" min="0.05" max="500" step="0.05" value="3"><span>mm</span></div>
+   </div>
+   <div class="control two-fields" id="relief-heights" hidden>
+    <div><label class="mini-label" for="min-height">Minimum thickness</label><div class="unit-field"><input id="min-height" type="number" min="0.05" max="500" step="0.05" value="0.6"><span>mm</span></div></div>
+    <div><label class="mini-label" for="max-height">Black thickness</label><div class="unit-field"><input id="max-height" type="number" min="0.05" max="500" step="0.05" value="5"><span>mm</span></div></div>
+   </div>
+   <div class="control">
+    <label class="control-label" for="smoothing">Smoothing <span class="hint">% of image width</span></label>
+    <div class="range-line"><input id="smoothing" type="range" min="0" max="2" step="0.05" value="0.25"><input id="smoothing-number" type="number" min="0" max="2" step="0.05" value="0.25" aria-label="Smoothing percent"></div>
+    <div class="endpoints"><span>Sharp</span><span>Soft</span></div>
+   </div>
+   <details class="advanced"><summary>Advanced controls</summary>
+    <label class="check"><input type="checkbox" id="layer-invert">Invert this layer only</label>
+    <div class="control" id="gamma-control" hidden>
+     <label class="control-label" for="gamma">Relief curve <span class="hint">gamma</span></label>
+     <div class="range-line"><input type="range" id="gamma" min="0.2" max="3" step="0.05" value="1"><input type="number" id="gamma-number" min="0.2" max="3" step="0.05" value="1" aria-label="Relief gamma"></div>
+     <p>Higher values make midtones thinner. Lower values make them thicker.</p>
+    </div>
+   </details>
+  </section>
+  <section class="section">
+   <h2 class="section-title"><span class="step">04</span> Model size</h2>
+   <div class="two-fields">
+    <div><label class="mini-label" for="width-mm">Image width</label><div class="unit-field"><input id="width-mm" type="number" min="0.1" max="5000" step="0.1" value="100"><span>mm</span></div></div>
+    <div><label class="mini-label" for="resolution">Mesh detail</label><select id="resolution" style="width:100%"><option value="128">128 · Draft</option><option value="256">256 · Fast</option><option value="512" selected>512 · Balanced</option><option value="1024">1024 · Fine</option><option value="2048">2048 · Max</option></select></div>
+   </div>
+   <p class="detail-note" id="detail-note" hidden></p>
+   <label class="check"><input type="checkbox" id="mirror">Mirror whole model horizontally</label>
+   <label class="check"><input type="checkbox" id="base-enabled">Add a base plate under the whole image</label>
+   <div class="control" id="base-control" hidden><label class="mini-label" for="base-thickness">Plate thickness</label><div class="unit-field"><input id="base-thickness" type="number" min="0.2" max="50" step="0.1" value="1.2"><span>mm</span></div></div>
+  </section>
+  <section class="section export-section">
+   <label class="mini-label" for="export-scope">Export</label><select class="export-scope" id="export-scope"><option value="all">All enabled layers</option><option value="selected">Selected layer only</option></select>
+   <button class="export" id="export-button" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="export-label">Export STL</span></button>
+   <p class="export-note" id="export-note">Binary STL · millimeter coordinates</p>
+  </section>
+ </aside>
+ <section class="workspace" aria-label="Model previews">
+  <div class="preview-layout">
+   <section class="preview-panel">
+    <header class="panel-heading"><h2>3D preview</h2><span id="status" class="status-pill busy" role="status" aria-live="polite"><span class="dot"></span><span id="status-label">Building</span></span></header>
+    <div class="viewer" id="viewer-container">
+     <canvas id="model-canvas" aria-label="Interactive 3D model. Drag to rotate, shift-drag to pan, scroll to zoom."></canvas>
+     <div class="viewer-overlay"><button id="view-iso" title="Reset to isometric view">Iso</button><button id="view-top" title="View from above">Top</button><button id="view-fit" title="Fit model in view">Fit</button></div>
+     <span class="view-help">Drag to orbit · Scroll to zoom · Shift-drag to pan</span>
+     <div class="viewer-fallback" id="viewer-fallback" hidden>3D preview needs WebGL. The image preview and STL export still work.</div>
+    </div>
+   </section>
+   <div class="preview-side">
+   <section class="preview-panel image-preview-panel">
+    <header class="panel-heading"><h2>Image preview</h2><button class="mini-button" id="edit-regions" title="Draw and edit regions on the original image">Edit regions</button></header>
+    <div class="image-view">
+     <div class="image-tabs" role="group" aria-label="Image preview"><button id="show-processed" aria-pressed="true">Processed</button><button id="show-original" aria-pressed="false">Original</button></div>
+     <div class="image-fit"><canvas id="image-canvas" class="checker" aria-label="Processed image, with empty areas shown as a checkerboard"></canvas></div>
+     <div class="image-caption" id="image-caption"><span class="key"></span>Solid<span class="key hollow"></span>Empty<br>White pixels and transparent pixels are removed.</div>
+    </div>
+   </section>
+   <section class="preview-panel appearance-panel" aria-label="Preview appearance">
+    <h2>Preview appearance</h2>
+    <div class="color-row"><label for="background-color">Background</label><input type="color" id="background-color" value="#f4f7f1"></div>
+    <div class="color-row"><label for="model-color">Model color</label><input type="color" id="model-color" value="#6f9366"></div>
+    <div class="appearance-actions"><label class="check"><input type="checkbox" id="show-grid" checked>Show dots</label><button id="reset-colors">Reset colors</button></div>
+    <p class="appearance-foot">Preview colors only. STL contains shape, without color.</p>
+    <div class="fit-info" id="preview-size">—</div>
+   </section>
+   </div>
+  </div>
+  <div class="stats" aria-label="Model measurements">
+   <div class="stat"><div class="stat-label">Model footprint</div><div class="stat-value" id="stat-dimensions">—</div></div>
+   <div class="stat"><div class="stat-label">Height</div><div class="stat-value" id="stat-height">—</div></div>
+   <div class="stat"><div class="stat-label">Triangles</div><div class="stat-value" id="stat-triangles">—</div></div>
+   <div class="stat"><div class="stat-label">Separate pieces</div><div class="stat-value" id="stat-pieces">—</div></div>
+  </div>
+  <p class="feedback" id="feedback" role="status" aria-live="polite">Loading the sample…</p>
+  <footer class="bottom-note"><span class="dot"></span><span>Runs entirely in your browser. Nothing is uploaded.</span></footer>
+ </section>
+</main>
+<dialog id="region-dialog" class="region-dialog" aria-labelledby="region-title">
+ <div class="dialog-head"><h2 id="region-title">Regions</h2><button id="close-region-editor" aria-label="Close region editor">×</button></div>
+ <div class="region-tools"><select id="region-layer-select" aria-label="Layer to edit"></select><button id="region-select-tool" aria-pressed="true" title="Move, resize and reshape regions">Select</button><button id="region-new-tool" aria-pressed="false" title="Draw a new rectangle region">Rectangle</button><button id="region-polygon-tool" aria-pressed="false" title="Draw a new polygon region">Polygon</button><button id="region-redraw-tool" aria-pressed="false" title="Draw the selected region again, keeping its settings">Redraw</button><button id="region-convert" hidden title="Turn this rectangle into a polygon with four editable points">Convert to polygon</button><button id="region-delete-point" hidden title="Remove the selected point (Delete)">Delete point</button><button id="region-undo-point" hidden>Undo point</button><button id="region-close-polygon" hidden>Close polygon</button><span class="history"><button id="region-undo" title="Undo (Ctrl+Z)">Undo</button><button id="region-redo" title="Redo (Ctrl+Shift+Z)">Redo</button></span></div>
+ <div class="region-stage" id="region-stage"><canvas id="region-canvas" tabindex="0" aria-label="Original image and region selections. Drag a region to move it, its square handles to resize it, and its points to reshape it."></canvas></div>
+ <div class="region-footer"><p id="region-instructions" role="status" aria-live="polite">Select a region to move it or drag its resize handles.</p><div class="region-actions"><button id="region-delete" title="Delete the selected region">Delete region</button><button id="apply-region-editor" class="primary">Done</button></div></div>
+</dialog>
+<dialog id="help-dialog" aria-labelledby="help-title"><div class="dialog-head"><h2 id="help-title">Quick guide</h2><button id="close-help" aria-label="Close guide">×</button></div>
+ <div class="help-content">
+  <ol><li>Drop in an image, or use the demo. Choose <b>Cutout</b> for a flat extrusion, or <b>Variable relief</b> for a brightness-based height map.</li><li>Use <b>+ Region</b> to draw a rectangle, or choose <b>Polygon</b> in the region editor. Click to place points; <b>double-click to close</b>. Each region has its own conversion settings.</li><li>With <b>Select</b>, click a region to edit it. Drag inside to move it, drag the square handles to resize it, and drag a point to reshape it. Drag the small circle in the middle of an edge to add a point. Double-click a point, or click it and press Delete, to remove it. <b>Convert to polygon</b> turns a rectangle into four editable points.</li><li>Rename a layer by double-clicking its name in the layer list or on its label in the region editor, or edit the <b>Name</b> field above its settings.</li><li>Adjust the white cutoff, dimensions, thickness, and smoothing. Inspect the model, then export STL. <b>Save project</b> keeps the image, layers and settings in one file you can open again.</li></ol>
+  <table><tbody>
+   <tr><td>Region layers</td><td>Rectangles and polygons use original-image coordinates. Each has independent mode, cutoff, thickness, smoothing, gamma, and optional local inversion. Resizing, moving, and reshaping preserve those settings. Top regions replace the settings below them, including white holes; they do not stack extra copies of the mesh. Disable the Whole image layer to keep only selected regions. Forward and Back change priority; Duplicate copies a region with its settings. Up to twelve regions are supported.</td></tr>
+   <tr><td>Polygon drawing</td><td>Use three to 64 points. Click the first point, double-click, press Enter, or use Close polygon to finish. Undo point (or Backspace) removes the last point; Escape cancels an unfinished drawing. Concave polygons are supported. Crossing edges are rejected, so use a simple closed outline.</td></tr>
+   <tr><td>Keyboard</td><td>Ctrl+Z undoes and Ctrl+Shift+Z (or Ctrl+Y) redoes any layer, region or setting change. In the region editor, arrow keys nudge the selected region or point by one pixel (Shift: ten), Delete removes the selected point or region, and Escape clears the point selection.</td></tr>
+   <tr><td>Base plate</td><td>Adds a solid plate of the chosen thickness under the whole image rectangle and stands the model on it, so separate dark areas print as one piece. White areas then become plate instead of holes. The result is still one closed solid.</td></tr>
+   <tr><td>Region boundaries</td><td>The combined result is a single height field. Settings transition across one mesh cell at region boundaries, giving a short ramp between different thicknesses. Increase Mesh detail for a sharper transition. Very small regions may need higher detail.</td></tr>
+   <tr><td>Export layers</td><td><b>All enabled layers</b> exports the combined preview. <b>Selected layer only</b> exports that entire layer in isolation at the same image position and scale, without overrides from other layers. Hidden layers are not exported.</td></tr>
+   <tr><td>Fit &amp; appearance</td><td>Fit measures the actual mesh after the current rotation and fills the available view with a 5% margin on each limiting side. Empty image borders are ignored. Changing conversion settings preserves your camera view; a new image fits automatically. Color controls affect only the preview; Reset colors restores the original appearance.</td></tr>
+   <tr><td>Invert photo colors</td><td>Use the toggle below the image upload to swap light and dark in either mode. The processed preview and STL update together. Transparent areas remain empty.</td></tr>
+   <tr><td>White cutoff</td><td>Pixels with processed brightness <b>below</b> the cutoff become material. Pixels at or above it are removed. At 128, darker half-tones remain; at 255, only pure white is excluded. Relief starts at 250 to keep most tones.</td></tr>
+   <tr><td>Cutout</td><td>Remaining areas within this layer have one constant thickness, with a flat bottom.</td></tr>
+   <tr><td>Variable relief</td><td>Darker areas are thicker. Black reaches the maximum; lighter material approaches the minimum. The white cutoff still creates holes. The bottom remains flat.</td></tr>
+   <tr><td>Smoothing</td><td>Gaussian blur before thresholding and height mapping. The value is a percentage of image width, so its scale remains consistent when detail changes. More smoothing rounds contours and softens relief; small features can disappear.</td></tr>
+   <tr><td>Mesh detail</td><td>Subdivisions along the longest image side; 512 is the default. 1024 and 2048 have four and sixteen times as many triangles, take longer to rebuild after each change, and can produce STL files of hundreds of megabytes. More subdivisions capture smaller features, but going past the image’s own pixel count adds triangles without recovering detail absent from the input.</td></tr>
+   <tr><td>Image width</td><td>Width of the <b>whole image</b>, including white margins. Height follows the image aspect ratio. The model footprint below the preview reports actual solid bounds. Coordinates are intended as millimeters; choose millimeters when importing into a slicer because STL does not store units.</td></tr>
+   <tr><td>Transparency</td><td>Transparent input is treated as white, including with inversion enabled. Partial transparency is composited onto white before smoothing.</td></tr>
+  </tbody></table>
+  <h3>Relief formula</h3><div class="code">thickness = minimum + (maximum − minimum) × (1 − brightness / 255)<sup>gamma</sup></div>
+  <h3>For printing</h3><p>Without a base plate, each separate dark island becomes a separate closed solid. Turn on <b>Add a base plate</b> to join them, or combine the pieces on a base in your slicer or CAD tool. Verify fine walls and unsupported details against your printer’s capabilities.</p>
+  <p>The STL has a flat underside, closed sides, and a triangulated top. Hole boundaries follow interpolated brightness contours; image Y is flipped to preserve the image’s appearance when viewed from above. Without a base plate, a white hole is empty all the way through, in relief mode too.</p>
+  <h3>Source &amp; portability</h3><p>This is a self-contained, editable HTML/JavaScript program. Save a copy and open it offline. There are no CDNs, analytics, uploads, or external packages. Modern desktop Chromium and Firefox browsers are recommended. Very large detail settings need more memory.</p>
+  <p>Browser API references: <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGLRenderingContext/drawElements" target="_blank" rel="noopener noreferrer">WebGL indexed rendering</a> · <a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers" target="_blank" rel="noopener noreferrer">Web Workers</a>. These links are optional and are not loaded by the program.</p>
+  <p class="legal">Image to STL · Program source released under the MIT License. Copyright © 2026. Permission is granted, free of charge, to use, copy, modify, distribute, sublicense, and sell this software, with this notice included. The software is provided “as is”, without warranty of any kind. The authors are not liable for any claim or damages arising from its use.</p>
+ </div>
+</dialog>
+
+<script id="region-geometry">
+'use strict';
+// Shared by the editor and meshing worker: normalized original-image regions.
+(() => {
+  const EPS=1e-10;
+  const cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+  function onSegment(p,a,b){return Math.abs(cross(a,b,p))<=EPS&&p.x>=Math.min(a.x,b.x)-EPS&&p.x<=Math.max(a.x,b.x)+EPS&&p.y>=Math.min(a.y,b.y)-EPS&&p.y<=Math.max(a.y,b.y)+EPS;}
+  function segmentsIntersect(a,b,c,d){
+    const abC=cross(a,b,c),abD=cross(a,b,d),cdA=cross(c,d,a),cdB=cross(c,d,b);
+    if(((abC>EPS&&abD< -EPS)||(abC< -EPS&&abD>EPS))&&((cdA>EPS&&cdB< -EPS)||(cdA< -EPS&&cdB>EPS)))return true;
+    return onSegment(c,a,b)||onSegment(d,a,b)||onSegment(a,c,d)||onSegment(b,c,d);
+  }
+  function polygonError(points){
+    if(!Array.isArray(points)||points.length<3)return 'A polygon needs at least three points.';
+    if(points.length>64)return 'Use at most 64 points per polygon.';
+    if(points.some(p=>!p||!Number.isFinite(p.x)||!Number.isFinite(p.y)||p.x<0||p.x>1||p.y<0||p.y>1))return 'Keep polygon points inside the image.';
+    let area=0;
+    for(let i=0;i<points.length;i++){
+      const a=points[i],b=points[(i+1)%points.length];
+      if(Math.hypot(a.x-b.x,a.y-b.y)<1e-8)return 'Polygon points must be distinct.';
+      area+=a.x*b.y-b.x*a.y;
+      for(let j=i+1;j<points.length;j++){
+        if(j===i+1||(i===0&&j===points.length-1))continue;
+        if(segmentsIntersect(a,b,points[j],points[(j+1)%points.length]))return 'Polygon edges cannot cross or touch each other.';
+      }
+    }
+    if(Math.abs(area)<2e-8)return 'Draw a polygon with a larger area.';
+    return '';
+  }
+  function bounds(points){
+    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+    for(const p of points){x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y);}
+    return {x0,y0,x1,y1};
+  }
+  function contains(layer,x,y){
+    const r=layer.rect||(layer.points?bounds(layer.points):null);
+    if(r&&(x<r.x0-EPS||x>r.x1+EPS||y<r.y0-EPS||y>r.y1+EPS))return false;
+    const points=layer.points;if(!points)return true;
+    const p={x,y};let inside=false;
+    for(let i=0,j=points.length-1;i<points.length;j=i++){
+      const a=points[j],b=points[i];if(onSegment(p,a,b))return true;
+      if((a.y>y)!==(b.y>y)&&x<(b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x)inside=!inside;
+    }
+    return inside;
+  }
+  function clone(shape){return {rect:shape.rect?{...shape.rect}:null,points:shape.points?shape.points.map(p=>({...p})):null};}
+  globalThis.StlRegions={contains,polygonError,bounds,clone};
+})();
+
+</script>
+
+<!-- Geometry engine: pure JavaScript, executed in a Blob Web Worker. It can also
+     be loaded into Node for independent geometry tests. No external libraries. -->
+<script id="mesh-engine" type="text/plain">
+'use strict';
+
+function gaussianBlur(source, width, height, sigma) {
+  if (sigma < 0.08) return source;
+  const radius = Math.ceil(3 * sigma), kernel = new Float64Array(radius * 2 + 1);
+  let sum = 0;
+  for (let k = -radius; k <= radius; k++) {
+    const value = Math.exp(-0.5 * (k / sigma) ** 2);
+    kernel[k + radius] = value; sum += value;
+  }
+  for (let k = 0; k < kernel.length; k++) kernel[k] /= sum;
+  const temp = new Float32Array(source.length), out = new Float32Array(source.length);
+  // Clamp at the image edge: a solid full-frame input keeps its full footprint.
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    let value = 0;
+    for (let k = -radius; k <= radius; k++) value += source[y * width + Math.max(0, Math.min(width - 1, x + k))] * kernel[k + radius];
+    temp[y * width + x] = value;
+  }
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    let value = 0;
+    for (let k = -radius; k <= radius; k++) value += temp[Math.max(0, Math.min(height - 1, y + k)) * width + x] * kernel[k + radius];
+    out[y * width + x] = Math.max(0, Math.min(255, value));
+  }
+  return out;
+}
+
+function buildMesh(rgba, cols, rows, options) {
+  if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1 || cols > 2048 || rows > 2048) throw new Error('Invalid mesh resolution.');
+  const sw = cols + 1, sh = rows + 1, sampleCount = sw * sh;
+  if (rgba.length !== sampleCount * 4) throw new Error('Image sample size does not match the mesh.');
+  const o = options;
+  if (!Number.isFinite(o.width) || !Number.isFinite(o.imageHeight) || o.width < 0.1 || o.width > 5000 || o.imageHeight <= 0) throw new Error('Enter valid image dimensions.');
+  const base = o.base === undefined ? 0 : o.base;
+  if (!Number.isFinite(base) || base < 0 || base > 100) throw new Error('Base plate thickness must be 0–100 mm.');
+  const definitions = o.layers || [{id: 'base', name: 'Whole image', enabled: true, rect: null, settings: {...o, invert: false}}];
+  if (definitions.length > 13) throw new Error('Use at most twelve regions plus the whole-image layer.');
+  if (o.onlyLayer && !definitions.some(layer => layer.id === o.onlyLayer)) throw new Error('The selected layer no longer exists.');
+  const layers = definitions.filter(layer => layer.enabled && (!o.onlyLayer || layer.id === o.onlyLayer)).map(layer=>({...layer}));
+  for (const layer of layers) {
+    const s = layer.settings;
+    const prefix = (layer.name || 'Layer') + ': ';
+    if (!s || !['cutout', 'relief'].includes(s.mode)) throw new Error(prefix + 'choose a conversion mode.');
+    for (const key of ['cutoff', 'smoothing', ...(s.mode === 'cutout' ? ['thickness'] : ['minHeight', 'maxHeight', 'gamma'])]) {
+      if (!Number.isFinite(s[key])) throw new Error(prefix + 'enter valid numbers for all active settings.');
+    }
+    if (s.cutoff < 1 || s.cutoff > 255 || s.smoothing < 0 || s.smoothing > 2 || (s.mode === 'relief' && (s.gamma < .2 || s.gamma > 3))) throw new Error(prefix + 'a setting is outside its supported range.');
+    if (s.mode === 'cutout' ? (s.thickness < .05 || s.thickness > 500) : (s.minHeight < .05 || s.maxHeight > 500 || s.maxHeight < s.minHeight)) throw new Error(prefix + 'thickness must be 0.05–500 mm, with maximum at least minimum.');
+    if(layer.points){const error=StlRegions.polygonError(layer.points);if(error)throw new Error(prefix+error);layer.rect=StlRegions.bounds(layer.points);}
+    if (layer.rect && (!['x0','y0','x1','y1'].every(k => Number.isFinite(layer.rect[k]) && layer.rect[k] >= 0 && layer.rect[k] <= 1) || layer.rect.x1 <= layer.rect.x0 || layer.rect.y1 <= layer.rect.y0)) throw new Error(prefix + 'draw a valid region inside the image.');
+  }
+  const fields = new Map(), rawFields = new Map();
+  function layerField(layer) {
+    const inverted = Boolean(o.invert) !== Boolean(layer.settings.invert);
+    const key = String(inverted) + '/' + layer.settings.smoothing;
+    if (!fields.has(key)) {
+      if (!rawFields.has(inverted)) {
+        const raw = new Float32Array(sampleCount);
+        for (let i = 0; i < sampleCount; i++) {
+          const p = 4*i, alpha = rgba[p+3]/255;
+          let value = .2126*rgba[p] + .7152*rgba[p+1] + .0722*rgba[p+2];
+          if (inverted) value = 255-value;
+          raw[i] = alpha*value + (1-alpha)*255;
+        }
+        rawFields.set(inverted, raw);
+      }
+      fields.set(key, gaussianBlur(rawFields.get(inverted), sw, sh, layer.settings.smoothing/100*cols));
+    }
+    return fields.get(key);
+  }
+  function layerHeight(layer, brightness) {
+    const s = layer.settings;
+    return s.mode === 'cutout' ? s.thickness : s.minHeight + (s.maxHeight-s.minHeight)*Math.max(0,Math.min(1,1-brightness/255))**s.gamma;
+  }
+  const layerFields = layers.map(layerField), owners = new Int16Array(sampleCount); owners.fill(-1);
+  const field = new Float32Array(sampleCount), heights = new Float64Array(sampleCount), signed = new Float32Array(sampleCount);
+  let highestSample = 0;
+  // Move near-exact ties slightly outside/inside while keeping their sign.
+  // This prevents contour intersections collapsing onto sample vertices when
+  // coordinates are quantized to float32 by STL. Equality is always empty.
+  for (let i = 0; i < sampleCount; i++) {
+    const x = o.mirror ? 1-(i%sw)/cols : (i%sw)/cols, y = Math.floor(i/sw)/rows;
+    for (let k = layers.length-1; k >= 0; k--) {
+      if (StlRegions.contains(layers[k],x,y)) { owners[i] = k; break; }
+    }
+    const owner = owners[i];
+    if (owner < 0) { field[i] = 255; signed[i] = -255; continue; }
+    field[i] = layerFields[owner][i]; heights[i] = layerHeight(layers[owner], field[i]);
+    const d = layers[owner].settings.cutoff - field[i];
+    signed[i] = d > 0 ? Math.max(0.125, d) : Math.min(-0.125, d);
+    if (d > 0) highestSample = Math.max(highestSample, heights[i]);
+  }
+  // Without a plate every planar vertex has a top (2*id) and a bottom (2*id+1)
+  // vertex. With one, a third vertex (3*id+2) sits on the plate surface.
+  const stride = base > 0 ? 3 : 2;
+  // Typed arrays grown in place: at 2048 detail a mesh has over twelve million
+  // triangles, which plain arrays hold at twice the size and then copy again.
+  const grow = (array, need) => { const next = new array.constructor(Math.max(need, Math.ceil(array.length * 1.5))); next.set(array); return next; };
+  let positions = new Float32Array(Math.max(1024, sampleCount * stride * 3)), positionCount = 0;
+  let faces = new Uint32Array(Math.max(1024, cols * rows * 14)), faceCount = 0;
+  let parents = new Int32Array(Math.max(256, sampleCount)), vertexCount = 0;
+  function pushFace(a, b, c) {
+    if (faceCount + 3 > faces.length) faces = grow(faces, faceCount + 3);
+    faces[faceCount++] = a; faces[faceCount++] = b; faces[faceCount++] = c;
+  }
+  const sampleVertex = new Int32Array(sampleCount); sampleVertex.fill(-1);
+  // Each grid edge carries at most one contour vertex. Horizontal and vertical
+  // edges are keyed by their first sample, diagonals by their cell.
+  const edgeH = new Int32Array(sampleCount).fill(-1), edgeV = new Int32Array(sampleCount).fill(-1), edgeD = new Int32Array(cols * rows).fill(-1);
+  let area = 0, volume = 0, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = 0, minTopZ = Infinity;
+  const dx = o.width / cols, dy = o.imageHeight / rows;
+
+  function root(v) {
+    while (parents[v] !== v) { parents[v] = parents[parents[v]]; v = parents[v]; }
+    return v;
+  }
+  function join(a, b) { const ra = root(a), rb = root(b); if (ra !== rb) parents[rb] = ra; }
+  function addVertex(x, y, height, contour, border) {
+    const id = vertexCount++;
+    if (id >= parents.length) parents = grow(parents, id + 1);
+    parents[id] = id;
+    if (positionCount + stride * 3 > positions.length) positions = grow(positions, positionCount + stride * 3);
+    positions[positionCount++] = x; positions[positionCount++] = y; positions[positionCount++] = height;
+    positions[positionCount++] = x; positions[positionCount++] = y; positions[positionCount++] = 0;
+    if (stride === 3) { positions[positionCount++] = x; positions[positionCount++] = y; positions[positionCount++] = base; }
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    minTopZ = Math.min(minTopZ, height); maxZ = Math.max(maxZ, height);
+    return {id, x, y, height, contour, border};
+  }
+  // Boundary bitmask: left=1, right=2, top=4, bottom=8.
+  function sample(i) {
+    const x = i % sw, y = Math.floor(i / sw);
+    const border = (x === 0 ? 1 : 0) | (x === cols ? 2 : 0) | (y === 0 ? 4 : 0) | (y === rows ? 8 : 0);
+    let id = sampleVertex[i];
+    if (id < 0) {
+      // Empty samples only become vertices of the plate, at plate height.
+      const v = addVertex(x * dx - o.width / 2, o.imageHeight / 2 - y * dy, signed[i] > 0 ? base + heights[i] : base, false, border);
+      sampleVertex[i] = v.id; return v;
+    }
+    const p = id * stride * 3;
+    return {id, x: positions[p], y: positions[p + 1], height: positions[p + 2], contour: false, border};
+  }
+  function intersection(a, b) {
+    if (a > b) { const tmp = a; a = b; b = tmp; }
+    const ax = a % sw, ay = Math.floor(a / sw), bx = b % sw, by = Math.floor(b / sw);
+    const ba = (ax === 0 ? 1 : 0) | (ax === cols ? 2 : 0) | (ay === 0 ? 4 : 0) | (ay === rows ? 8 : 0);
+    const bb = (bx === 0 ? 1 : 0) | (bx === cols ? 2 : 0) | (by === 0 ? 4 : 0) | (by === rows ? 8 : 0);
+    const border = ba & bb;
+    const store = ay === by ? edgeH : ax === bx ? edgeV : edgeD, slot = store === edgeD ? ay * cols + Math.min(ax, bx) : a;
+    const cached = store[slot];
+    if (cached >= 0) {
+      const p = cached * stride * 3;
+      return {id: cached, x: positions[p], y: positions[p + 1], height: positions[p + 2], contour: true, border};
+    }
+    const t = signed[a] / (signed[a] - signed[b]);
+    let height;
+    if (owners[a] === owners[b] && owners[a] >= 0) height = layerHeight(layers[owners[a]], field[a] + (field[b]-field[a])*t);
+    else if (owners[a] < 0) height = heights[b];
+    else if (owners[b] < 0) height = heights[a];
+    else height = signed[a] > 0 ? heights[a] : heights[b];
+    const v = addVertex((ax + (bx - ax) * t) * dx - o.width / 2, o.imageHeight / 2 - (ay + (by - ay) * t) * dy, base + height, true, border);
+    store[slot] = v.id; return v;
+  }
+  // Clip a CCW triangle against the linear, interpolated brightness field,
+  // keeping the solid side (or, for the plate, the empty side). Shared
+  // original edges always reuse the same intersection vertex.
+  function clip(ids, solid) {
+    const polygon = [];
+    for (let e = 0; e < 3; e++) {
+      const current = ids[e], previous = ids[(e + 2) % 3];
+      const inside = (signed[current] > 0) === solid, prevInside = (signed[previous] > 0) === solid;
+      if (inside !== prevInside) polygon.push(intersection(previous, current));
+      if (inside) polygon.push(sample(current));
+    }
+    return polygon;
+  }
+  function emit(polygon, solid) {
+    if (polygon.length < 3) return;
+    // The plate's top surface uses the plate-height vertex of every point.
+    const up = solid ? 0 : 2;
+    for (let p = 1; p < polygon.length - 1; p++) {
+      const va = polygon[0], vb = polygon[p], vc = polygon[p + 1];
+      const ia = stride * va.id, ib = stride * vb.id, ic = stride * vc.id;
+      pushFace(ia + up, ib + up, ic + up); pushFace(ia + 1, ic + 1, ib + 1);
+      join(va.id, vb.id); join(va.id, vc.id);
+      const triArea = ((vb.x - va.x) * (vc.y - va.y) - (vb.y - va.y) * (vc.x - va.x)) / 2;
+      if (solid) { area += triArea; volume += triArea * (va.height + vb.height + vc.height) / 3; }
+      else volume += triArea * base;
+    }
+    // Only contour edges and the outer image boundary need walls. Internal
+    // grid edges are already shared; there is no separate solid per pixel.
+    for (let p = 0; p < polygon.length; p++) {
+      const va = polygon[p], vb = polygon[(p + 1) % polygon.length];
+      const contourEdge = va.contour && vb.contour, borderEdge = (va.border & vb.border) !== 0;
+      if (!contourEdge && !borderEdge) continue;
+      const ia = stride * va.id, ib = stride * vb.id;
+      if (stride === 2) { pushFace(ia, ia + 1, ib + 1); pushFace(ia, ib + 1, ib); continue; }
+      // On a plate, contour walls rise from the plate surface, and border walls
+      // are split there so they share edges with the plate's own border walls.
+      if (solid) { pushFace(ia, ia + 2, ib + 2); pushFace(ia, ib + 2, ib); }
+      if (borderEdge) { pushFace(ia + 2, ia + 1, ib + 1); pushFace(ia + 2, ib + 1, ib + 2); }
+    }
+  }
+  function triangle(a, b, c) {
+    const ids = [a, b, c];
+    emit(clip(ids, true), true);
+    if (stride === 3) emit(clip(ids, false), false);
+  }
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const a = y * sw + x, b = a + 1, d = a + sw, c = d + 1;
+    // Alternating diagonals reduce systematic bias toward one grid direction.
+    if ((x + y) % 2 === 0) { triangle(a, d, c); triangle(a, c, b); }
+    else { triangle(a, d, b); triangle(b, d, c); }
+  }
+  let pieces = 0; for (let i = 0; i < vertexCount; i++) if (root(i) === i) pieces++;
+  const preview = new Uint8ClampedArray(sampleCount * 4);
+  for (let i = 0; i < sampleCount; i++) {
+    const p = 4 * i;
+    if (signed[i] <= 0) {
+      if (base > 0) { preview[p] = 222; preview[p + 1] = 228; preview[p + 2] = 220; preview[p + 3] = 255; }
+      continue;
+    }
+    const layered = layers.length > 1;
+    const gray = layered || layers[owners[i]].settings.mode === 'relief';
+    const v = layered ? Math.round(230*(1-heights[i]/Math.max(highestSample,.001))) : gray ? Math.round(field[i]) : 38;
+    preview[p] = v; preview[p + 1] = gray ? v : 54; preview[p + 2] = gray ? v : 46; preview[p + 3] = 255;
+  }
+  const empty = faceCount === 0;
+  return {
+    positions: positions.slice(0, positionCount), indices: faces.slice(0, faceCount), preview,
+    stats: {triangles: faceCount / 3, vertices: positionCount / 3, pieces, width: empty ? 0 : maxX - minX, depth: empty ? 0 : maxY - minY, height: maxZ, minTopHeight: empty ? 0 : minTopZ, area, volume, bounds: empty ? [0, 0, 0, 0] : [minX, minY, maxX, maxY], cols, rows, layerCount: layers.length, base}
+  };
+}
+
+function encodeSTL(positions, indices) {
+  const count = indices.length / 3;
+  if (!Number.isInteger(count) || count < 1) throw new Error('There is no solid to export.');
+  const buffer = new ArrayBuffer(84 + count * 50), view = new DataView(buffer);
+  const title = 'Image to STL | millimeter coordinates | Z-up';
+  for (let i = 0; i < title.length; i++) view.setUint8(i, title.charCodeAt(i));
+  view.setUint32(80, count, true);
+  let offset = 84;
+  for (let f = 0; f < indices.length; f += 3) {
+    const a = indices[f] * 3, b = indices[f + 1] * 3, c = indices[f + 2] * 3;
+    const ux = positions[b] - positions[a], uy = positions[b + 1] - positions[a + 1], uz = positions[b + 2] - positions[a + 2];
+    const vx = positions[c] - positions[a], vy = positions[c + 1] - positions[a + 1], vz = positions[c + 2] - positions[a + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const length = Math.hypot(nx, ny, nz);
+    if (!(length > 0) || !Number.isFinite(length)) throw new Error('A degenerate face was found. Try a lower mesh detail or more smoothing.');
+    view.setFloat32(offset, nx / length, true); view.setFloat32(offset + 4, ny / length, true); view.setFloat32(offset + 8, nz / length, true); offset += 12;
+    for (const v of [a, b, c]) for (let k = 0; k < 3; k++) { view.setFloat32(offset, positions[v + k], true); offset += 4; }
+    view.setUint16(offset, 0, true); offset += 2;
+  }
+  return buffer;
+}
+
+globalThis.StlEngine = {buildMesh, encodeSTL, gaussianBlur};
+if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
+  self.onmessage = function(event) {
+    try {
+      const data = event.data;
+      if (data.operation === 'export') {
+        const buffer = encodeSTL(new Float32Array(data.positions), new Uint32Array(data.indices));
+        self.postMessage({operation: 'export', buffer}, [buffer]);
+      } else if (data.operation === 'exportLayer') {
+        const mesh = buildMesh(new Uint8ClampedArray(data.rgba), data.cols, data.rows, {...data.options, onlyLayer: data.layerId});
+        const buffer = encodeSTL(mesh.positions, mesh.indices);
+        self.postMessage({operation: 'export', buffer}, [buffer]);
+      } else {
+        const mesh = buildMesh(new Uint8ClampedArray(data.rgba), data.cols, data.rows, data.options);
+        self.postMessage({operation: 'build', ...mesh}, [mesh.positions.buffer, mesh.indices.buffer, mesh.preview.buffer]);
+      }
+    } catch (error) { self.postMessage({error: error.message || String(error)}); }
+  };
+}
+</script>
+
+<script id="app">
+'use strict';
+const $ = id => document.getElementById(id);
+const DEFAULT_BACKGROUND = '#f4f7f1', DEFAULT_MODEL = '#6f9366';
+const DEFAULT_SETTINGS = {mode:'cutout',cutoff:128,thickness:3,minHeight:.6,maxHeight:5,smoothing:.25,gamma:1,invert:false};
+const settingsInputs = {cutoff:'cutoff-number',thickness:'thickness',minHeight:'min-height',maxHeight:'max-height',smoothing:'smoothing-number',gamma:'gamma-number'};
+const state = {mode:'cutout',image:null,fileName:'sample',mesh:null,preview:null,processed:true,pending:true,exporting:false,epoch:0,loadEpoch:0,worker:null,buildTimer:null,renderer:null,buildData:null,layers:[],activeLayerId:'base',nextLayer:1,regionTool:'select',regionDrag:null,regionPoints:[],regionHover:null,regionVertex:-1,regionView:null,labelRects:[],imageSource:null,fitNextMesh:true};
+// Model-wide inputs that undo/redo and project files carry alongside the layers.
+const GLOBAL_INPUTS = ['invert','width-mm','resolution','mirror','base-enabled','base-thickness'];
+const HIT = matchMedia('(pointer: coarse)').matches ? 14 : 8;
+const workerURL = URL.createObjectURL(new Blob([$('region-geometry').textContent,'\n',$('mesh-engine').textContent], {type:'application/javascript'}));
+const sampleCanvas = document.createElement('canvas'), sampleContext = sampleCanvas.getContext('2d',{willReadFrequently:true});
+const imageCanvas = $('image-canvas'), imageContext = imageCanvas.getContext('2d');
+const regionCanvas = $('region-canvas'), regionContext = regionCanvas.getContext('2d');
+const pretty = (n,digits=1) => Number(n).toLocaleString(undefined,{maximumFractionDigits:digits});
+const activeLayer = () => state.layers.find(layer=>layer.id===state.activeLayerId);
+const regionColors = ['#397da3','#c57d3d','#8a60a4','#3b8a6b','#bd5a6a','#a08c30'];
+
+function setStatus(label,type='') { $('status-label').textContent=label; $('status').className='status-pill'+(type?' '+type:''); }
+function feedback(message,error=false) { $('feedback').textContent=message; $('feedback').classList.toggle('error',error); }
+function updateExportButton() {
+  const selected=$('export-scope').value==='selected';
+  const available=selected ? state.buildData && activeLayer()?.enabled : state.mesh?.indices.length;
+  $('export-button').disabled=state.pending||state.exporting||!available;
+  if(!state.exporting) $('export-label').textContent=selected?'Export layer STL':'Export STL';
+}
+function saveActiveLayer() {
+  const layer=activeLayer();if(!layer)return;
+  layer.settings.mode=state.mode;
+  for(const [key,id]of Object.entries(settingsInputs)) layer.settings[key]=$(id).value.trim()===''?NaN:Number($(id).value);
+  layer.settings.invert=$('layer-invert').checked;
+}
+function updateModeUI() {
+  const relief=state.mode==='relief';
+  $('mode-cutout').setAttribute('aria-pressed',!relief);$('mode-relief').setAttribute('aria-pressed',relief);
+  $('cutout-height').hidden=relief;$('relief-heights').hidden=!relief;$('gamma-control').hidden=!relief;
+  const plate=$('base-enabled').checked;
+  $('mode-description').textContent=relief?'Darker areas become thicker. Light areas become thinner. '+(plate?'White areas stay at plate height.':'White areas remain open.'):plate?'Dark areas become solid at one height. Light areas stay at plate height.':'Dark areas become solid. Light areas become holes. A constant height throughout.';
+}
+function loadActiveLayer() {
+  const layer=activeLayer();if(!layer)return;
+  state.mode=layer.settings.mode;
+  for(const [key,id]of Object.entries(settingsInputs)) $(id).value=Number.isFinite(layer.settings[key])?layer.settings[key]:'';
+  for(const [range,number]of [['cutoff','cutoff-number'],['smoothing','smoothing-number'],['gamma','gamma-number']]) if($(number).value!=='')$(range).value=$(number).value;
+  $('layer-invert').checked=Boolean(layer.settings.invert);$('layer-name').value=layer.name;
+  updateModeUI();updateExportButton();
+}
+function renderLayers() {
+  const list=$('layer-list');list.replaceChildren();
+  const menu=$('region-layer-select');menu.replaceChildren();
+  for(const layer of [...state.layers].reverse()) {
+    const row=document.createElement('div');row.className='layer-row'+(layer.id===state.activeLayerId?' active':'');row.dataset.id=layer.id;
+    const check=document.createElement('input');check.type='checkbox';check.checked=layer.enabled;check.setAttribute('aria-label','Show '+layer.name);
+    check.addEventListener('change',()=>{layer.enabled=check.checked;invalidate();renderLayers();drawImagePreview();drawRegionEditor();commitHistory();});
+    const choice=document.createElement('button');choice.className='layer-choice';choice.textContent=layer.name;choice.title=layer.name+' · double-click to rename';choice.setAttribute('aria-pressed',layer.id===state.activeLayerId);
+    choice.addEventListener('keydown',e=>{if(e.key==='F2'){e.preventDefault();startListRename(layer.id);}});
+    const type=document.createElement('span');type.className='layer-type';type.textContent=layer.settings.mode==='relief'?'Relief':'Cutout';
+    row.append(check,choice,type);list.appendChild(row);
+    const option=document.createElement('option');option.value=layer.id;option.textContent=layer.name+(layer.enabled?'':' (hidden)');menu.appendChild(option);
+  }
+  menu.value=state.activeLayerId;
+  const index=state.layers.findIndex(layer=>layer.id===state.activeLayerId);
+  $('layer-remove').disabled=$('region-delete').disabled=index<=0;$('layer-forward').disabled=index<=0||index===state.layers.length-1;$('layer-back').disabled=index<=1;
+  $('layer-duplicate').disabled=index<=0||state.layers.length>=13;
+  if(document.activeElement!==$('layer-name'))$('layer-name').value=activeLayer()?.name||'';
+  // The mode switch sits with the image, so name the layer it changes once there are several.
+  $('mode-layer').textContent=state.layers.length>1?'for '+(activeLayer()?.name||''):'';
+  updateRegionToolbar();
+}
+function selectLayer(id) {
+  if(!state.layers.some(layer=>layer.id===id))return;
+  if(id!==state.activeLayerId)state.regionVertex=-1;
+  saveActiveLayer();state.activeLayerId=id;loadActiveLayer();renderLayers();drawImagePreview();drawRegionEditor();
+}
+function renameLayer(layer,value) {
+  const name=String(value).trim().slice(0,48);
+  if(!layer||!name||name===layer.name)return;
+  layer.name=name;renderLayers();drawRegionEditor();commitHistory();
+}
+// Enter or leaving the field keeps the name, Escape restores it.
+function bindRename(input,layer,done) {
+  let finished=false;
+  const finish=keep=>{if(finished)return;finished=true;if(keep)renameLayer(layer,input.value);done();};
+  input.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Enter'){e.preventDefault();finish(true);}else if(e.key==='Escape'){e.preventDefault();finish(false);}});
+  input.addEventListener('blur',()=>finish(true));
+}
+function startListRename(id) {
+  const layer=state.layers.find(l=>l.id===id);if(!layer)return;
+  if(id!==state.activeLayerId)selectLayer(id);
+  const choice=[...$('layer-list').querySelectorAll('.layer-row')].find(row=>row.dataset.id===id)?.querySelector('.layer-choice');if(!choice)return;
+  const input=document.createElement('input');input.type='text';input.className='layer-rename';input.maxLength=48;input.autocomplete='off';input.value=layer.name;input.setAttribute('aria-label','Layer name');
+  choice.replaceWith(input);input.focus();input.select();
+  bindRename(input,layer,()=>{renderLayers();$('layer-list').querySelector('.layer-row.active .layer-choice')?.focus({preventScroll:true});});
+}
+function addRegion(rect,points=null) {
+  if(state.layers.length>=13){$('region-instructions').textContent='Twelve regions is the limit. Remove a region before adding another.';return false;}
+  saveActiveLayer();
+  const number=state.nextLayer++, source=activeLayer()?.settings||DEFAULT_SETTINGS;
+  const layer={id:'region-'+number,name:'Region '+number,enabled:true,rect:{...rect},points:points?points.map(p=>({...p})):null,settings:{...source}};
+  state.layers.push(layer);state.activeLayerId=layer.id;state.regionVertex=-1;loadActiveLayer();renderLayers();invalidate();drawRegionEditor();commitHistory();return true;
+}
+function duplicateLayer() {
+  const layer=activeLayer();if(!layer?.rect||state.layers.length>=13)return;
+  saveActiveLayer();
+  // Offset the copy so it is visibly a second region, kept inside the image.
+  const shape=StlRegions.clone(layer),r=shape.rect,dx=Math.min(.03,1-r.x1),dy=Math.min(.03,1-r.y1);
+  shape.rect={x0:r.x0+dx,y0:r.y0+dy,x1:r.x1+dx,y1:r.y1+dy};
+  if(shape.points){shape.points=shape.points.map(p=>({x:p.x+dx,y:p.y+dy}));shape.rect=StlRegions.bounds(shape.points);}
+  const number=state.nextLayer++,copy={id:'region-'+number,name:(layer.name+' copy').slice(0,48),enabled:true,rect:shape.rect,points:shape.points,settings:{...layer.settings}};
+  state.layers.splice(state.layers.indexOf(layer)+1,0,copy);state.activeLayerId=copy.id;state.regionVertex=-1;
+  loadActiveLayer();renderLayers();invalidate();drawImagePreview();drawRegionEditor();commitHistory();
+}
+function moveLayer(direction) {
+  saveActiveLayer();const index=state.layers.findIndex(layer=>layer.id===state.activeLayerId), next=index+direction;
+  if(index<=0||next<=0||next>=state.layers.length)return;
+  [state.layers[index],state.layers[next]]=[state.layers[next],state.layers[index]];renderLayers();invalidate();drawRegionEditor();commitHistory();
+}
+function removeLayer() {
+  const index=state.layers.findIndex(layer=>layer.id===state.activeLayerId);if(index<=0)return;
+  state.layers.splice(index,1);state.activeLayerId=state.layers[Math.max(0,index-1)].id;state.regionVertex=-1;loadActiveLayer();renderLayers();invalidate();drawImagePreview();drawRegionEditor();commitHistory();
+}
+
+// Undo/redo keeps whole snapshots of the layers and model-wide inputs; they
+// are small (a few kB), so there is nothing to gain from diffing them.
+const edits={stack:[],index:-1,key:'',time:0};
+function readInput(id){const el=$(id);return el.type==='checkbox'?el.checked:el.value;}
+function writeInput(id,value){const el=$(id);if(el.type==='checkbox')el.checked=Boolean(value);else el.value=value;}
+function snapshot() {
+  saveActiveLayer();
+  return JSON.stringify({layers:state.layers,activeLayerId:state.activeLayerId,nextLayer:state.nextLayer,inputs:Object.fromEntries(GLOBAL_INPUTS.map(id=>[id,readInput(id)]))});
+}
+// Commits with the same key within a second replace each other (arrow-key nudges).
+function commitHistory(key='') {
+  if(!state.image)return;
+  const snap=snapshot(),now=performance.now();
+  if(edits.stack[edits.index]===snap)return;
+  if(key&&key===edits.key&&now-edits.time<1000&&edits.index>0)edits.stack[edits.index]=snap;
+  else{edits.stack.splice(edits.index+1);edits.stack.push(snap);if(edits.stack.length>200)edits.stack.shift();edits.index=edits.stack.length-1;}
+  edits.key=key;edits.time=now;updateHistoryButtons();
+}
+function resetHistory(){edits.stack=[];edits.index=-1;edits.key='';commitHistory();}
+function restoreSnapshot(snap) {
+  const s=JSON.parse(snap);
+  state.layers=s.layers;state.activeLayerId=s.activeLayerId;state.nextLayer=s.nextLayer;
+  for(const [id,value]of Object.entries(s.inputs||{}))if(GLOBAL_INPUTS.includes(id))writeInput(id,value);
+  state.regionDrag=null;state.regionPoints=[];state.regionHover=null;state.regionVertex=-1;
+  updateBaseUI();updateDetailNote();loadActiveLayer();renderLayers();invalidate();drawImagePreview();drawRegionEditor();
+}
+function stepHistory(direction) {
+  const next=edits.index+direction;if(next<0||next>=edits.stack.length)return;
+  edits.index=next;edits.key='';restoreSnapshot(edits.stack[next]);updateHistoryButtons();
+}
+function undo(){if(isPolygonTool()&&state.regionPoints.length&&$('region-dialog').open){undoPolygonPoint();return;}stepHistory(-1);}
+function redo(){stepHistory(1);}
+function updateHistoryButtons() {
+  $('undo').disabled=$('region-undo').disabled=edits.index<=0;
+  $('redo').disabled=$('region-redo').disabled=edits.index>=edits.stack.length-1;
+}
+function updateBaseUI(){$('base-control').hidden=!$('base-enabled').checked;updateModeUI();}
+function updateDetailNote() {
+  const detail=+$('resolution').value,side=state.image?Math.max(state.image.width,state.image.height):0,note=$('detail-note');
+  note.textContent=side&&detail>side?`Finer than the image itself (${side.toLocaleString()} px): more triangles, no new detail.`:detail>=1024?'Large mesh: each change takes longer to rebuild, and the STL can reach hundreds of MB.':'';
+  note.hidden=!note.textContent;
+}
+function readOptions() {
+  saveActiveLayer();
+  const selected=activeLayer();
+  const plate=$('base-enabled').checked;
+  const active=['width-mm',...(plate?['base-thickness']:[]),...(selected?.enabled?['cutoff-number','smoothing-number',...(state.mode==='cutout'?['thickness']:['min-height','max-height','gamma-number'])]:[])];
+  for(const id of active)if(!$(id).checkValidity()||$(id).value.trim()==='')throw new Error('Check the highlighted fields for '+(id==='width-mm'||id==='base-thickness'?'the model size':selected?.name||'this model')+'.');
+  const width=+$('width-mm').value;
+  return {...state.layers[0].settings,width,imageHeight:width*state.image.height/state.image.width,invert:$('invert').checked,mirror:$('mirror').checked,base:plate?+$('base-thickness').value:0,layers:state.layers.map(layer=>({...layer,rect:layer.rect?{...layer.rect}:null,points:layer.points?layer.points.map(p=>({...p})):null,settings:{...layer.settings}}))};
+}
+function invalidate() {
+  saveActiveLayer();state.pending=true;state.epoch++;updateExportButton();setStatus('Updating','busy');
+  clearTimeout(state.buildTimer);state.buildTimer=setTimeout(rebuild,160);
+}
+function rebuild() {
+  if(!state.image)return;
+  const epoch=state.epoch;state.worker?.terminate();state.worker=null;
+  let options;try{options=readOptions();}catch(error){setStatus('Check settings','error');feedback(error.message,true);return;}
+  const detail=+$('resolution').value,ratio=state.image.width/state.image.height;
+  const cols=Math.max(1,Math.round(ratio>=1?detail:detail*ratio)),rows=Math.max(1,Math.round(ratio>=1?detail/ratio:detail));
+  sampleCanvas.width=cols+1;sampleCanvas.height=rows+1;sampleContext.imageSmoothingEnabled=true;sampleContext.imageSmoothingQuality='high';sampleContext.save();
+  if(options.mirror){sampleContext.translate(sampleCanvas.width,0);sampleContext.scale(-1,1);}
+  sampleContext.drawImage(state.image,0,0,sampleCanvas.width,sampleCanvas.height);sampleContext.restore();
+  let rgba;try{rgba=sampleContext.getImageData(0,0,sampleCanvas.width,sampleCanvas.height).data;}catch{setStatus('Image error','error');feedback('This image could not be read. Try PNG or JPG.',true);return;}
+  const buildData={rgba:rgba.slice(),cols,rows,options};
+  setStatus('Building','busy');let worker;
+  try{worker=new Worker(workerURL);}catch{setStatus('Worker blocked','error');feedback('Open the downloaded HTML in a desktop browser with JavaScript enabled.',true);return;}
+  state.worker=worker;
+  worker.onmessage=event=>{
+    worker.terminate();if(state.worker===worker)state.worker=null;if(epoch!==state.epoch)return;
+    if(event.data.error){setStatus('Check settings','error');feedback(event.data.error,true);return;}
+    state.mesh=event.data;state.mesh.options=options;state.buildData=buildData;
+    state.preview={data:event.data.preview,width:cols+1,height:rows+1};state.pending=false;
+    state.renderer?.setMesh(state.mesh,state.fitNextMesh);state.fitNextMesh=false;drawImagePreview();updateStats();updateExportButton();
+  };
+  worker.onerror=event=>{worker.terminate();if(epoch!==state.epoch)return;setStatus('Build failed','error');feedback('Model generation failed. Try a lower mesh detail.',true);event.preventDefault();};
+  worker.postMessage({operation:'build',rgba:rgba.buffer,cols,rows,options},[rgba.buffer]);
+}
+function updateStats() {
+  const s=state.mesh.stats;
+  $('stat-dimensions').innerHTML=pretty(s.width)+' × '+pretty(s.depth)+'<small>mm</small>';$('stat-height').innerHTML=pretty(s.height,2)+'<small>mm</small>';
+  $('stat-triangles').textContent=pretty(s.triangles,0);$('stat-pieces').textContent=s.pieces;
+  $('preview-size').textContent=s.cols+' × '+s.rows+' cells · '+s.layerCount+' enabled layer'+(s.layerCount===1?'':'s');
+  $('export-note').textContent='Binary STL · '+pretty((84+50*s.triangles)/1048576,1)+' MB combined · millimeters';
+  if(!s.triangles){setStatus('Empty image');feedback(s.layerCount?'No material remains. Raise the cutoff, invert the image, or check your regions.':'All layers are hidden. Enable a layer to build geometry.');}
+  else{setStatus('Ready');feedback(s.base>0?`One closed solid on a ${pretty(s.base,2)} mm base plate.`+(s.layerCount>1?' Higher layers override lower settings; height changes meet across one mesh cell.':' White areas are plate, not holes.'):s.pieces>1?`${s.pieces} separate closed pieces. Disconnected dark areas print separately; add a base in your slicer to connect them.`:s.layerCount>1?'Regions share one closed model. Higher layers override lower settings; height changes meet across one mesh cell.':'A closed solid with a flat underside. White areas remain open all the way through.');}
+}
+function drawImagePreview() {
+  if(!state.image)return;
+  if(state.processed&&state.preview){imageCanvas.width=state.preview.width;imageCanvas.height=state.preview.height;imageContext.putImageData(new ImageData(state.preview.data,state.preview.width,state.preview.height),0,0);}
+  else{
+    const scale=Math.min(1,680/Math.max(state.image.width,state.image.height));imageCanvas.width=Math.max(1,Math.round(state.image.width*scale));imageCanvas.height=Math.max(1,Math.round(state.image.height*scale));
+    imageContext.drawImage(state.image,0,0,imageCanvas.width,imageCanvas.height);drawRegionOutlines(imageContext,imageCanvas.width,imageCanvas.height);
+  }
+  $('show-processed').setAttribute('aria-pressed',state.processed);$('show-original').setAttribute('aria-pressed',!state.processed);
+  const plate=state.mesh?.stats.base>0;
+  $('image-caption').innerHTML=!state.processed?'Original image with region selections.<br>Use Edit regions to draw or change an area.':state.layers.length>1?'Darker = thicker in the combined model.<br>'+(plate?'Light grey = base plate.':'Checkerboard = empty.'):plate?'<span class="key"></span>Solid<span class="key plate"></span>Base plate<br>White areas become plate.':'<span class="key"></span>Solid<span class="key hollow"></span>Empty<br>Checkerboard areas are removed.';
+}
+function chooseMode(mode) {
+  if(state.mode===mode)return;
+  const previous=state.mode,current=+$('cutoff-number').value;state.mode=mode;
+  if((previous==='cutout'&&current===128)||(previous==='relief'&&current===250))$('cutoff').value=$('cutoff-number').value=mode==='relief'?250:128;
+  updateModeUI();invalidate();renderLayers();commitHistory();
+}
+// `source` is what Save project embeds: {blob}, {dataURL} or {canvas}.
+// `project` is a snapshot to restore instead of starting with one layer.
+function useImage(image,name,source,project=null) {
+  saveActiveLayer();const settings={...(state.layers[0]?.settings||DEFAULT_SETTINGS)};
+  state.image=image;state.imageSource=source;state.fileName=name;state.preview=null;state.buildData=null;state.fitNextMesh=true;
+  state.layers=[{id:'base',name:'Whole image',enabled:true,rect:null,settings}];state.activeLayerId='base';state.nextLayer=1;state.regionDrag=null;state.regionPoints=[];state.regionHover=null;state.regionVertex=-1;state.regionView=null;
+  $('file-name').textContent=name;$('file-meta').textContent=`${image.width.toLocaleString()} × ${image.height.toLocaleString()} px`;updateDetailNote();
+  if(project)restoreSnapshot(project);
+  else{loadActiveLayer();renderLayers();drawImagePreview();drawRegionEditor();invalidate();}
+  resetHistory();
+}
+
+const PROJECT_APP='image-to-stl';
+const cleanName=s=>s.replace(/[^a-z0-9_-]+/gi,'-').replace(/^-+|-+$/g,'')||'image';
+function downloadBlob(blob,name) {
+  const url=URL.createObjectURL(blob),anchor=document.createElement('a');
+  anchor.href=url;anchor.download=name;document.body.appendChild(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+}
+function imageDataURL() {
+  const source=state.imageSource;
+  if(source?.dataURL)return Promise.resolve(source.dataURL);
+  if(source?.blob)return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(source.blob);});
+  const canvas=document.createElement('canvas');canvas.width=state.image.width;canvas.height=state.image.height;canvas.getContext('2d').drawImage(state.image,0,0);
+  return Promise.resolve(canvas.toDataURL('image/png'));
+}
+// One JSON file: the original image bytes as a data URL plus the same
+// snapshot undo/redo uses.
+async function saveProject() {
+  if(!state.image)return;
+  let image;try{image=await imageDataURL();}catch{feedback('The image could not be read for saving.',true);return;}
+  const project={app:PROJECT_APP,version:1,fileName:state.fileName,image,...JSON.parse(snapshot())};
+  downloadBlob(new Blob([JSON.stringify(project)],{type:'application/json'}),cleanName(state.fileName.replace(/\.[^.]+$/,''))+'.image-to-stl.json');
+}
+function sanitizeLayers(list) {
+  if(!Array.isArray(list)||!list.length||list.length>13)return null;
+  const num=v=>v===null||v===undefined||v===''?NaN:Number(v),seen=new Set(),out=[];
+  for(const [i,l]of list.entries()){
+    if(!l||typeof l!=='object')return null;
+    const s=l.settings&&typeof l.settings==='object'?l.settings:{},settings={mode:s.mode==='relief'?'relief':'cutout',invert:Boolean(s.invert)};
+    for(const key of ['cutoff','thickness','minHeight','maxHeight','smoothing','gamma'])settings[key]=num(s[key]??DEFAULT_SETTINGS[key]);
+    let id=i===0?'base':String(l.id||'region-'+i).slice(0,40);
+    if(i>0&&(id==='base'||seen.has(id)))id='region-copy-'+i;
+    seen.add(id);
+    const layer={id,name:String(l.name||(i?'Region '+i:'Whole image')).slice(0,48),enabled:l.enabled!==false,rect:null,points:null,settings};
+    if(i>0){
+      if(Array.isArray(l.points)&&l.points.length>=3){layer.points=l.points.slice(0,64).map(p=>({x:num(p?.x),y:num(p?.y)}));layer.rect=StlRegions.bounds(layer.points);}
+      else if(l.rect&&typeof l.rect==='object')layer.rect={x0:num(l.rect.x0),y0:num(l.rect.y0),x1:num(l.rect.x1),y1:num(l.rect.y1)};
+      else return null;
+    }
+    out.push(layer);
+  }
+  return out;
+}
+async function openProject(file) {
+  const loadEpoch=++state.loadEpoch;
+  let data=null;try{data=JSON.parse(await file.text());}catch{}
+  const layers=sanitizeLayers(data?.layers);
+  if(data?.app!==PROJECT_APP||typeof data.image!=='string'||!/^data:image\//.test(data.image)||!layers){feedback('This file is not an Image to STL project.',true);return;}
+  const img=new Image();
+  try{await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=data.image;});if(!img.naturalWidth||!img.naturalHeight)throw new Error('empty');}
+  catch{if(loadEpoch===state.loadEpoch)feedback('The image inside this project could not be opened.',true);return;}
+  if(loadEpoch!==state.loadEpoch)return;
+  const inputs={};
+  for(const id of GLOBAL_INPUTS)if(data.inputs&&typeof data.inputs==='object'&&id in data.inputs)inputs[id]=data.inputs[id];
+  if('resolution' in inputs&&![...$('resolution').options].some(o=>o.value===String(inputs.resolution)))delete inputs.resolution;
+  const activeLayerId=layers.some(l=>l.id===data.activeLayerId)?data.activeLayerId:'base';
+  const nextLayer=Math.max(Number.isInteger(data.nextLayer)?data.nextLayer:1,...layers.map(l=>Number(/^region-(\d+)$/.exec(l.id)?.[1]||0)+1));
+  useImage(img,String(data.fileName||file.name).slice(0,120),{dataURL:data.image},JSON.stringify({layers,activeLayerId,nextLayer,inputs}));
+}
+
+async function loadFile(file) {
+  if (!file) return;
+  if (/\.json$/i.test(file.name) || file.type === 'application/json') { openProject(file); return; }
+  if (file.size > 80 * 1024 * 1024) { feedback('Choose an image smaller than 80 MB.', true); return; }
+  const loadEpoch = ++state.loadEpoch;
+  const url = URL.createObjectURL(file), img = new Image();
+  const wasPending = state.pending;
+  // Invalidate an older build while decoding, so its result cannot enable an
+  // export for a different image. Keep the last successful preview visible.
+  state.epoch++; state.worker?.terminate(); state.worker = null; clearTimeout(state.buildTimer);
+  state.pending = true; updateExportButton(); setStatus('Opening image', 'busy');
+  try {
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = url; });
+    if (loadEpoch !== state.loadEpoch) return;
+    if (!img.naturalWidth || !img.naturalHeight) throw new Error('Empty image');
+    useImage(img, file.name, {blob: file});
+  } catch {
+    if (loadEpoch !== state.loadEpoch) return;
+    feedback('The browser could not open this image. Try PNG, JPG, WebP, BMP, or SVG.', true);
+    if (state.image && wasPending) invalidate();
+    else { state.pending = false; updateExportButton(); setStatus('Image not opened', 'error'); }
+  } finally { URL.revokeObjectURL(url); }
+}
+function loadDemo() {
+  state.loadEpoch++;
+  const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 480;
+  const c = canvas.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0, 0, 640, 480);
+  // An asymmetric rounded token with a genuine through-hole and a continuous
+  // grayscale sweep, so the two modes are easy to compare on the same input.
+  c.beginPath(); c.roundRect(90, 70, 460, 340, 75);
+  const gradient = c.createLinearGradient(100, 70, 530, 430); gradient.addColorStop(0, '#bcbcbc'); gradient.addColorStop(.45, '#4c4c4c'); gradient.addColorStop(1, '#141414'); c.fillStyle = gradient; c.fill();
+  c.fillStyle = 'white'; c.beginPath(); c.arc(162, 142, 27, 0, Math.PI * 2); c.fill();
+  c.save(); c.translate(270, 235); c.rotate(-.20); c.lineCap = 'round'; c.lineJoin = 'round'; c.lineWidth = 24; c.strokeStyle = '#efefef';
+  c.beginPath(); c.moveTo(-20, -45); c.lineTo(-20, 45); c.lineTo(65, 45); c.stroke();
+  c.strokeStyle = '#e2e2e2'; c.beginPath(); c.arc(113, -16, 31, -.9, Math.PI * .91); c.stroke(); c.restore();
+  useImage(canvas, 'Built-in sample', {canvas});
+}
+
+
+function exportSTL() {
+  const selected=$('export-scope').value==='selected',layer=activeLayer();
+  if(state.pending||state.exporting||!state.buildData||(selected?!layer?.enabled:!state.mesh?.indices.length))return;
+  const mesh=state.mesh,fileName=state.fileName,layerId=layer.id,layerName=layer.name;
+  state.exporting=true;updateExportButton();$('export-label').textContent='Preparing STL…';
+  let worker;const finish=()=>{worker?.terminate();state.exporting=false;updateExportButton();};
+  try{worker=new Worker(workerURL);}catch{feedback('STL export could not start. Try reopening the HTML in your browser.',true);finish();return;}
+  worker.onmessage=event=>{
+    if(event.data.error){feedback(event.data.error,true);finish();return;}
+    const name=cleanName(fileName.replace(/\.[^.]+$/,'')),suffix=selected?cleanName(layerName):mesh.stats.layerCount>1?'layers':mesh.options.mode;
+    downloadBlob(new Blob([event.data.buffer],{type:'model/stl'}),name+'-'+suffix+'.stl');finish();
+  };
+  worker.onerror=event=>{feedback('STL export failed. Try a lower mesh detail.',true);finish();event.preventDefault();};
+  try{
+    if(selected){const b=state.buildData,rgba=b.rgba.slice();worker.postMessage({operation:'exportLayer',rgba:rgba.buffer,cols:b.cols,rows:b.rows,options:b.options,layerId},[rgba.buffer]);}
+    else{const positions=mesh.positions.slice(),indices=mesh.indices.slice();worker.postMessage({operation:'export',positions:positions.buffer,indices:indices.buffer},[positions.buffer,indices.buffer]);}
+  }catch{feedback('Not enough memory for this export. Try lower mesh detail.',true);finish();}
+}
+
+function isPolygonTool(){return state.regionTool==='polygon'||state.regionTool==='redraw-polygon';}
+function regionMetrics(){const b=regionCanvas.getBoundingClientRect();return {width:Math.max(1,b.width),height:Math.max(1,b.height)};}
+function regionPoint(event){const b=regionCanvas.getBoundingClientRect();return {x:Math.max(0,Math.min(1,(event.clientX-b.left)/Math.max(1,b.width))),y:Math.max(0,Math.min(1,(event.clientY-b.top)/Math.max(1,b.height)))};}
+function regionDistance(a,b){const m=regionMetrics();return Math.hypot((a.x-b.x)*m.width,(a.y-b.y)*m.height);}
+const clamp01=v=>Math.max(0,Math.min(1,v));
+function regionMessage(text){$('region-instructions').textContent=text;}
+function selectHint(){
+  const layer=activeLayer();
+  return layer?.points?'Drag a point to reshape, or the small circle on an edge to add one. Double-click a point to remove it.':layer?.rect?'Drag inside to move and the square handles to resize. Convert to polygon to edit the corners.':'Click a region to edit it, or draw one with Rectangle or Polygon.';
+}
+function regionHandles(shape){
+  if(!shape?.rect)return [];
+  const r=shape.rect,m=regionMetrics(),pad=shape.points?12:0;
+  const clampX=v=>Math.max(Math.min(8,m.width/4)/m.width,Math.min(1-Math.min(8,m.width/4)/m.width,v));
+  const clampY=v=>Math.max(Math.min(8,m.height/4)/m.height,Math.min(1-Math.min(8,m.height/4)/m.height,v));
+  const l=clampX(r.x0-pad/m.width),t=clampY(r.y0-pad/m.height),right=clampX(r.x1+pad/m.width),bottom=clampY(r.y1+pad/m.height),cx=(l+right)/2,cy=(t+bottom)/2;
+  return [['nw',l,t],['n',cx,t],['ne',right,t],['e',right,cy],['se',right,bottom],['s',cx,bottom],['sw',l,bottom],['w',l,cy]].map(([name,x,y])=>({name,x,y}));
+}
+function handleAt(shape,point){const m=regionMetrics();return regionHandles(shape).find(h=>Math.abs((h.x-point.x)*m.width)<=HIT-1&&Math.abs((h.y-point.y)*m.height)<=HIT-1);}
+function vertexAt(shape,point){
+  if(!shape?.points)return -1;
+  let best=-1,bestDistance=HIT;
+  shape.points.forEach((p,i)=>{const d=regionDistance(p,point);if(d<=bestDistance){best=i;bestDistance=d;}});
+  return best;
+}
+// Midpoints of the selected polygon's edges; dragging one inserts a point.
+// Short edges get none, so the handles never crowd the points themselves.
+function regionMidpoints(shape){
+  if(!shape?.points||shape.points.length>=64)return [];
+  const m=regionMetrics(),n=shape.points.length,out=[];
+  for(let i=0;i<n;i++){const a=shape.points[i],b=shape.points[(i+1)%n];if(Math.hypot((a.x-b.x)*m.width,(a.y-b.y)*m.height)>=28)out.push({index:i,x:(a.x+b.x)/2,y:(a.y+b.y)/2});}
+  return out;
+}
+function midpointAt(shape,point){return regionMidpoints(shape).find(p=>regionDistance(p,point)<=HIT-1);}
+function labelAt(point){const m=regionMetrics(),x=point.x*m.width,y=point.y*m.height;return [...state.labelRects].reverse().find(r=>x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h);}
+function visibleRegionShape(layer){const d=state.regionDrag;return d?.layerId===layer.id&&d.target?{...layer,...d.target}:layer;}
+function traceRegion(context,shape,width,height){
+  context.beginPath();
+  if(shape.points){shape.points.forEach((p,i)=>i?context.lineTo(p.x*width,p.y*height):context.moveTo(p.x*width,p.y*height));}
+  else if(shape.rect){const r=shape.rect;context.rect(r.x0*width,r.y0*height,(r.x1-r.x0)*width,(r.y1-r.y0)*height);}
+  context.closePath();
+}
+// The editor draws in CSS pixels (its context carries the device-pixel scale).
+function drawRegionHandles(context,shape,width,height){
+  const handles=regionHandles(shape);
+  context.save();
+  if(shape.points&&handles.length){context.strokeStyle='#24362f';context.lineWidth=1;context.setLineDash([4,3]);context.strokeRect(handles[0].x*width,handles[0].y*height,(handles[4].x-handles[0].x)*width,(handles[4].y-handles[0].y)*height);context.setLineDash([]);}
+  for(const h of handles){context.fillStyle='#fff';context.strokeStyle='#24362f';context.lineWidth=1.5;context.fillRect(h.x*width-4,h.y*height-4,8,8);context.strokeRect(h.x*width-4,h.y*height-4,8,8);}
+  if(shape.points){
+    for(const p of regionMidpoints(shape)){context.beginPath();context.arc(p.x*width,p.y*height,3.5,0,Math.PI*2);context.fillStyle='#ffffffd9';context.fill();context.strokeStyle='#22654f';context.lineWidth=1.25;context.stroke();}
+    shape.points.forEach((p,i)=>{
+      const selected=i===state.regionVertex;
+      context.beginPath();context.arc(p.x*width,p.y*height,selected?6:4.5,0,Math.PI*2);
+      context.fillStyle=selected?'#fff':'#22654f';context.fill();context.strokeStyle=selected?'#22654f':'#fff';context.lineWidth=selected?2.5:1.5;context.stroke();
+    });
+  }
+  context.restore();
+}
+function drawRegionOutlines(context,width,height,labels=false){
+  if(labels)state.labelRects=[];
+  for(const [index,layer]of state.layers.entries()){
+    if(!layer.rect)continue;
+    const shape=visibleRegionShape(layer),r=shape.rect,selected=layer.id===state.activeLayerId;
+    const invalid=selected&&state.regionDrag?.layerId===layer.id&&state.regionDrag.error;
+    const color=invalid?'#b44d3c':regionColors[(index-1)%regionColors.length];
+    context.save();context.globalAlpha=layer.enabled?1:.35;traceRegion(context,shape,width,height);context.fillStyle=color+(selected?'2a':'13');context.fill();context.strokeStyle='#fff';context.lineWidth=selected?4:3;context.stroke();context.strokeStyle=color;context.lineWidth=selected?2.5:1.5;context.stroke();
+    if(labels){
+      const x=r.x0*width,y=r.y0*height;context.font='12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+      const labelWidth=Math.min(width-8,context.measureText(layer.name).width+12),left=Math.max(2,Math.min(x,width-labelWidth-2)),top=Math.max(2,y-23);
+      context.fillStyle=color;context.fillRect(left,top,labelWidth,21);context.fillStyle='#fff';context.fillText(layer.name,left+6,top+15,labelWidth-9);
+      state.labelRects.push({id:layer.id,x:left,y:top,w:labelWidth,h:21});
+    }
+    context.restore();
+  }
+}
+function updatePolygonButtons(){const poly=isPolygonTool();$('region-close-polygon').hidden=!poly;$('region-undo-point').hidden=!poly;$('region-close-polygon').disabled=state.regionPoints.length<3;$('region-undo-point').disabled=!state.regionPoints.length;}
+function updateRegionToolbar(){
+  const layer=activeLayer(),select=state.regionTool==='select';
+  $('region-redraw-tool').disabled=!layer?.rect;
+  $('region-convert').hidden=!(select&&layer?.rect&&!layer.points);
+  $('region-delete-point').hidden=!(select&&layer?.points&&state.regionVertex>=0);
+  $('region-delete-point').disabled=!(layer?.points?.length>3);
+  updatePolygonButtons();
+}
+function setRegionTool(tool){
+  if(tool==='redraw')tool=activeLayer()?.points?'redraw-polygon':activeLayer()?.rect?'redraw':'new';
+  state.regionTool=tool;state.regionDrag=null;state.regionPoints=[];state.regionHover=null;if(tool!=='select')state.regionVertex=-1;
+  for(const [id,name]of [['region-select-tool','select'],['region-new-tool','new'],['region-polygon-tool','polygon'],['region-redraw-tool','redraw']])$(id).setAttribute('aria-pressed',name==='redraw'?tool.startsWith('redraw'):tool===name);
+  regionMessage(tool==='select'?selectHint():isPolygonTool()?'Click to place points. Click the first point, double-click or press Enter to finish; Backspace removes the last point.':tool==='redraw'?'Drag to replace this rectangle. Its settings stay the same.':'Drag a rectangle on the image. New regions copy the selected layer’s settings.');
+  regionCanvas.style.cursor=tool==='select'?'default':'crosshair';updateRegionToolbar();drawRegionEditor();
+}
+// Fit the canvas to the stage at device-pixel resolution, and keep a scaled
+// copy of the image so each redraw is a blit, not a resample of the photo.
+let regionBackdrop=null,regionFrame=0;
+function sizeRegionCanvas(){
+  const stage=$('region-stage');if(!state.image||!$('region-dialog').open)return;
+  const cs=getComputedStyle(stage),availW=stage.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight),availH=stage.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom);
+  const scale=Math.max(.01,Math.min(availW/state.image.width,availH/state.image.height,4));
+  const w=Math.max(1,Math.floor(state.image.width*scale)),h=Math.max(1,Math.floor(state.image.height*scale)),dpr=Math.min(2,window.devicePixelRatio||1),bw=Math.round(w*dpr),bh=Math.round(h*dpr);
+  regionCanvas.style.width=w+'px';regionCanvas.style.height=h+'px';
+  if(regionCanvas.width!==bw||regionCanvas.height!==bh){regionCanvas.width=bw;regionCanvas.height=bh;}
+  if(!regionBackdrop||regionBackdrop.width!==bw||regionBackdrop.height!==bh||regionBackdrop.source!==state.image){
+    regionBackdrop=document.createElement('canvas');regionBackdrop.width=bw;regionBackdrop.height=bh;regionBackdrop.source=state.image;
+    const b=regionBackdrop.getContext('2d');b.imageSmoothingEnabled=true;b.imageSmoothingQuality='high';b.drawImage(state.image,0,0,bw,bh);
+  }
+  state.regionView={w,h,dpr:bw/w};
+}
+function requestRegionDraw(){if(!regionFrame)regionFrame=requestAnimationFrame(()=>{regionFrame=0;drawRegionEditor();});}
+function openRegionEditor(tool='select'){if(!state.image)return;renderLayers();$('region-dialog').showModal();state.regionView=null;sizeRegionCanvas();setRegionTool(tool);regionCanvas.focus?.({preventScroll:true});}
+function closeRegionEditor(){$('region-stage').querySelector('.canvas-rename')?.blur();$('region-dialog').close();}
+function finishPolygon(){
+  if(!isPolygonTool())return true;
+  const points=state.regionPoints.map(p=>({...p}));
+  if(points.length>3&&regionDistance(points[0],points[points.length-1])<6)points.pop();
+  const error=StlRegions.polygonError(points);
+  if(error){regionMessage(error+' Use Undo point to adjust the outline.');return false;}
+  const rect=StlRegions.bounds(points);
+  if(state.regionTool==='redraw-polygon'&&activeLayer()?.rect){activeLayer().rect=rect;activeLayer().points=points;invalidate();renderLayers();commitHistory();}
+  else if(!addRegion(rect,points))return false;
+  state.polygonClosedAt=performance.now();setRegionTool('select');drawImagePreview();return true;
+}
+function undoPolygonPoint(){if(!isPolygonTool())return;state.regionPoints.pop();state.regionHover=null;updatePolygonButtons();drawRegionEditor();}
+function deleteVertex(index){
+  const layer=activeLayer();if(!layer?.points||index<0||index>=layer.points.length)return;
+  if(layer.points.length<=3){regionMessage('A polygon needs at least three points. Delete the region instead.');return;}
+  const points=layer.points.filter((_,i)=>i!==index),error=StlRegions.polygonError(points);
+  if(error){regionMessage(error+' The point was kept.');return;}
+  layer.points=points;layer.rect=StlRegions.bounds(points);state.regionVertex=-1;
+  invalidate();commitHistory();drawRegionEditor();drawImagePreview();
+}
+function convertToPolygon(){
+  const layer=activeLayer();if(!layer?.rect||layer.points)return;
+  const r=layer.rect;layer.points=[{x:r.x0,y:r.y0},{x:r.x1,y:r.y0},{x:r.x1,y:r.y1},{x:r.x0,y:r.y1}];
+  invalidate();renderLayers();commitHistory();setRegionTool('select');
+}
+function deleteRegion(){if(!activeLayer()?.rect)return;removeLayer();if($('region-dialog').open)setRegionTool('select');}
+// Arrow keys move the selected point, or the whole region, by screen pixels.
+function nudgeRegion(dxPx,dyPx){
+  const layer=activeLayer();if(!layer?.rect)return;
+  const m=regionMetrics(),dx=dxPx/m.width,dy=dyPx/m.height,shape=StlRegions.clone(layer);
+  if(shape.points&&state.regionVertex>=0&&state.regionVertex<shape.points.length){const p=shape.points[state.regionVertex];shape.points[state.regionVertex]={x:clamp01(p.x+dx),y:clamp01(p.y+dy)};}
+  else{
+    const r=shape.rect,mx=Math.max(-r.x0,Math.min(1-r.x1,dx)),my=Math.max(-r.y0,Math.min(1-r.y1,dy));
+    shape.rect={x0:r.x0+mx,y0:r.y0+my,x1:r.x1+mx,y1:r.y1+my};
+    if(shape.points)shape.points=shape.points.map(p=>({x:clamp01(p.x+mx),y:clamp01(p.y+my)}));
+  }
+  if(shape.points){const error=StlRegions.polygonError(shape.points);if(error){regionMessage(error);return;}shape.rect=StlRegions.bounds(shape.points);}
+  layer.rect=shape.rect;layer.points=shape.points;invalidate();commitHistory('nudge');drawRegionEditor();drawImagePreview();
+}
+function startCanvasRename(label){
+  const layer=state.layers.find(l=>l.id===label.id);if(!layer)return;
+  if(layer.id!==state.activeLayerId)selectLayer(layer.id);
+  const stage=$('region-stage'),sb=stage.getBoundingClientRect(),cb=regionCanvas.getBoundingClientRect();
+  const input=document.createElement('input');input.type='text';input.className='canvas-rename';input.maxLength=48;input.autocomplete='off';input.value=layer.name;input.setAttribute('aria-label','Region name');
+  input.style.left=(cb.left-sb.left-stage.clientLeft+label.x)+'px';input.style.top=(cb.top-sb.top-stage.clientTop+label.y-1)+'px';input.style.width=Math.max(150,label.w+40)+'px';
+  stage.appendChild(input);input.focus();input.select();state.renaming=true;
+  bindRename(input,layer,()=>{state.renaming=false;input.remove();if($('region-dialog').open)regionCanvas.focus({preventScroll:true});});
+}
+function drawRegionEditor(){
+  if(!state.image||!$('region-dialog').open)return;
+  if(!state.regionView)sizeRegionCanvas();
+  const {w,h,dpr}=state.regionView,c=regionContext;
+  c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,regionCanvas.width,regionCanvas.height);
+  c.drawImage(regionBackdrop,0,0);c.setTransform(dpr,0,0,dpr,0,0);
+  drawRegionOutlines(c,w,h,true);
+  if(state.regionTool==='select'&&activeLayer()?.rect)drawRegionHandles(c,visibleRegionShape(activeLayer()),w,h);
+  if(state.regionDrag?.kind==='create'){
+    const {start,end}=state.regionDrag;c.save();c.strokeStyle='#24362f';c.lineWidth=1.5;c.setLineDash([7,4]);c.fillStyle='#22654f22';
+    const x=Math.min(start.x,end.x)*w,y=Math.min(start.y,end.y)*h,rw=Math.abs(start.x-end.x)*w,rh=Math.abs(start.y-end.y)*h;c.fillRect(x,y,rw,rh);c.strokeRect(x,y,rw,rh);c.restore();
+  }
+  if(isPolygonTool()&&state.regionPoints.length){
+    const points=state.regionPoints;
+    c.save();c.beginPath();points.forEach((p,i)=>i?c.lineTo(p.x*w,p.y*h):c.moveTo(p.x*w,p.y*h));if(state.regionHover)c.lineTo(state.regionHover.x*w,state.regionHover.y*h);
+    if(points.length>=3){c.closePath();c.fillStyle='#22654f22';c.fill();}
+    c.strokeStyle='#22654f';c.lineWidth=2;c.setLineDash([6,3]);c.stroke();c.setLineDash([]);
+    // With three points the first one closes the outline, so it gets a ring.
+    if(points.length>=3){c.beginPath();c.arc(points[0].x*w,points[0].y*h,7,0,Math.PI*2);c.strokeStyle='#22654f';c.lineWidth=1.5;c.stroke();}
+    for(const p of points){c.beginPath();c.arc(p.x*w,p.y*h,3.5,0,Math.PI*2);c.fillStyle='#22654f';c.fill();c.strokeStyle='#fff';c.lineWidth=1;c.stroke();}
+    c.restore();
+  }
+  updateRegionToolbar();
+}
+function updateEditDrag(point){
+  const d=state.regionDrag;if(!d||d.kind==='create')return;
+  // A press that moves less than two pixels is a click: it selects, never moves.
+  d.moved=d.moved||regionDistance(d.start,point)>2;
+  const from=d.base||d.original,r=d.original.rect,dx=d.moved?point.x-d.start.x:0,dy=d.moved?point.y-d.start.y:0,clamp=clamp01;let target=StlRegions.clone(from);
+  if(d.kind==='move'){
+    const x=Math.max(-r.x0,Math.min(1-r.x1,dx)),y=Math.max(-r.y0,Math.min(1-r.y1,dy));
+    target.rect={x0:clamp(r.x0+x),y0:clamp(r.y0+y),x1:clamp(r.x1+x),y1:clamp(r.y1+y)};
+    if(target.points){target.points=target.points.map(p=>({x:clamp(p.x+x),y:clamp(p.y+y)}));target.rect=StlRegions.bounds(target.points);}
+  }else if(d.kind==='resize'){
+    const next={...r},minX=Math.min(.002,(r.x1-r.x0)/2),minY=Math.min(.002,(r.y1-r.y0)/2);
+    if(d.handle.includes('w'))next.x0=Math.max(0,Math.min(r.x1-minX,r.x0+dx));
+    if(d.handle.includes('e'))next.x1=Math.min(1,Math.max(r.x0+minX,r.x1+dx));
+    if(d.handle.includes('n'))next.y0=Math.max(0,Math.min(r.y1-minY,r.y0+dy));
+    if(d.handle.includes('s'))next.y1=Math.min(1,Math.max(r.y0+minY,r.y1+dy));
+    target.rect=next;
+    if(target.points){target.points=target.points.map(p=>({x:clamp(next.x0+(p.x-r.x0)/(r.x1-r.x0)*(next.x1-next.x0)),y:clamp(next.y0+(p.y-r.y0)/(r.y1-r.y0)*(next.y1-next.y0))}));target.rect=StlRegions.bounds(target.points);}
+  }else if(d.kind==='vertex'){
+    target.points[d.vertex]={x:clamp(from.points[d.vertex].x+dx),y:clamp(from.points[d.vertex].y+dy)};target.rect=StlRegions.bounds(target.points);
+  }
+  d.target=target;d.error=target.points?StlRegions.polygonError(target.points):'';
+}
+function resizeCursor(name){return name==='n'||name==='s'?'ns-resize':name==='e'||name==='w'?'ew-resize':name==='nw'||name==='se'?'nwse-resize':'nesw-resize';}
+function bindRegionEditor(){
+  regionCanvas.addEventListener('pointerdown',event=>{
+    if(event.button!==0||isPolygonTool())return;
+    event.preventDefault();regionCanvas.focus?.({preventScroll:true});const point=regionPoint(event);
+    if(state.regionTool==='select'){
+      // Points first, then edge midpoints, resize handles, name labels, insides.
+      const active=activeLayer(),vertex=vertexAt(active,point),mid=vertex<0?midpointAt(active,point):null,handle=vertex<0&&!mid?handleAt(active,point):null;
+      let layer=active;
+      if(vertex<0&&!mid&&!handle){
+        const label=labelAt(point);
+        if(label){if(label.id!==state.activeLayerId){selectLayer(label.id);regionMessage(selectHint());}return;}
+        layer=active?.rect&&StlRegions.contains(active,point.x,point.y)?active:[...state.layers].reverse().find(l=>l.rect&&StlRegions.contains(l,point.x,point.y));
+        state.regionVertex=-1;
+        if(!layer){selectLayer('base');regionMessage(selectHint());drawRegionEditor();return;}
+        if(layer.id!==state.activeLayerId){selectLayer(layer.id);regionMessage(selectHint());}
+      }
+      if(!layer?.rect)return;
+      const original=StlRegions.clone(layer);let base=null,index=vertex;
+      if(mid){base=StlRegions.clone(layer);base.points.splice(mid.index+1,0,{x:mid.x,y:mid.y});index=mid.index+1;}
+      if(index>=0)state.regionVertex=index;
+      state.regionDrag={kind:handle?'resize':index>=0?'vertex':'move',handle:handle?.name,vertex:index,layerId:layer.id,start:point,end:point,original,base,target:StlRegions.clone(base||layer),error:'',moved:false,pointerId:event.pointerId};
+    }else state.regionDrag={kind:'create',start:point,end:point,pointerId:event.pointerId};
+    regionCanvas.setPointerCapture(event.pointerId);drawRegionEditor();
+  });
+  regionCanvas.addEventListener('pointermove',event=>{
+    const point=regionPoint(event),d=state.regionDrag;
+    if(d&&d.pointerId===event.pointerId){d.end=point;updateEditDrag(point);requestRegionDraw();return;}
+    if(isPolygonTool()){state.regionHover=point;requestRegionDraw();return;}
+    if(state.regionTool==='select'){const layer=activeLayer(),handle=handleAt(layer,point);regionCanvas.style.cursor=vertexAt(layer,point)>=0?'grab':midpointAt(layer,point)?'copy':handle?resizeCursor(handle.name):labelAt(point)?'pointer':state.layers.some(l=>l.rect&&StlRegions.contains(l,point.x,point.y))?'move':'default';}
+  });
+  regionCanvas.addEventListener('pointerup',event=>{
+    const d=state.regionDrag;if(!d||d.pointerId!==event.pointerId)return;
+    const end=regionPoint(event);d.end=end;updateEditDrag(end);state.regionDrag=null;if(regionCanvas.hasPointerCapture(event.pointerId))regionCanvas.releasePointerCapture(event.pointerId);
+    if(d.kind!=='create'){
+      const layer=state.layers.find(l=>l.id===d.layerId);if(!layer)return;
+      if(d.error){if(d.base)state.regionVertex=-1;regionMessage(d.error+' The previous shape has been kept.');drawRegionEditor();return;}
+      if(JSON.stringify(d.original)!==JSON.stringify(d.target)){layer.rect=d.target.rect;layer.points=d.target.points;invalidate();commitHistory();}
+      drawRegionEditor();drawImagePreview();return;
+    }
+    const rect={x0:Math.min(d.start.x,end.x),y0:Math.min(d.start.y,end.y),x1:Math.max(d.start.x,end.x),y1:Math.max(d.start.y,end.y)};
+    if(rect.x1-rect.x0<.002||rect.y1-rect.y0<.002){regionMessage('Draw a larger rectangle to create a region.');drawRegionEditor();return;}
+    if(state.regionTool==='redraw'&&activeLayer()?.rect){activeLayer().rect=rect;activeLayer().points=null;invalidate();commitHistory();}else if(!addRegion(rect)){drawRegionEditor();return;}
+    setRegionTool('select');drawImagePreview();
+  });
+  const cancelDrag=()=>{state.regionDrag=null;drawRegionEditor();};regionCanvas.addEventListener('pointercancel',cancelDrag);regionCanvas.addEventListener('lostpointercapture',cancelDrag);
+  regionCanvas.addEventListener('pointerleave',()=>{if(isPolygonTool()){state.regionHover=null;requestRegionDraw();}});
+  regionCanvas.addEventListener('click',event=>{
+    if(!isPolygonTool()||event.detail>1)return;
+    const point=regionPoint(event),points=state.regionPoints;
+    if(points.length&&regionDistance(points[points.length-1],point)<5)return;
+    if(points.length>=3&&regionDistance(points[0],point)<HIT){finishPolygon();return;}
+    if(points.length>=64){regionMessage('64 points is the limit. Double-click or use Close polygon to finish.');return;}
+    points.push(point);state.regionHover=null;drawRegionEditor();
+  });
+  regionCanvas.addEventListener('dblclick',event=>{
+    event.preventDefault();
+    if(isPolygonTool()){finishPolygon();return;}
+    // The double-click that just closed a polygon must not also delete its point.
+    if(state.regionTool!=='select'||performance.now()-(state.polygonClosedAt||0)<500)return;
+    const point=regionPoint(event),vertex=vertexAt(activeLayer(),point);
+    if(vertex>=0){deleteVertex(vertex);return;}
+    const label=labelAt(point);if(label)startCanvasRename(label);
+  });
+  $('region-dialog').addEventListener('keydown',event=>{
+    if(['INPUT','SELECT','TEXTAREA'].includes(event.target?.tagName)||event.ctrlKey||event.metaKey||event.altKey)return;
+    if(isPolygonTool()){
+      if(event.key==='Enter'){event.preventDefault();finishPolygon();}else if(event.key==='Backspace'){event.preventDefault();undoPolygonPoint();}
+      return;
+    }
+    if(state.regionTool!=='select'||!activeLayer()?.rect)return;
+    if(event.key==='Delete'||event.key==='Backspace'){event.preventDefault();if(state.regionVertex>=0&&activeLayer().points)deleteVertex(state.regionVertex);else deleteRegion();}
+    else if(event.key.startsWith('Arrow')){
+      event.preventDefault();const step=event.shiftKey?10:1;
+      nudgeRegion(event.key==='ArrowLeft'?-step:event.key==='ArrowRight'?step:0,event.key==='ArrowUp'?-step:event.key==='ArrowDown'?step:0);
+    }
+  });
+  // Escape steps back one level: rename, then drawing, then point selection, then close.
+  $('region-dialog').addEventListener('cancel',event=>{
+    if(state.renaming){event.preventDefault();return;}
+    if(state.regionPoints.length||state.regionDrag){event.preventDefault();setRegionTool('select');return;}
+    if(state.regionVertex>=0){event.preventDefault();state.regionVertex=-1;drawRegionEditor();}
+  });
+  $('region-dialog').addEventListener('close',()=>{state.regionDrag=null;state.regionPoints=[];state.regionHover=null;drawImagePreview();});
+  new ResizeObserver(()=>{if($('region-dialog').open){sizeRegionCanvas();drawRegionEditor();}}).observe($('region-stage'));
+}
+
+
+/* CAMERA_MATH_START */
+function computeFitFrame(positions,aspect,yaw,pitch,margin=.9) {
+  if(!positions.length)return {center:[0,0,0],scale:1,depthScale:1,span:[0,0]};
+  aspect=Number.isFinite(aspect)&&aspect>0?aspect:1;
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+  for(let i=0;i<positions.length;i+=3){const x=positions[i],y=positions[i+1],z=positions[i+2],rx=cy*x-sy*y,qy=sy*x+cy*y,ry=cp*qy-sp*z,rz=sp*qy+cp*z;minX=Math.min(minX,rx);maxX=Math.max(maxX,rx);minY=Math.min(minY,ry);maxY=Math.max(maxY,ry);minZ=Math.min(minZ,rz);maxZ=Math.max(maxZ,rz);}
+  const mx=(minX+maxX)/2,my=(minY+maxY)/2,mz=(minZ+maxZ)/2,qy=cp*my+sp*mz;
+  const center=[cy*mx+sy*qy,-sy*mx+cy*qy,-sp*my+cp*mz],spanX=maxX-minX,spanY=maxY-minY;
+  return {center,scale:margin*Math.min(2*aspect/Math.max(spanX,1e-9),2/Math.max(spanY,1e-9)),depthScale:.94/Math.max(Math.hypot(spanX,spanY,maxZ-minZ)/2,1e-9),span:[spanX,spanY]};
+}
+/* CAMERA_MATH_END */
+
+class ModelView {
+  constructor(canvas) {
+    this.canvas=canvas;this.gl=canvas.getContext('webgl',{alpha:true,antialias:true,premultipliedAlpha:false});const gl=this.gl;
+    if(!gl||!gl.getExtension('OES_element_index_uint')||!gl.getExtension('OES_standard_derivatives'))throw new Error('WebGL extensions unavailable');
+    const vertex=`attribute vec3 position;uniform vec3 center;uniform float scale;uniform float aspect;uniform float yaw;uniform float pitch;uniform float depthScale;uniform vec2 pan;varying vec3 viewPosition;varying float height;void main(){vec3 p=position-center;float cy=cos(yaw),sy=sin(yaw),cp=cos(pitch),sp=sin(pitch);vec3 r=vec3(cy*p.x-sy*p.y,sy*p.x+cy*p.y,p.z);r=vec3(r.x,cp*r.y-sp*r.z,sp*r.y+cp*r.z);viewPosition=r;height=position.z;gl_Position=vec4(r.x*scale/aspect+pan.x,r.y*scale+pan.y,-r.z*depthScale,1.);}`;
+    const fragment=`#extension GL_OES_standard_derivatives : enable\nprecision highp float;varying vec3 viewPosition;varying float height;uniform float maxHeight;uniform vec3 modelColor;uniform float customColor;void main(){vec3 n=normalize(cross(dFdx(viewPosition),dFdy(viewPosition)));if(!gl_FrontFacing)n=-n;vec3 light=normalize(vec3(-.5,.65,1.));float diffuse=max(0.,dot(n,light));float h=clamp(height/max(maxHeight,.001),0.,1.);vec3 original=mix(vec3(.22,.43,.33),vec3(.59,.73,.53),h*.65+.2);vec3 base=mix(original,modelColor*(.8+.2*h),customColor);float shade=.48+.49*diffuse;float rim=pow(1.-abs(n.z),3.)*.055;gl_FragColor=vec4(base*shade+rim,1.);}`;
+    const compile=(type,source)=>{const shader=gl.createShader(type);gl.shaderSource(shader,source);gl.compileShader(shader);if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(shader));return shader;};
+    this.program=gl.createProgram();gl.attachShader(this.program,compile(gl.VERTEX_SHADER,vertex));gl.attachShader(this.program,compile(gl.FRAGMENT_SHADER,fragment));gl.linkProgram(this.program);if(!gl.getProgramParameter(this.program,gl.LINK_STATUS))throw new Error('Shader linking failed');
+    gl.useProgram(this.program);this.position=gl.getAttribLocation(this.program,'position');this.uniforms={};for(const name of ['center','scale','aspect','yaw','pitch','depthScale','pan','maxHeight','modelColor','customColor'])this.uniforms[name]=gl.getUniformLocation(this.program,name);
+    this.vertices=gl.createBuffer();this.indices=gl.createBuffer();this.mesh=null;this.yaw=-.55;this.pitch=-.87;this.zoom=1;this.pan=[0,0];this.frame=0;this.fitFrame=null;
+    gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.disable(gl.CULL_FACE);gl.clearColor(0,0,0,0);
+    this.resizeObserver=new ResizeObserver(()=>this.fit(false));this.resizeObserver.observe(canvas);this.bindEvents();
+  }
+  setMesh(mesh,resetView=false){
+    this.mesh=mesh;const gl=this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.vertices);gl.bufferData(gl.ARRAY_BUFFER,mesh.positions,gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.indices);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,mesh.indices,gl.STATIC_DRAW);
+    if(resetView)this.fitFrame=null;
+    if(!this.fitFrame&&mesh.indices.length){this.fit();return;}
+    // Keep the same screen-space camera while replacing geometry. Expand only
+    // the depth range so newly revealed material is not clipped behind it.
+    if(this.fitFrame){
+      const f=this.fitFrame,p=mesh.positions;let radius=.94/f.depthScale;
+      for(let i=0;i<p.length;i+=3)radius=Math.max(radius,Math.hypot(p[i]-f.center[0],p[i+1]-f.center[1],p[i+2]-f.center[2]));
+      f.depthScale=.94/Math.max(radius,1e-9);
+    }
+    this.draw();
+  }
+  fit(reset=true){if(reset){this.zoom=1;this.pan=[0,0];}if(this.mesh?.indices.length)this.fitFrame=computeFitFrame(this.mesh.positions,this.canvas.clientWidth/Math.max(1,this.canvas.clientHeight),this.yaw,this.pitch);this.draw();}
+  iso(){this.yaw=-.55;this.pitch=-.87;this.fit();}
+  top(){this.yaw=0;this.pitch=0;this.fit();}
+  draw(){if(this.frame)return;this.frame=requestAnimationFrame(()=>{this.frame=0;this.render();});}
+  render(){
+    const gl=this.gl,canvas=this.canvas,dpr=Math.min(2,window.devicePixelRatio||1),width=Math.round(canvas.clientWidth*dpr),height=Math.round(canvas.clientHeight*dpr);if(!width||!height)return;
+    if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}
+    gl.viewport(0,0,width,height);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);if(!this.mesh?.indices.length)return;
+    const f=this.fitFrame||computeFitFrame(this.mesh.positions,width/height,this.yaw,this.pitch),u=this.uniforms;
+    gl.useProgram(this.program);gl.uniform3f(u.center,...f.center);gl.uniform1f(u.scale,f.scale*this.zoom);gl.uniform1f(u.aspect,width/height);gl.uniform1f(u.yaw,this.yaw);gl.uniform1f(u.pitch,this.pitch);gl.uniform1f(u.depthScale,f.depthScale);gl.uniform2f(u.pan,...this.pan);gl.uniform1f(u.maxHeight,this.mesh.stats.height);
+    const hex=$('model-color').value;gl.uniform3f(u.modelColor,parseInt(hex.slice(1,3),16)/255,parseInt(hex.slice(3,5),16)/255,parseInt(hex.slice(5,7),16)/255);gl.uniform1f(u.customColor,hex.toLowerCase()===DEFAULT_MODEL?0:1);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.vertices);gl.enableVertexAttribArray(this.position);gl.vertexAttribPointer(this.position,3,gl.FLOAT,false,0,0);gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.indices);gl.drawElements(gl.TRIANGLES,this.mesh.indices.length,gl.UNSIGNED_INT,0);
+  }
+  bindEvents(){
+    const canvas=this.canvas;let drag=null;
+    canvas.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===2};canvas.setPointerCapture(e.pointerId);});
+    canvas.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;if(drag.pan||e.shiftKey){this.pan[0]+=2*dx/canvas.clientWidth;this.pan[1]-=2*dy/canvas.clientHeight;}else{this.yaw+=dx*.009;this.pitch=Math.max(-Math.PI+.02,Math.min(-.02,this.pitch+dy*.009));}this.draw();});
+    const end=()=>{drag=null;};for(const name of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(name,end);
+    canvas.addEventListener('wheel',e=>{e.preventDefault();this.zoom=Math.max(.05,Math.min(30,this.zoom*Math.exp(-e.deltaY*.001)));this.draw();},{passive:false});canvas.addEventListener('contextmenu',e=>e.preventDefault());canvas.addEventListener('dblclick',()=>this.iso());
+  }
+}
+function applyAppearance(){$('viewer-container').style.backgroundColor=$('background-color').value;$('viewer-container').style.backgroundImage=$('show-grid').checked?'':'none';state.renderer?.draw();}
+
+for(const input of document.querySelectorAll('input[type=number]'))input.required=true;
+for(const [rangeID,numberID]of [['cutoff','cutoff-number'],['smoothing','smoothing-number'],['gamma','gamma-number']]){
+  $(rangeID).addEventListener('input',()=>{$(numberID).value=$(rangeID).value;invalidate();});
+  $(numberID).addEventListener('input',()=>{if($(numberID).checkValidity()&&$(numberID).value!=='')$(rangeID).value=$(numberID).value;invalidate();});
+}
+for(const id of ['thickness','min-height','max-height','width-mm','resolution','mirror','layer-invert','base-thickness'])$(id).addEventListener('input',invalidate);
+$('invert').addEventListener('input',()=>{state.processed=true;invalidate();});
+$('base-enabled').addEventListener('input',()=>{updateBaseUI();invalidate();});
+$('resolution').addEventListener('input',updateDetailNote);
+// Each finished edit (slider released, field left, box ticked) is one undo step.
+for(const id of ['cutoff','cutoff-number','smoothing','smoothing-number','gamma','gamma-number','thickness','min-height','max-height','layer-invert',...GLOBAL_INPUTS])$(id).addEventListener('change',()=>commitHistory());
+$('mode-cutout').addEventListener('click',()=>chooseMode('cutout'));$('mode-relief').addEventListener('click',()=>chooseMode('relief'));
+$('file-input').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});$('dropzone').addEventListener('click',()=>$('file-input').click());
+for(const type of ['dragenter','dragover'])$('dropzone').addEventListener(type,e=>{e.preventDefault();$('dropzone').classList.add('dragging');});for(const type of ['dragleave','drop'])$('dropzone').addEventListener(type,e=>{e.preventDefault();$('dropzone').classList.remove('dragging');});$('dropzone').addEventListener('drop',e=>loadFile(e.dataTransfer.files[0]));window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('drop',e=>e.preventDefault());
+$('demo-button').addEventListener('click',loadDemo);$('export-button').addEventListener('click',exportSTL);$('export-scope').addEventListener('change',updateExportButton);
+$('show-processed').addEventListener('click',()=>{state.processed=true;drawImagePreview();});$('show-original').addEventListener('click',()=>{state.processed=false;drawImagePreview();});
+$('open-help').addEventListener('click',()=>$('help-dialog').showModal());$('close-help').addEventListener('click',()=>$('help-dialog').close());
+$('help-dialog').addEventListener('click',e=>{if(e.target===$('help-dialog')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
+$('add-region').addEventListener('click',()=>openRegionEditor('new'));$('edit-regions').addEventListener('click',()=>openRegionEditor());$('close-region-editor').addEventListener('click',closeRegionEditor);$('apply-region-editor').addEventListener('click',()=>{if(isPolygonTool()&&state.regionPoints.length&&!finishPolygon())return;closeRegionEditor();});
+$('region-polygon-tool').addEventListener('click',()=>setRegionTool('polygon'));$('region-close-polygon').addEventListener('click',finishPolygon);$('region-undo-point').addEventListener('click',undoPolygonPoint);
+$('region-select-tool').addEventListener('click',()=>setRegionTool('select'));$('region-new-tool').addEventListener('click',()=>setRegionTool('new'));$('region-redraw-tool').addEventListener('click',()=>setRegionTool('redraw'));$('region-layer-select').addEventListener('change',()=>{selectLayer($('region-layer-select').value);setRegionTool('select');});
+$('region-convert').addEventListener('click',convertToPolygon);$('region-delete-point').addEventListener('click',()=>deleteVertex(state.regionVertex));$('region-delete').addEventListener('click',deleteRegion);
+$('layer-name').addEventListener('input',()=>{const layer=activeLayer(),name=$('layer-name').value.trim();if(layer&&name){layer.name=name.slice(0,48);renderLayers();drawRegionEditor();}});
+$('layer-name').addEventListener('change',()=>{if(!activeLayer())return;if(!$('layer-name').value.trim())$('layer-name').value=activeLayer().name;commitHistory();});
+// Selecting a layer rebuilds the list, so the second click of a double-click
+// lands on a new element and the browser never fires dblclick. Count clicks on
+// the list itself instead.
+let lastLayerClick={id:null,time:0};
+$('layer-list').addEventListener('click',e=>{
+  const choice=e.target.closest?.('.layer-choice');if(!choice)return;
+  const id=choice.closest('.layer-row').dataset.id,now=performance.now();
+  if(lastLayerClick.id===id&&now-lastLayerClick.time<450){lastLayerClick={id:null,time:0};startListRename(id);return;}
+  lastLayerClick={id,time:now};
+  if(id!==state.activeLayerId){selectLayer(id);$('layer-list').querySelector('.layer-row.active .layer-choice')?.focus({preventScroll:true});}
+});
+$('layer-forward').addEventListener('click',()=>moveLayer(1));$('layer-back').addEventListener('click',()=>moveLayer(-1));$('layer-duplicate').addEventListener('click',duplicateLayer);$('layer-remove').addEventListener('click',removeLayer);
+for(const id of ['undo','region-undo'])$(id).addEventListener('click',undo);for(const id of ['redo','region-redo'])$(id).addEventListener('click',redo);
+$('save-project').addEventListener('click',saveProject);$('open-project').addEventListener('click',()=>$('project-input').click());$('project-input').addEventListener('change',e=>{if(e.target.files[0])openProject(e.target.files[0]);e.target.value='';});
+// Text fields keep the browser's own undo; everywhere else Ctrl+Z is the model's.
+document.addEventListener('keydown',e=>{
+  if(!(e.ctrlKey||e.metaKey)||e.altKey||$('help-dialog').open)return;
+  const key=e.key.toLowerCase(),t=e.target;if(key!=='z'&&key!=='y')return;
+  if(t?.isContentEditable||t?.tagName==='TEXTAREA'||(t?.tagName==='INPUT'&&['text','number','search'].includes(t.type)))return;
+  e.preventDefault();if(key==='y'||e.shiftKey)redo();else undo();
+});
+for(const id of ['background-color','model-color','show-grid'])$(id).addEventListener('input',applyAppearance);
+$('reset-colors').addEventListener('click',()=>{$('background-color').value=DEFAULT_BACKGROUND;$('model-color').value=DEFAULT_MODEL;$('show-grid').checked=true;applyAppearance();});
+bindRegionEditor();
+try{state.renderer=new ModelView($('model-canvas'));}catch{$('viewer-fallback').hidden=false;}
+$('view-iso').addEventListener('click',()=>state.renderer?.iso());$('view-top').addEventListener('click',()=>state.renderer?.top());$('view-fit').addEventListener('click',()=>state.renderer?.fit());
+loadDemo();applyAppearance();
+
+</script>
+</body>
+</html>

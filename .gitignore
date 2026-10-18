@@ -72,3 +72,7 @@ id_ed25519*
 .env.*
 .netrc
 .npmrc
+
+# Local backup archive of the tetris sim folder (249 MB, over GitHub's 100 MB
+# file limit). The folder itself is committed; the zip is only a snapshot.
+vibe-code/simulations/tetris_neuro_evolution.zip

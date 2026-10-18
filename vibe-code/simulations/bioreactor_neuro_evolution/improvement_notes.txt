@@ -1,0 +1,255 @@
+# Primary Literature to Improve the Quantitative Fidelity of an hPSC Directed-Differentiation Bioreactor Simulation
+
+## TL;DR
+
+- **The single highest-value change is to replace the lumped oxygen constant (r_crit = 92 µm × √(DO/q_O2)) with the measured reaction–diffusion parameters from Wu, Rostami & Tzanakakis (PLoS ONE 2014): fitted O₂ tissue diffusivity, volumetric Vmax and KM for hESC and mESC aggregates, porosity ~0.25 and tortuosity ~1.6.** This is the only one of your mechanisms for which a directly-fit, hPSC-specific parameter table exists, and it converts a tuned constant into a defensible first-principles submodel that also unlocks hypoxia-as-signal.
+- **Your two weakest areas — per-hour stage-transition rates (Q1) and off-target biology (Q2) — remain genuinely under-measured; the literature reports inputs and endpoints, not per-hour commitment probabilities.** Keep these as tuned parameters, but re-anchor them: optimal-transport methods (Waddington-OT/LineageOT) give you couplings you can convert to residence times, and single-cell censuses now name the off-target populations (neurons, melanocytes, muscle in kidney; non-CMs in cardiac) and bound their fractions.
+- **Several of your borrowed constants are provably wrong for hPSCs and are cheap to fix:** the 30 mM lactate / 4 mM ammonia CHO thresholds, the FGF8 window (days 2–13, which matches neither Kriks nor Nolbrant), the protein reagent half-lives (FGF2 ≈ 8–10 h, not first-order-slow), and the β-cell maturation duration. Each is a one-to-few-line change with a named source below.
+
+---
+
+## How to read this report
+
+For each of the ten areas I give: **(a) what the literature supports** with numbers, ranges and conditions; **(b) what is contested and why; (c) a concrete recommendation** — a parameter value with a source, or a structural change with a statement of what it fixes; and **(d) what remains genuinely unknown**, where you should keep a tuned parameter and label it as such. A ranked fidelity-gain ÷ cost table closes the report. Publication years are noted throughout because these protocols have moved.
+
+A caveat that colors everything below: **your model is a control testbed, not a digital twin.** For a controller, the *variance structure* and the *sign and rough magnitude* of responses matter more than exact means. I have therefore flagged where a number is precise-but-non-transferable versus where a rough-but-robust range is all you need.
+
+---
+
+## Q1. Stage-transition kinetics (your weakest area)
+
+**What the literature supports.** There is no body of work that reports per-hour transition probabilities between named differentiation states — you correctly identified this as the gap. What exists is a set of methods that *recover couplings between timepoints* that you can convert into residence times:
+
+- **Waddington-OT** (Schiebinger et al., *Cell* 2019; originally bioRxiv 2017): optimal-transport couplings inferred from 315,000 single-cell RNA-seq profiles collected at **half-day intervals across 18 days** of reprogramming. The transport map between adjacent timepoints is explicitly interpretable as a transition matrix; growth/division rates are incorporated by adjusting marginal distributions. This is the closest thing to a data-driven per-interval transition operator, but it is for reprogramming, not your five protocols.
+- **LineageOT** (Nature Communications 2021) unifies lineage barcoding with OT, which reduces the well-known non-identifiability of pure-OT couplings (a "stromal → iPSC" artifact that Waddington-OT itself flags).
+- **Population-balance / compartmental ODE models fit to directed-differentiation data** exist but are sparse: the Tzanakakis-group PBE work (below) and the Glasgow/Sheffield iPSC-expansion kinetic models (Bartolini et al., population balance; Wu et al., 2023 arXiv "Stochastic Biological System-of-Systems Modelling for iPSC Culture") give fitted proliferation and aggregation kernels, not fate-transition rates.
+
+The most useful transferable observation is qualitative-but-robust: OT and live-imaging studies consistently describe commitment as **gradual over ~0.5–2 days per major transition rather than instantaneous**, with wide cell-to-cell spread — consistent with your rate-gated chain but arguing against sharp deterministic hand-offs.
+
+**What is contested.** (1) Whether pseudotime can be calibrated to real time at all without a clock (RNA-velocity gives direction, not rate). (2) Whether OT couplings represent true ancestor–descendant flow or just minimal-cost matching — the field's own reviews (e.g. LineageOT, TracingFlow 2024) treat first-order memoryless OT as an approximation that misses "regulatory momentum."
+
+**Recommendation.** Keep per-stage transition rate *k* and split fraction *q* as **tuned parameters — labeled as such.** But (i) set the *shape* of the residence-time distribution from OT/live-imaging: use a gamma/Erlang residence time (2–4 sub-steps) rather than a single exponential, because a pure first-order rate over-predicts early leakage; (ii) set the **inter-line spread** of *k* to be wide — the variability papers in Q9 imply commitment-rate CVs of tens of percent between lines. This is a structural change (residence-time distribution) of moderate cost that fixes unrealistically synchronous transitions.
+
+**What is unknown.** Absolute per-hour commitment probabilities for cardiomyocyte, DA-neuron, β-cell, kidney and hepatocyte stages. Do not pretend these are measured. This is the area where a bespoke reporter-line live-imaging experiment would most improve the model, and no current paper supplies it.
+
+---
+
+## Q2. Off-target populations
+
+**What the literature supports.**
+
+- **Kidney (best-characterized).** Single-cell censuses now name the off-target cells: **neurons/neural progenitors (SOX2⁺, STMN2⁺), melanocytes/melanoma-like (PMEL), and muscle (MYOG⁺)** (Wu et al., *Cell Stem Cell* 2018; Subramanian et al., *Nature Communications* 2019; Howden et al./PNAS 2023 multiome; and the 2025 bioRxiv "Classification of indeterminate and off-target cell types" which reanalyzed the standard protocol across 27 days and found the same off-target/indeterminate states recur *irrespective of starting line or lab*). The neural off-target is the dominant contaminant and is CRABP1-expressing (Wu et al. 2018). Transplantation under the mouse kidney capsule **diminishes** off-target fractions (Subramanian 2019).
+- **Cardiac.** Non-CM fraction is dominated by **fibroblast-like/stromal and residual non-contractile mesoderm**; lactate selection (Q6) removes them by starvation. Suspension protocols report high post-selection purity but with substantial pre-selection contamination: Mehta et al. (spinner study, PMID 30098478) report lactate selection raising purity from **72.5 ± 8.35% to 83.12 ± 8.73% cardiac troponin-T⁺ cells** with **~76% death of non-CMs**, and Tohyama-cited data show troponin-positive rate rising from **26% to 48% over 5 days of 4 mM lactate selection** — implying pre-selection off-target fractions of roughly 20–75% depending on protocol and line, with the best suspension protocols reaching 85–99% cTnT⁺ only after selection.
+- **Off-target proliferation.** The key transferable fact for your sink's growth rate: off-target populations in these protocols are generally **slower-cycling than the pluripotent input but not senescent**; kidney-organoid cell-cycle fractions (G2M+S+G1 cycling) were **~37–45%** across Morizane and Takasato protocols and hESC vs iPSC sources (Subramanian/Combes et al., *Cell Stem Cell* 2018) — i.e. off-target and on-target cycled at similar rates in that dataset, which argues against giving the sink a dramatically different growth rate from the on-target stages.
+
+**What is contested — the nephron/stromal fraction.** Your model uses 21% nephron against a reported 16.7–39% range. The disagreement is driven by **(i) annotation method** (DevKidCC reference-based classification vs de novo clustering assigns "stroma" vs "unassigned/indeterminate" differently — the 2025 classification paper exists precisely because a large fraction was previously dumped into "unassigned"); **(ii) protocol** (Takasato vs Morizane give different stromal:nephron ratios); **(iii) timepoint** (stromal fraction grows with culture age); and **(iv) dissociation bias** (Combes/Subramanian explicitly note stroma can be under- or over-recovered depending on dissociation). **There is no consensus single number**, and the honest reading is that "nephron fraction" is protocol-, age- and annotation-dependent across roughly 15–40%.
+
+**Recommendation.** (1) Keep the single sink but make its **fraction grow with run length** explicitly (the literature is unanimous that off-target fraction rises with time and is worse without selection/transplantation). (2) For kidney, do **not** hard-code 21%; sample nephron fraction from a **wide distribution (~15–40%)** per run to stress-test the controller — this is more faithful than any point estimate. (3) Set the sink growth rate **close to, not far below,** the on-target progenitor rate for kidney (cycling fractions were similar). Your current 0.0015–0.012 /h range is defensible at the low end but the upper end may be too high for post-mitotic off-targets (neurons).
+
+**What is unknown.** Per-protocol off-target *proliferation rates* are essentially unmeasured directly (they are inferred from fraction changes). Keep them tuned.
+
+---
+
+## Q3. Dose-response geometry
+
+**What the literature supports (curves, not single doses).**
+
+- **Activin A → definitive endoderm.** The D'Amour/Novocell dose series (embodied in multiple patents citing the original *Nat Biotechnol* 2005 work) tested **0, 10, 30, 100 ng/mL** and showed SOX17/MIXL1/GATA4/FOXA2 rising monotonically with a **plateau at ~100 ng/mL**; Yasunaga/Loh-style serum-free work (Stem Cell Reports 2014, Chen et al.) confirms **100 ng/mL Activin ≈ maximal** with 25–50 ng/mL BMP4 or 100 ng/mL WNT3A as co-signal. Implied EC50 is roughly **20–40 ng/mL**, Hill coefficient modest (~1.5–2, monotonic, no sharp switch).
+- **CHIR99021 → mesoderm/cardiac.** The literature is emphatic that this is the **least transferable dose in all of hPSC biology.** Optimal reported doses span **~3–12 µM** and the optimum shifts with cell line, density and cell-cycle state (Massé/Bhattacharya, *Stem Cell Reports* 2018 "Unraveling the Inconsistencies…"; the 2026 NHSJS study found **6 µM** optimal for two lines where 12 µM was hypothesized). Response is **biphasic/bell-shaped**, not sigmoidal: too little → no mesoderm, too much → non-cardiac/endoderm and apoptosis. The mechanistic driver is TCF7L1/2 level and G1 fraction.
+- **CHIR for neural caudalization (DA neurons).** Kirkeby/Nolbrant report **2–3 µM typical**, with the caudalizing effect steep: small increases shift OTX2⁺ midbrain → hindbrain fate (Gantner/Parmar, STAR Protocols 2020: "doses of 2–3 µM typical," high doses caudalize beyond midbrain).
+- **Line-to-line EC50 variance — measured, not anecdotal.** The Bhattacharya 2018 paper correlated **peak cTnT on day 14 after 4–12 µM CHIR across 17 independent monolayer hPSC cultures** against day-0 S-phase fraction — an actual measured distribution of dose-response across lines. Volmert/Aguirre (Nat Commun 2024) and Halloin (2019) report line-dependent optimal CHIR/IWR in suspension.
+
+**What is contested.** Whether CHIR variance is intrinsic (genetic) or a proxy for a controllable state variable (cell-cycle/density). Bhattacharya argues the latter — you can partly *predict* the optimum from G1 fraction — which is directly relevant to a controller.
+
+**Recommendation.** (1) For Activin A, replace any single-dose logic with a **Hill function, EC50 ≈ 30 ng/mL, n ≈ 2, plateau at 100 ng/mL** (D'Amour/Chen). (2) For CHIR, **do not use a monotone Hill** — implement a **bell-shaped (biphasic) dose-response** with a per-line optimum drawn from ~3–9 µM; this is a structural change that fixes the qualitatively wrong shape. (3) Keep your lognormal EC50 scatter but justify the width from Bhattacharya's 17-line spread rather than calling it an anecdote.
+
+**What is unknown.** Genuine EC50 distributions (mean + variance) for retinoic acid, SHH agonists, FGF9, OSM across many lines are not published as curves — keep tuned. Your ±22% global / ±14% per-channel scatter is a reasonable placeholder but is not measured for most channels.
+
+---
+
+## Q4. Reagent transport into aggregates
+
+**What the literature supports.**
+
+- **Small-molecule diffusion in spheroids is fast and near-complete for sub-mm aggregates.** Confocal-Raman diffusion measurements in neural spheroids (PNAS/Biophys J 2024, "Diffusion kinetics and perfusion times in tissue models") report **small-molecule (DMSO) effective diffusivities a modest factor below water** and full-penetration perfusion times of **minutes** for sub-mm spheroids. Dextran/FITC studies (IJMS 2013 scaffold work) give **3 kDa dextran D ≈ 1.28×10⁻⁶ cm²/s** and estimate **O₂ diffusivity in hydrogel/tissue ≈ 92–94% of water**.
+- **Growth-factor (protein) half-lives in medium at 37 °C — measured:**
+  - **FGF2/bFGF: ~8–10 h functional half-life** at 37 °C, 5% CO₂ (widely cited; the engineered thermostable FGF2-G3/FGF2-STAB extends this from <10 h to >7 days — Dvorak/Qkine). ELISA-detectable half-life measured at **~22.75 h** in one study; per Naderi et al. (*Scientific Reports* 2021), the FGF2 half-life "has been determined in the literature through western blot (**4.7–13.7 h** depending on media composition) and circular dichroism (**6.3 h** for native form FGF2)." Take-home: **FGF2 is effectively gone within a day**, which your first-order decay can capture only if the rate constant is set to ~0.07–0.09 /h, not "slow."
+  - Activin A, BMP4, HGF, OSM, FGF9 specific half-lives in culture medium are **poorly measured**; most process papers assume daily replenishment. TGF-β-superfamily ligands (Activin, BMP) are generally more stable than FGFs but a defensible number is scarce.
+- **Receptor-mediated depletion.** No hPSC-specific quantitative depletion rate exists in the literature I found; the reaction–diffusion analogy to O₂ (below) is the defensible path.
+
+**What is contested.** Whether protein penetration into aggregates is diffusion-limited or consumption/binding-limited. For sub-300-µm aggregates the Raman/dextran data suggest diffusion is *not* the bottleneck for small molecules, and only marginally so for proteins; the dominant loss is **medium-phase degradation (FGF2) and receptor binding at the surface**, not failure to reach the core.
+
+**Recommendation.** This is a case where your tuned form is **defensibly replaceable by first principles.** Model each ligand as a **reaction–diffusion problem with a Thiele modulus, exactly as you already do for O₂** (Q5). Use: small-molecule D ≈ 0.9 × D_water; protein D ≈ 0.1–0.3 × D_water (size-scaled). Add **medium-phase first-order decay with FGF2 k ≈ 0.08 /h (t½ ≈ 8–10 h)**; treat Activin/BMP as more stable (t½ ≥ 24 h) but flag as estimated. This removes two tuned exponents (dilExp/penExp) and replaces them with a ligand Thiele modulus you can compute. What it fixes: the current penExp=1.3 for proteins likely *over*-penalizes penetration for sub-300-µm aggregates where the data say proteins largely get in; the real loss is degradation.
+
+**What is unknown.** Activin A, BMP4, HGF, OSM, FGF9 half-lives at 37 °C in your specific media, and receptor-mediated depletion rates. Keep tuned and labeled.
+
+---
+
+## Q5. Oxygen and the hypoxic core
+
+**What the literature supports (this is your best-sourced area).** Wu, Rostami, Cadavid Olaya & Tzanakakis (*PLoS ONE* 2014, 9(7):e102486) fit a transient reaction–diffusion model to mESC and hESC aggregates and report a full parameter table (CGS units):
+
+- **O₂ tissue diffusivity Dₜ:** hESC **~1.2–1.5×10⁻⁵ cm²/s**, mESC **~1.3–2.4×10⁻⁵ cm²/s** (vs water **2.78×10⁻⁵ cm²/s at 37 °C**). Effective diffusivity D_eff = (ε/τ)·Dₜ.
+- **Porosity ε ≈ 0.25** (the porosity of mESC aggregates in spinner flasks at 100 rpm was 0.229±0.016 at 24 hours; hESC 0.254–0.270) and **tortuosity τ ≈ 1.5–1.6** — both essentially invariant with agitation. So **D_eff ≈ 0.16 × Dₜ ≈ 0.2–0.5×10⁻⁵ cm²/s**.
+- **Volumetric Vmax:** hESC **~1.0–1.4×10⁻⁸ mol/(cm³·s)**, mESC **~2.6–4.8×10⁻⁸ mol/(cm³·s)** — **mESC consume O₂ ~2× faster than hESC.** Per-cell equivalent **~4×10⁻¹⁷ mol/(cell·s)**.
+- **KM ≈ 3×10⁻⁸ mol/cm³** (hESC), i.e. Michaelis-Menten, not zeroth-order.
+- **Necrotic/critical-core threshold: 8 mm Hg** (from Wartenberg). With bulk fixed at 148 mm Hg: aggregates **<200 µm are normoxic throughout; >400 µm → ~23% of cells hypoxic (<30 mm Hg); 1000 µm → ~70% hypoxic.** Cells >100 µm from the surface see <10 mm Hg.
+- kLa: gas-liquid transfer kL ≈ 16.57 cm/hr; Bunsen solubility αm = 1.27×10⁻⁹ mol/(cm³·mm Hg) at 37 °C.
+
+This maps directly onto your r_crit = 92 µm × √(DO/q_O2): the "92 µm" is consistent with the onset of appreciable hypoxia in their data (negligible for radius <100 µm), but the lumped constant hides the **2× species difference in q_O2 and the per-stage differences you should carry.**
+
+**Hypoxia as a signal, not only death.** HIF signaling is instructively important in: **cardiac** (early hypoxia/HIF1α favors mesoderm and first-heart-field; the *IJMS* 2021 "Oxygen Is an Ambivalent Factor" paper shows O₂ level changes hPSC-CM differentiation and Ca²⁺ handling — measured mitochondrial O₂ consumption **3.94 ± 2.07 nmol O₂/min/mg protein**); **hepatic** (CYP zonation and maturation are O₂-graded — your CYP3A4-as-oxygen-responsive assumption is correct in sign); and **neural** (hypoxia promotes some ventral/DA fates). The retinal-organoid stirred-bioreactor bioRxiv (2025) shows oxygenation *per se* changes differentiation outcome.
+
+**What is contested.** The exact critical concentration (0 vs 8 mm Hg both used); whether specific OCR rises or falls on differentiation is lineage-dependent (the 2021 cardiac paper found similar OCR across O₂ conditions, while the general pluripotent→oxidative shift, Q6, predicts a rise).
+
+**Recommendation.** (1) **Replace the lumped r_crit constant with the Wu 2014 parameter set**: D_eff from ε/τ·Dₜ, Michaelis-Menten Vmax with per-stage scaling (start pluripotent ≈ 4×10⁻¹⁷ mol/cell/s, scale up for oxidative derivatives per Q6), KM ≈ 3×10⁻⁸ mol/cm³, critical core 8 mm Hg. This is the highest fidelity-per-effort change in the whole report. (2) **Add a HIF signal channel** driven by the same core-O₂ field you already compute, feeding the instructive-signal fraction *q* for cardiac (early) and hepatic (maturation). Which protocols change: cardiac induction timing and hepatocyte CYP maturation become O₂-controllable — directly relevant to a controller that can set DO.
+
+**What is unknown.** Per-stage specific OCR for DA-neuron, β-cell, kidney and hepatocyte stages specifically — the Wu data are for pluripotent aggregates. Scale from Q6 metabolism and label as estimated.
+
+---
+
+## Q6. Metabolism
+
+**What the literature supports.**
+
+- **The glycolytic→oxidative shift is quantified.** Pluripotent hPSCs are highly glycolytic (high ECAR, low OCR, UCP2 restrains pyruvate entry — Zhang/Teitell). On differentiation, **mesoderm requires glutaminolysis and a distinct mitochondrial metabolism** (Cliff/Dalton, *Cell Res*/*Cell Stem Cell* 2019 "Mitochondrial metabolism and glutamine are essential for mesoderm differentiation"): they give per-lineage OCR (mito stress test), and **media-footprint glucose consumption, lactate production, glutamine consumption and glutamate production at day 5 for endoderm/mesoderm/ectoderm** — a directly usable per-lineage flux table.
+- **Lactate as CM fuel (Tohyama basis).** Tohyama et al. (*Cell Stem Cell* 2013) and the STAR Protocols 2022 update: purification uses **glucose- and glutamine-depleted medium + 4 mM L-lactate** — Tohyama measured viability of purified hESC-derived cardiomyocytes in glucose-depleted conditions across a range of lactate concentrations and found the lowest numbers of dead cells at 4 mM lactate; non-CMs die within days, CMs survive because they oxidize lactate. Reported outcome: **>90% cTnT⁺ after selection, <50% CM loss** (vs up to 80% loss for antibody sorting). Lactate-purified CMs show **OCR increased ~1.5-fold** (PLoS One 2020). This gives you both the threshold (CMs tolerate 0 glucose + 4 mM lactate; non-CMs do not) and the kinetics (selection over ~3–8 days).
+- **Inhibition thresholds.** Your 30 mM lactate / 4 mM ammonia half-maxima are **borrowed from CHO practice and are likely wrong for hPSCs.** hPSC-specific data are thinner but suggest hPSCs are *more* lactate-sensitive during expansion (inhibition seen at **lower** lactate, often cited ~20–35 mM as growth-inhibitory in suspension expansion), while ammonia sensitivity is protocol-dependent. The Tohyama work shows CMs specifically *thrive* on lactate as fuel — so a single global lactate-inhibition term is structurally wrong: lactate is a poison during expansion and a fuel during CM selection.
+
+**What is contested.** Whether hPSC lactate inhibition is pH-mediated (lactic acid titrating bicarbonate — which you already model via Henderson–Hasselbalch) or a specific lactate effect. Much of the apparent "lactate inhibition" is actually acidification, meaning double-counting is a risk if you have both a lactate term and a pH term.
+
+**Recommendation.** (1) **Make lactate context-dependent:** an inhibitory term during expansion/most stages, but a **fuel term for CMs during lactate selection** (Tohyama) — otherwise your cardiac selection stage is unphysical. (2) **Re-derive the lactate half-max for hPSCs (~20–30 mM) rather than importing 30 mM from CHO**, and check you are not double-counting with pH. (3) **Ammonia 4 mM is probably too tolerant** — flag and keep tuned pending hPSC-specific data. (4) Use the Cliff/Dalton per-lineage day-5 flux table to set stage-specific glucose/glutamine uptake and lactate yield rather than one generic value, and scale specific OCR up for oxidative derivatives.
+
+**What is unknown.** hPSC-specific ammonia inhibition half-max; per-stage fluxes beyond the three germ layers. Keep tuned.
+
+---
+
+## Q7. Aggregate population balance
+
+**What the literature supports.** The Tzanakakis group provides a fitted **population-balance equation (PBE)** for hPSC/ESC aggregates (Wu 2014 above; Cadavid Olaya thesis): collision-induced aggregation + proliferation, with **agitation-dependent kernels** (Table 2: aggregation rate constants and exponents at 60/80/100 rpm, with the aggregation kernel k falling ~200× from 60→80 rpm). Measured mean diameters: **mESC 113 µm at 100 rpm vs 174 µm at 60 rpm; hESC 164 µm at 45 rpm, 192 µm at 60 rpm** — i.e. **higher rpm → smaller aggregates**, monotonic. The "inverse problem" paper (Bartolini/Tzanakakis, *J Biotechnol* 2015) fits kernels to transient size data. Bench-scale comparison (PBS-Mini vertical-wheel, *Front Bioeng* 2023) gives **narrow size distributions** (88 µm vs 126 µm mean at two scales) and shows the CV depends strongly on vessel type — vertical-wheel and AggreWell give tight distributions, horizontal-impeller spinners broader.
+
+**What is contested.** Whether a single mean is adequate. The Wu 2014 paper's central finding is that **size heterogeneity maps directly onto O₂-exposure heterogeneity** — cells in large aggregates spend longer hypoxic even in a well-mixed vessel. This is an explicit argument that a **single mean diameter loses first-order information** when aggregates approach the hypoxic-onset size (~300–400 µm).
+
+**Recommendation.** Move from one mean to a **two-moment model (mean + variance/CV)**, because the CV feeds the hypoxic-core death and reagent-penetration terms nonlinearly — a right-skewed distribution has more large aggregates than the mean implies. Use the Wu/Bartolini kernels for the rpm dependence. What it fixes: under a single mean you systematically under-count the hypoxic/necrotic tail. **How much the CV matters empirically:** the Wu data show that at a mean of ~200 µm, essentially no cells are hypoxic, but the distribution tail into >400 µm already puts ~23% of *those* cells hypoxic — so CV matters most exactly when the mean is near 300 µm.
+
+**What is unknown.** Breakup kernels are much less well-measured than aggregation kernels for hPSCs (most fits are aggregation+growth only). Keep breakup tuned.
+
+---
+
+## Q8. Shear
+
+**What the literature supports.** The transferable quantity is **energy dissipation rate / Kolmogorov microscale**, not rpm. Spinner-flask PIV/CFD (Flow Characterization, *PLoS One* 2014; Zhao et al. 2021 impeller PIV) show **average and local shear rate scale roughly linearly with impeller speed**, and that the **Kolmogorov scale must stay above aggregate size** to avoid breakup/damage. The cortical-spheroid patent and hPSC reviews cite **~3–15 dyne/cm² macroscopic shear** as the operating window for stirred suspension, with interstitial flow inside aggregates far lower (0.1–0.2 dyne/cm²). hPSCs are explicitly noted as **shear-sensitive** (Kropp et al. 2017). Vertical-wheel bioreactors achieve suspension at **lower energy dissipation** than horizontal impellers (Borys/Dang 2021), which is why they give tighter, more compact aggregates.
+
+**What is contested.** Whether shear acts mainly through viability (breakup/death) or instructively (mechanotransduction affecting fate/pluripotency). The suspension-bioreactor naïve-pluripotency work (Q7 refs) argues the mechanical environment has an *instructive* component, not only a damage component.
+
+**Recommendation.** **Replace the rpm-based Hill (half-max 120 rpm) with an energy-dissipation-rate (ε_EDR) or Kolmogorov-scale criterion**, which is portable between vessel geometries — the whole point of your control testbed. Damage rises when the Kolmogorov microscale approaches the aggregate diameter. This is a moderate structural change that fixes non-transferability: your current 120-rpm half-max is meaningless in a different vessel, whereas an EDR threshold (~target the 3–15 dyne/cm² window) transfers. Keep the (d/250 µm)^1.5 size scaling — larger aggregates are more shear-vulnerable, which is qualitatively correct.
+
+**What is unknown.** A quantitative hPSC shear-death dose-response in portable units (death rate vs EDR) is not cleanly published — most work reports outcomes at one rpm in one vessel. Keep the death magnitude tuned; only the *independent variable* (EDR not rpm) is well-justified.
+
+---
+
+## Q9. Batch-to-batch and line-to-line variability (what the controller trains against)
+
+**What the literature supports (distributions, not means — exactly what you need).**
+
+- **The definitive dataset: iPSCORE cardiac.** 191 iPSC lines from 181 individuals differentiated to cardiovascular progenitors (D'Antonio-Chronowska et al., *Stem Cell Reports* 2019): the authors "differentiated 191 iPSC lines to generate iPSC-derived cardiovascular progenitor cells (iPSC-CVPCs)" and observed cellular heterogeneity across samples due to varying fractions of **two cell types — cardiomyocytes (CMs) and epicardium-derived cells (EPDCs)** — driven by non-genetic (clone, passage) and genetic factors including X-chromosome dosage. This is a real, large, quantified distribution of differentiation outcome across lines.
+- **Large transcriptomic variability libraries:** Carcamo-Orive et al. (*Cell Stem Cell* 2017, 317 lines) and Kilpinen et al. (HipSci, 215 lines) identify **polycomb targets and eQTLs** driving differentiation-efficiency variance, and quantify that **inter-donor >> intra-donor (inter-clone)** variance.
+- **Lineage-specific propensity distributions:** retinal (15 patient lines, *STCLTM* 2023: a 14-gene signature predicts good vs poor producers); neural anterior-posterior fate (Ortmann et al./Strano 2020, 31 lines: **line-specific caudalization tendencies**); endoderm (non-CG methylation predicts DE propensity).
+- **Covariance structure — your key assumption.** Your model assumes a line that responds weakly to one cue responds weakly to all. The literature **partially contradicts this**: propensity is often **lineage-specific** (a good endoderm line is not necessarily a good neural line — Strano/Ortmann show lines with specific regional biases; retinal propensity is predicted by *retinal* genes not global "differentiation quality"). There is *some* global component (overall "differentiation efficiency" QTLs exist) but it is not dominant.
+
+**What is contested.** How much variance is genetic (fixed per donor, ~heritable) vs epigenetic/stochastic (varies batch-to-batch within a line). Consensus: **genetic/donor effects dominate line-to-line; passage and clone drive intra-line batch variation.**
+
+**Recommendation.** (1) Keep your per-line EC50/rate scatter, but **change the covariance structure from fully-correlated to block-structured**: a modest global "differentiation efficiency" factor plus **larger lineage-specific independent components.** This is the single most important fidelity fix for a *controller-training* testbed, because a fully-correlated assumption makes the control problem artificially easy (one hidden variable explains everything). (2) Add **reagent-lot effects** as an independent batch nuisance (well-documented for Activin A, CHIR, Matrigel). (3) Calibrate inter- vs intra-line variance ratio from iPSCORE/HipSci: inter-donor variance is the larger component.
+
+**What is unknown.** The exact covariance matrix across your five specific lineages is not published. Keep the block structure but label the off-diagonal magnitudes as tuned.
+
+---
+
+## Q10. Process analytics
+
+**What the literature supports.**
+
+- **Dielectric spectroscopy / capacitance for biovolume** is the most mature: it is "generally regarded as the most robust and reliable" online viable-biomass method (BioProcess International; Aber Futura), with **linear capacitance-vs-viable-cell-volume correlations R² ~0.95** demonstrated across **50–2000 L** CHO scale-up (Springer 2019), and **specifically validated on pluripotent stem-cell aggregate cultures** (the *Curr Opin Biotechnol* 2023 capacitance review cites hPSC-aggregate online density monitoring). Caveat that matters for your virtual sensor: **capacitance tracks viable cell *volume*, so it drifts when cell size changes** (differentiation changes cell diameter) — the Vero-cell and CHO papers explicitly note the calibration must be corrected for cell-size evolution. This is a real, modelable drift source for your simulated sensor.
+- **Off-gas OUR / DO / pH** are standard and reliable; your treatment is fine.
+- **Raman** for online metabolites (glucose, lactate, glutamine, ammonia) is established in mammalian culture (Abu-Absi 2011; Whelan 2012) and increasingly paired with capacitance for **dynamic feeding control** (Bioprocess Biosyst Eng 2020). Latency is minutes with chemometric models; the limiting factor is model calibration and the **limit of detection** (Yang 2024).
+- **Emerging:** on-chip combined pH+O₂ sensors for hPSC-CMs (ACS Sensors 2021, RuOx electrodes); focused-beam reflectance (FBRM) for aggregate size; microfluidic sampling.
+
+**What is contested.** Whether any online sensor can read **differentiation state / phenotype** in real time — the consensus (Pharma's Almanac 2024 review; ISCT) is **no**: "sensor limitations — especially for real-time viability, differentiation state, and phenotype — define the practical ceiling of closed-loop control." Flow cytometry remains offline with the delays you model.
+
+**Recommendation.** (1) Your capacitance virtual sensor should include a **size-dependent drift term** during stages where cell diameter changes — this is measured, not hypothetical, and makes the control problem realistically harder. (2) Add **Raman as an optional online metabolite channel** (glucose/lactate) with minutes-scale latency and a calibration-error term, since it would materially change what the controller can see (closes the loop on feeding). (3) Keep flow cytometry offline with your 1/3/5 h delays — this matches reality.
+
+**What is unknown.** Quantified drift rates for capacitance specifically in *differentiating* (size-changing) hPSC cultures are not cleanly published — keep the drift magnitude tuned but label it.
+
+---
+
+## Cross-cutting requests
+
+### Published control work on stem-cell bioreactors
+Genuine closed-loop *differentiation* control is nearly absent. What exists: (i) **MPC and capacitance-triggered feeding for biomass/perfusion** in CHO and iPSC *expansion* (Springer MPC 2022; capacitance-based on-demand feeding); (ii) a **closed-loop neural-progenitor differentiation** patent (biochemical + physical stimuli, intelligent control algorithm); (iii) closed-loop T-cell expansion. The honest state of the art (Pharma's Almanac 2024): feedback can guide *proliferation* trajectories, but **differentiation-state control is blocked by the sensor ceiling** in Q10 — which is precisely the gap your testbed explores. There is **no published MPC that controls hPSC fate to a target purity**, so your testbed is addressing a real, open problem.
+
+### Mechanistic/hybrid models to borrow from (with parameter tables)
+- **Wu/Tzanakakis 2014** (O₂ reaction–diffusion + PBE) — full parameter table, your best source (Q5, Q7).
+- **Bartolini/Tzanakakis 2015** (PBE inverse problem) — aggregation kernels.
+- **iPSC expansion kinetic models** (Glasgow group; Wu et al. 2023 arXiv stochastic system-of-systems) — growth, glucose, lactate, aggregate size with parameters, including **iPSCs using lactate as a metabolic substrate**.
+- **Waddington-OT / LineageOT** — transition-coupling machinery (Q1).
+
+### Scale effects (100 mL → clinical)
+Quantitatively: cardiac suspension protocols scale from **100–150 mL to 2000 mL producing >1.3×10⁹ CMs at 85%+ purity** (Zweigerdt protein-free 2024) and to **350–500 mL yielding ~4×10⁸ CMs at >90% purity** (Kempf/Zweigerdt 2019). What changes with scale: **kLa and mixing time degrade**, DO gradients worsen, and **shear/EDR distributions broaden** — so your omissions of *mixing time and spatial structure* (below) become more first-order at clinical scale. Yields per mL are broadly **scale-invariant (~1–2×10⁶ CM/mL)** across 20–2000 mL when the process is well-controlled, which validates using per-mL yields as a scale-portable target.
+
+### Deliberate omissions — which are first-order?
+- **Mixing time / spatial structure: likely first-order at ≥1 L, second-order at 100 mL.** The Wu 2014 O₂ work shows even a "well-mixed" 50 mL vessel develops bulk pO₂ decline (to 82 mm Hg by day 4) and 58% of cells hypoxic — a spatial/temporal effect a single-compartment model misses. Flag as first-order for scale-up questions.
+- **Apoptosis vs necrosis: first-order for your hypoxic-core term.** Necrotic-core death (O₂) and shear/apoptotic death have different kinetics and different rescue levers (DO vs rpm); collapsing them loses controllability. Recommend splitting at least into O₂-necrosis vs shear-death.
+- **Secreted-factor accumulation beyond one Wnt term: plausibly first-order for cardiac** (endogenous Wnt is the documented driver of line-to-line cardiac variability — Murry group), and for autocrine BMP/Nodal in endoderm. Your single autocrine Wnt term is the right first thing to have; a second (BMP/Nodal) would be the next.
+- **Cell cycle: first-order for CHIR response specifically** (Bhattacharya 2018: G1/S fraction predicts CHIR optimum) — relevant if the controller sets CHIR.
+- **Contamination and harvest decision: correctly omitted** as second-order for a fate-control testbed.
+
+---
+
+## Specific open questions from the current build
+
+**β-cell 33 days → 30% purity; stage-6 maturation 7–25 days.** What governs it: **maturation, not specification, is rate-limiting**, and it is **asynchronous** — the Balboa/Otonkoski (*Nat Biotechnol* 2022) and Velazco-Cruz/Millman work show insulin content rising **6-fold over the first 3 weeks of the final stage** while **β-cell proliferation falls ~80% (2.1%→0.46%)**; GSIS (biphasic insulin secretion) only emerges late and often **only completes after transplantation** (months in vivo). Purity of ~30% in vitro is **in the normal published range** (many protocols report 20–50% C-peptide⁺ before enrichment; ENTPD3⁺ or self-aggregation enriches to ~90%). So your 33 d / 30% is realistic; the model should treat **stage-6 duration as trading time for maturation *quality* (GSIS), not for purity** — purity is roughly flat over stage 6 while function climbs. Recommend making the stage-6 readout a maturation score that saturates slowly (weeks), not a purity gain.
+
+**DA-neuron FGF8 timing (your days 2–13).** Your window matches **neither** Kriks 2011 (early, ~days 1–7) **nor** Nolbrant/Kirkeby 2017 (**FGF8b from day 9, and for some lines only from day 11**, because *early* FGF8 disrupts caudal ventral-midbrain patterning). The current consensus (Nolbrant STAR Protocols 2017; Kirkeby 2017; Gantner 2020) is **late FGF8b (day ~9–16)**, and several groups **omit FGF8 entirely and caudalize with CHIR (2–3 µM)**. The effect size is large and qualitative: **early FGF8 is reported as harmful** to midbrain identity. **Recommendation: move your FGF8 window to days 9–16 (late)**, and optionally add the CHIR-only alternative. This is a concrete, well-supported fix.
+
+**Hepatocyte maturation / CYP3A4.** The maturation gap is real and large: hPSC-HLCs typically reach **CYP3A4 activity 1–2 orders of magnitude below primary human hepatocytes** and retain fetal markers (AFP, CYP3A7). Best quantified accounts: HepaRG dual-reporter CYP3A4/CYP3A7 systems (Sci Rep 2017; *Pharmacol Res Perspect* 2020, which showed 2D optical-plate + collagen roughly **doubles** CYP3A4). Your treatment of CYP3A4 as **oxygen-responsive is directionally supported** (zonation is O₂-graded). Levers that partially close the gap: **OSM + HGF + dexamethasone** (Kamiya 2001: OSM > HGF for G6Pase/TAT/glycogen), **thyroid hormone (T3)** activating CYP3A4, 3D/spheroid culture, and the 2025 *Dev Cell* single-cell activation screen naming maturation regulators. **Nothing fully closes it in vitro** — keep the functional score well below primary and label the gap as real biology, not a model artifact.
+
+**Residual pluripotency (your half-max at 3%).** Reported residual at harvest varies widely by protocol and detection method (qPCR/OCT4, flow TRA-1-60, highly-sensitive SERS/ddPCR detecting **1 in 10⁶**). The teratoma dose-response is **not a clean 3% threshold**: teratoma incidence depends heavily on **site** (kidney capsule 100% > subcutaneous+Matrigel 94% > intramuscular 12.5% — HESI consensus 2025) and on as few as **~10²–10⁴ undifferentiated cells** forming teratomas in permissive sites. **Recommendation: your 3% half-max is far too tolerant for a safety-relevant readout** — the real risk onset is orders of magnitude lower in cell fraction, and site-dependent. For a control testbed, model residual-pluripotency penalty as steep and low-threshold, and label the absolute threshold as uncertain (it is genuinely contested).
+
+**Protocol yields per cell seeded (your 2.28 cardiac, 0.83 DA, 0.62 β, 2.22 kidney, 2.02 hepatic).** These are **plausible for suspension** but the cardiac number is at the low end. Measured suspension cardiac yields: **~3.58 CM per input hPSC** (Volmert/Aguirre *Nat Commun* 2024, spinner) and **~5–20 TNNT2⁺ per seeded hPSC** (xeno-free, *Front* 2020) — so your 2.28 is conservative but within range. The **much higher monolayer numbers come from both accounting and biology**: (i) monolayer counts often include proliferative expansion during differentiation and report per-input-at-a-later-stage, not per-hPSC-seeded (accounting); (ii) monolayer avoids the aggregate hypoxic-core and shear losses that suppress suspension yield (biology). Both are real. **Recommendation: keep suspension yields in the ~1–4 range; treat literature monolayer yields as non-transferable to your vessel** unless you replicate their accounting convention.
+
+---
+
+## Ranked recommendations (fidelity gain ÷ implementation cost)
+
+**Tier 1 — highest ratio (do first):**
+1. **[Structural, moderate cost] Replace lumped r_crit with the Wu/Tzanakakis 2014 O₂ reaction–diffusion parameter set** (D_eff via ε≈0.25/τ≈1.6·Dₜ; Michaelis-Menten Vmax ~1×10⁻⁸ mol/cm³/s hESC scaled per stage; KM ~3×10⁻⁸ mol/cm³; critical core 8 mm Hg). Fixes the least-defensible constant in the model with the best-available data. (Q5)
+2. **[One-line constant] Move FGF8 window from days 2–13 to days 9–16 (late).** Large, well-supported fate effect; trivial to change. (DA open question)
+3. **[One-few lines] Set FGF2 medium half-life to ~8–10 h (k≈0.08/h) and make protein reagent decay ligand-specific.** Measured; your first-order decay just needs the right constant. (Q4)
+4. **[Few lines] Make lactate context-dependent — inhibitor during expansion, fuel during CM lactate selection — and re-anchor the half-max to hPSC (~20–30 mM), checking for pH double-counting.** Fixes an unphysical cardiac-selection stage. (Q6)
+5. **[Structural, low cost] Change the line-variability covariance from fully-correlated to block-structured (small global + larger lineage-specific components).** Most important fix *for a controller testbed* specifically; cheap. (Q9)
+
+**Tier 2 — high value, moderate cost:**
+6. **[Structural] Make CHIR dose-response biphasic (bell-shaped), not monotone Hill**, per-line optimum ~3–9 µM. (Q3)
+7. **[Structural] Replace rpm-based shear Hill with an energy-dissipation-rate / Kolmogorov-scale criterion** for vessel-portability. (Q8)
+8. **[Structural] Go from one aggregate mean to a two-moment (mean+CV) population balance** using Wu/Bartolini kernels; matters most near 300 µm mean. (Q7)
+9. **[Structural] Replace the two tuned reagent-transport exponents with a per-ligand Thiele-modulus reaction–diffusion** (small-molecule D≈0.9×water, protein D≈0.1–0.3×water). (Q4)
+10. **[Few lines] Split the death term into O₂-necrosis vs shear/apoptosis** (different rescue levers → better controllability). (omissions)
+
+**Tier 3 — worthwhile refinements:**
+11. **[Few lines] Add a HIF instructive-signal channel** off the existing core-O₂ field for cardiac (early) and hepatic (maturation). (Q5)
+12. **[Few lines] Make β-cell stage-6 a slowly-saturating maturation/GSIS score, decoupled from purity.** (β open question)
+13. **[One-line] Steepen and lower the residual-pluripotency penalty threshold** well below 3%; label absolute value as contested. (residual open question)
+14. **[Few lines] Add size-dependent drift to the capacitance virtual sensor and an optional Raman metabolite channel.** (Q10)
+15. **[Few lines] Set stage-specific glucose/glutamine/lactate fluxes from the Cliff/Dalton per-lineage table; scale OCR up for oxidative derivatives.** (Q6)
+16. **[Structural, keep tuned] Give the off-target sink a run-length-dependent growth fraction; for kidney sample nephron fraction from ~15–40% rather than fixing 21%.** (Q2)
+
+**Keep tuned and explicitly labeled (do not pretend these are measured):** per-hour stage-transition rates and split fractions (Q1); off-target proliferation rates (Q2); Activin/BMP/HGF/OSM/FGF9 half-lives and receptor-depletion rates (Q4); ammonia inhibition half-max (Q6); aggregate breakup kernels (Q7); absolute shear-death magnitude (Q8); the lineage covariance off-diagonals (Q9); capacitance drift magnitude (Q10); absolute teratoma threshold (residual question).
+
+---
+
+## Caveats
+
+- **Almost every quantitative parameter above was measured in a different format than your 100 mL stirred vessel** (monolayer, static aggregates, spinner flasks, or CHO cells). The O₂ parameters (Q5) are from mESC/hESC *pluripotent* aggregates in spinners — highly transferable for geometry but not for differentiated-stage OCR. Growth-factor half-lives are medium-chemistry-dependent. Treat every transferred number as carrying at least the reported ±SD *plus* an unquantified format-transfer uncertainty.
+- **The two areas you flagged as weakest (transition kinetics, off-target biology) remain weak after this search** because the primary literature genuinely does not report per-hour transition rates or off-target proliferation rates. This is not a search failure; it is the state of the field. Your instinct to keep them as tuned parameters is correct.
+- **Preprints (2024–2025) are used where they are state of the art** (kidney off-target classification 2025; retinal-organoid oxygenation 2025; β-cell maturation) and flagged as not-yet-peer-reviewed. Where a peer-reviewed equivalent exists it is preferred.
+- **For a control testbed, faithfully wrong-but-hard beats precisely-right-but-easy.** Several recommendations above (block covariance, capacitance drift, split death terms, bell-shaped CHIR) deliberately make the control problem *harder* in ways that match reality — that is the point of the testbed, and is more valuable than matching any single mean.

@@ -79,11 +79,25 @@ Run.prototype.prepare = async function () {
     if (!this.alive) return;
     this.evo = new CE.Evolution({
         ctx: this.ctx, seed: s.seed, popSize: s.pop, maxExperts: s.experts, seedNote: this.seedNote,
-        evaluate: jobs => this.pool.evaluate(jobs),
+        evaluate: jobs => this._evaluate(jobs),
         onExtinct: (sp) => { this.extinct[sp] = this.gen(); this._emit('extinct', sp, this.gen()); this._log('dead', G.SPECIES[sp].short + ' went extinct', '— far behind the leader and no longer improving, so it stops getting breeding slots.'); }
     });
     if (this.seeds.length) this.evo.seed(this.seeds);
     this.t0 = Date.now();
+};
+
+// A page that listens for `tried` sees every design the moment its sample score comes
+// back (the preview over the empty chart); `batch` says how many a generation holds.
+// Queuing the jobs one by one hands them to the workers in exactly the order a batch
+// would, and each result is still matched to its own design, so nothing evolves
+// differently. Without a listener (the headless trainer) it is the plain batch call.
+Run.prototype._evaluate = function (jobs) {
+    if (!this.on.tried) return this.pool.evaluate(jobs);
+    this._emit('batch', jobs.length, this.gen());
+    return Promise.all(jobs.map(job => this.pool.evaluate([job]).then(res => {
+        this._emit('tried', job, res[0]);
+        return res[0];
+    })));
 };
 
 // one generation of evolution, then ask for exams of every family leader that changed

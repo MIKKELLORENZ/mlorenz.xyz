@@ -310,7 +310,7 @@ const LIN_DOPA = {
         cue("shh", "SHH agonist (SAG / purmorphamine)", "SHH-ag", "µM", "sm", 1.2, 0.25, 0.50),
         cue("chir", "CHIR99021 (caudalising Wnt)", "CHIR", "µM", "sm", 6.0, 1.5, 0.25),
         cue("fgf8", "FGF8b", "FGF8", "ng/mL", "protein", 200, 60, 1.20),
-        cue("mat", "BDNF + GDNF + AA + dbcAMP + DAPT", "matur.", "×", "protein", 1.5, 0.35, 1.00)
+        cue("mat", "BDNF + GDNF + AA + dbcAMP + DAPT", "Maturation mix", "×", "protein", 1.5, 0.35, 1.00)
     ],
     media: [
         medium("basal", "neural induction (N2/B27)", { glc: 11.1, gln: 2.0, cost: 0.8 }),
@@ -454,7 +454,7 @@ const LIN_BETA = {
         cue("chir", "CHIR99021 (one-day Wnt pulse)", "CHIR", "µM", "sm", 4.0, 1.2, 0.25),
         cue("ra", "retinoic acid", "RA", "µM", "sm", 2.5, 0.6, 0.30),
         cue("sant", "SANT-1 (SHH inhibitor)", "SANT-1", "µM", "sm", 0.6, 0.10, 0.40),
-        cue("endo", "ALK5i + γ-secretase inhibitor + T3", "endocr.", "×", "sm", 1.5, 0.40, 0.90),
+        cue("endo", "ALK5i + γ-secretase inhibitor + T3", "Endocrine mix", "×", "sm", 1.5, 0.40, 0.90),
         cue("ldn", "LDN193189 (BMP inhibitor)", "LDN", "µM", "sm", 0.5, 0.12, 0.35)
     ],
     media: [

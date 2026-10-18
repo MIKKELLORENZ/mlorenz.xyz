@@ -7,151 +7,132 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="../../shared_assets/mobile.css">
 </head>
-<body>
+<body data-mode="exhibit">
 <div id="intro" role="dialog" aria-modal="true" aria-labelledby="intro-title">
     <div class="intro-card">
-        <div class="eyebrow">Bioreactor control · neuroevolution</div>
         <h2 id="intro-title">Tending the Culture</h2>
-        <p>Half a million stem cells go into a stirred bottle. Two to four weeks later it
-           should be full of <b>whatever was ordered</b> — heart cells, dopamine neurons,
-           β cells, kidney organoids or hepatocytes. One neural network runs the bottle for
-           all five, sees only what a lab sees, and is scored against each product's
-           published recipe run on the identical batch beside it.</p>
-
-        <div class="intro-section">Choose a product to make</div>
-        <div class="seg wrap" id="intro-lin" role="group" aria-label="Product"></div>
-
-        <div class="intro-choices">
-            <button id="intro-watch" class="intro-choice primary">
-                <b>Watch the network against the protocol</b>
-                <small>Same batch, same failures — the only difference is who decides</small>
-            </button>
-        </div>
-        <div class="intro-foot">
-            <button id="intro-explore" class="intro-dismiss">just let me look around</button>
-            <p class="hint">Reopen this with <b>Menu</b></p>
+        <p>A neural network runs a stirred bioreactor that turns stem cells into heart
+           cells, neurons, β cells, kidney organoids or liver cells over two to four
+           weeks. It sees only what a lab can measure, and every batch is also run by
+           the published protocol on identical cells, so the two can be compared.</p>
+        <div class="field-label">Product</div>
+        <div class="seg" id="intro-lin" role="group" aria-label="Product"></div>
+        <div class="intro-actions">
+            <button class="btn primary" id="intro-start">Start</button>
         </div>
     </div>
 </div>
 
 <div id="app">
     <header id="topbar">
-        <div class="brand">
-            <h1>Tending the Culture</h1>
-            <span class="brand-sub">five differentiation protocols, one evolved controller</span>
-        </div>
-        <div class="chooser-wrap">
-            <span class="chooser-label">Making</span>
-            <div class="seg" id="lin-group" role="group" aria-label="Which product to make"></div>
-        </div>
-        <div id="top-stats" data-lab>
-            <span class="tstat">generation <b id="stat-gen">1</b></span>
-            <span class="tstat">best <b id="stat-best">—</b></span>
-            <span class="tstat">alive <b id="stat-alive">—</b></span>
-        </div>
-        <div id="top-versus" data-exhibit>
-            <span class="vs-side vs-learn"><i></i><span class="vs-name">network</span><b id="vs-learn">—</b></span>
-            <span class="vs-mid" id="vs-verdict">—</span>
-            <span class="vs-side vs-sop"><b id="vs-sop">—</b><span class="vs-name">protocol</span><i></i></span>
+        <div class="brand"><h1>Tending the Culture</h1></div>
+        <div class="product">
+            <span class="field-label">Product</span>
+            <div class="seg" id="lin-group" role="group" aria-label="Product"></div>
         </div>
         <div id="top-actions" data-mob-bar>
-            <button class="btn" id="btn-next-scn" title="A new batch: a different cell line, a different inoculum, different things going wrong">New batch</button>
-            <div class="seg" id="speed-group" aria-label="Playback speed"></div>
-            <button class="btn primary" id="btn-pause">Pause</button>
-            <button class="btn" id="btn-menu">Menu</button>
+            <button class="btn" id="btn-next-scn" title="Draw a new batch: product, cell line, inoculum and faults">New batch</button>
+            <div class="seg" id="speed-group" role="group" aria-label="Playback speed"></div>
+            <button class="btn" id="btn-pause">Pause</button>
+            <button class="btn" id="btn-about">About</button>
         </div>
     </header>
 
     <div id="layout">
-        <aside id="panel-left">
+        <aside id="panel-left" data-mob-label="Details">
             <div id="panel-left-scroll">
-            <div class="card order-card">
-                <h2>This batch</h2>
-                <div class="order-head">
-                    <span class="order-name" id="ord-name">—</span>
-                    <span class="order-days" id="ord-days">—</span>
+                <section class="card">
+                    <div class="card-head">
+                        <h2 id="ord-name">—</h2>
+                        <span class="meta" id="ord-days">—</span>
+                    </div>
+                    <p class="lede" id="ord-why">—</p>
+                    <dl class="facts" id="ord-facts"></dl>
+                </section>
+
+                <section class="card">
+                    <div class="card-head"><h2>What the controller sees</h2></div>
+                    <div class="group-label">Probes, every hour</div>
+                    <dl class="readings">
+                        <div><dt>Dissolved O₂</dt><dd id="nb-DO">—</dd></div>
+                        <div><dt>pH</dt><dd id="nb-pH">—</dd></div>
+                        <div><dt>Medium colour</dt><dd id="nb-colour">—</dd></div>
+                        <div><dt>Viable biomass</dt><dd id="nb-cap">—</dd></div>
+                    </dl>
+                    <div class="group-label">Lab assays, hours late</div>
+                    <dl class="readings">
+                        <div><dt>Glucose</dt><dd id="nb-glc">—</dd></div>
+                        <div><dt>Lactate</dt><dd id="nb-lac">—</dd></div>
+                        <div><dt>Viable cells</dt><dd id="nb-viable">—</dd></div>
+                        <div><dt>Aggregate size</dt><dd id="nb-aggD">—</dd></div>
+                        <div><dt id="nb-prod-label">Product marker</dt><dd id="nb-prod">—</dd></div>
+                        <div><dt id="nb-func-label">Function</dt><dd id="nb-func">—</dd></div>
+                    </dl>
+                </section>
+
+                <details class="card" data-lab>
+                    <summary><h2>Evolution settings</h2></summary>
+                    <label class="slider-row"><span>Reactors <b id="lb-pop">16</b></span><input type="range" id="sl-pop" min="8" max="64" step="4" value="16"></label>
+                    <label class="slider-row"><span>Batches per generation <b id="lb-eps">5</b></span><input type="range" id="sl-eps" min="1" max="10" step="1" value="5"></label>
+                    <label class="slider-row"><span>Champion grace <b id="lb-grace">3 gens</b></span><input type="range" id="sl-grace" min="0" max="10" step="1" value="3"></label>
+                    <label class="slider-row"><span>Mutation rate <b id="lb-mutrate">10%</b></span><input type="range" id="sl-mutrate" min="1" max="40" step="1" value="10"></label>
+                    <label class="slider-row"><span>Mutation size <b id="lb-mutsig">1.00×</b></span><input type="range" id="sl-mutsig" min="2" max="150" step="1" value="100"></label>
+                    <label class="check-row"><input type="checkbox" id="chk-headless"><span>Train without drawing</span></label>
+                    <button class="btn danger wide" id="btn-restart">Restart from random networks</button>
+                </details>
+            </div>
+
+            <section class="card net-card">
+                <div class="card-head">
+                    <h2>Controller network</h2>
+                    <span class="meta" id="net-shape"></span>
                 </div>
-                <p class="hint" id="ord-why">—</p>
-                <div class="order-cues" id="ord-cues"></div>
-                <p class="hint" id="scn-desc">—</p>
-                <div id="scn-events"></div>
-            </div>
-
-            <div class="card">
-                <h2>Lab notebook</h2>
-                <p class="hint">Everything the controller knows. Offline values carry their age.</p>
-                <div class="notebook-sub">online, every hour</div>
-                <div class="kv"><span>dissolved O₂</span><b id="nb-DO">—</b></div>
-                <div class="kv"><span>pH · colour</span><b id="nb-pH">—</b></div>
-                <div class="kv"><span>capacitance (viable)</span><b id="nb-cap">—</b></div>
-                <div class="notebook-sub">offline, hours late</div>
-                <div class="kv"><span>glucose</span><b id="nb-glc">—</b></div>
-                <div class="kv"><span>lactate</span><b id="nb-lac">—</b></div>
-                <div class="kv"><span>viable cells</span><b id="nb-viable">—</b></div>
-                <div class="kv"><span>aggregate size</span><b id="nb-aggD">—</b></div>
-                <div class="kv"><span id="nb-prod-label">product marker</span><b id="nb-prod">—</b></div>
-                <div class="kv"><span id="nb-func-label">function</span><b id="nb-func">—</b></div>
-            </div>
-
-            <details class="card" data-lab>
-                <summary><h2>Evolution settings</h2></summary>
-                <label class="slider-row"><span>Reactors <b id="lb-pop">16</b></span><input type="range" id="sl-pop" min="8" max="64" step="4" value="16"></label>
-                <label class="slider-row"><span>Batches / generation <b id="lb-eps">5</b></span><input type="range" id="sl-eps" min="1" max="10" step="1" value="5"></label>
-                <label class="slider-row"><span>Champion grace <b id="lb-grace">3 gens</b></span><input type="range" id="sl-grace" min="0" max="10" step="1" value="3"></label>
-                <label class="slider-row"><span>Mutation rate <b id="lb-mutrate">10%</b></span><input type="range" id="sl-mutrate" min="1" max="40" step="1" value="10"></label>
-                <label class="slider-row"><span>Mutation sigma <b id="lb-mutsig">1.00×</b></span><input type="range" id="sl-mutsig" min="2" max="150" step="1" value="100"></label>
-                <label class="check-row"><input type="checkbox" id="chk-headless"><span>Headless — train without drawing</span></label>
-                <button class="btn danger wide" id="btn-restart">Restart from random networks</button>
-            </details>
-            </div><!-- /panel-left-scroll -->
-
-            <!-- The network, pinned to the bottom of this column and as wide as
-                 it is: there is room here to name every input as well as every
-                 output, and it must not need scrolling to. -->
-            <div class="card net-card">
-                <h2>The network, live</h2>
-                <canvas id="netview" width="640" height="380"></canvas>
-                <p class="hint" id="net-legend">Everything it reads on the left, everything it
-                   commands on the right. <span class="up">Teal</span> pushes a setting
-                   <b>up</b>, <span class="down">red</span> pushes it <b>down</b>; for the
-                   one-way pumps red just means <i>off</i>. The number beside each output is what
-                   the reactor got.</p>
-            </div>
+                <canvas id="netview"></canvas>
+                <div class="legend">
+                    <span><i class="sw up"></i>Raises a setting</span>
+                    <span><i class="sw down"></i>Lowers it, or pump off</span>
+                </div>
+            </section>
         </aside>
 
         <main id="canvas-wrap" data-mob-stage>
             <canvas id="view"></canvas>
-            <div id="hud"></div>
         </main>
 
-        <aside id="panel-right" data-lab>
-            <div class="card">
-                <h2>Fitness</h2>
-                <canvas id="chart" width="280" height="90"></canvas>
-                <div class="legend"><span><i class="sw sw-best"></i>best</span><span><i class="sw sw-avg"></i>mean</span></div>
-                <p class="hint"><b>0</b> = achieved nothing. <b>1</b> = as good as the published
-                   protocol. Each product is scored against its own recipe, so one number covers
-                   all five.</p>
-            </div>
-            <div class="card">
-                <h2>Difficulty</h2>
-                <p class="hint" id="rung-desc"></p>
-                <p class="hint">Each generation runs every product and the hardest unlocked rung,
-                   then cycles down to rung 0 — so a network cannot buy one product by forgetting
-                   another, or a broken lab by forgetting a working one.</p>
-            </div>
-            <div class="card">
-                <h2>The network</h2>
-                <button class="btn wide primary" id="btn-showcase">Watch the champion vs the protocol</button>
-                <button class="btn wide" id="btn-default">Load the built-in champion</button>
-                <div class="btn-row" style="margin-top:8px"><button class="btn" id="btn-save">Save</button><button class="btn" id="btn-load">Load</button></div>
-                <div class="btn-row" style="margin-top:6px"><button class="btn" id="btn-export">Export</button><button class="btn" id="btn-import">Import</button></div>
+        <aside id="panel-right" data-lab data-mob-label="Training">
+            <section class="card">
+                <div class="card-head"><h2>Training</h2><span class="meta" id="stat-rate"></span></div>
+                <dl class="readings">
+                    <div><dt>Generation</dt><dd id="stat-gen">1</dd></div>
+                    <div><dt>Best fitness</dt><dd id="stat-best">—</dd></div>
+                    <div><dt>Cultures alive</dt><dd id="stat-alive">—</dd></div>
+                </dl>
+                <canvas id="chart"></canvas>
+                <div class="legend">
+                    <span><i class="sw line best"></i>Best</span>
+                    <span><i class="sw line avg"></i>Mean</span>
+                </div>
+                <p class="note">0 means nothing was made, 1 means as good as the published protocol.</p>
+            </section>
+            <section class="card">
+                <div class="card-head"><h2>Difficulty</h2></div>
+                <ol class="rungs" id="rung-desc"></ol>
+                <p class="note">Every generation runs all five products and cycles down to the easiest level, so a network cannot trade one product for another.</p>
+            </section>
+            <section class="card">
+                <div class="card-head"><h2>Network</h2></div>
+                <div class="stack">
+                    <button class="btn primary wide" id="btn-showcase">Watch the built-in network</button>
+                    <button class="btn wide" id="btn-default">Seed the built-in network</button>
+                    <div class="btn-row"><button class="btn" id="btn-save">Save</button><button class="btn" id="btn-load">Load</button></div>
+                    <div class="btn-row"><button class="btn" id="btn-export">Export</button><button class="btn" id="btn-import">Import</button></div>
+                </div>
                 <input type="file" id="file-import" accept="application/json" hidden>
-            </div>
-            <div class="card">
-                <h2>Log</h2>
+            </section>
+            <section class="card">
+                <div class="card-head"><h2>Log</h2></div>
                 <div id="log"></div>
-            </div>
+            </section>
         </aside>
     </div>
 </div>
