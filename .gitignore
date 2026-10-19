@@ -73,6 +73,9 @@ id_ed25519*
 .netrc
 .npmrc
 
-# Local backup archive of the tetris sim folder (249 MB, over GitHub's 100 MB
-# file limit). The folder itself is committed; the zip is only a snapshot.
-vibe-code/simulations/tetris_neuro_evolution.zip
+# Zip archives. These are local backups of sim folders that are already
+# committed (tetris_neuro_evolution.zip was 249 MB, over GitHub's 100 MB file
+# limit and rejected on push). Nothing on the site serves a committed zip;
+# Everdiff builds its export zip in the browser. To commit one on purpose,
+# use `git add -f`.
+*.zip
